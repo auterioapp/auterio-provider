@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Linking, Modal, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
+import { Animated, KeyboardAvoidingView, Linking, Modal, PanResponder, Platform, RefreshControl, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import MapView, { Marker, Polyline } from 'react-native-maps';
 
@@ -24,8 +25,8 @@ const TABS = [
   { key: 'home', screen: 'home', icon: 'home', label: 'Home' },
   { key: 'requests', screen: 'requests', icon: 'chatbox-outline', label: 'Requests' },
   { key: 'jobs', screen: 'jobs', icon: 'briefcase-outline', label: 'Jobs' },
-  { key: 'earnings', icon: 'cash-outline', label: 'Earnings' },
-  { key: 'profile', icon: 'person-outline', label: 'Profile' },
+  { key: 'earnings', screen: 'earnings', icon: 'cash-outline', label: 'Earnings' },
+  { key: 'profile', screen: 'profile', icon: 'person-outline', label: 'Profile' },
 ];
 const REQUEST_ROUTE = [
   { latitude: 37.7694, longitude: -122.4862 },
@@ -117,6 +118,13 @@ const demoJobs = [
     pickup: { address: '123 Main St, San Francisco, CA' },
     payment: { method: 'VISA', last4: '4242', total: 89 },
     customerNote: "Car won't start, lights are dim.",
+    orderContext: {
+      customerComplaints: [
+        { id: 'no-start', label: "Vehicle won't start", value: 'Customer says the engine does not crank.' },
+        { id: 'dim-lights', label: 'Dim dashboard lights', value: 'Lights became weak after several attempts.' },
+        { id: 'battery-warning', label: 'Battery warning', value: 'Battery icon appeared before the vehicle stopped.' },
+      ],
+    },
     createdAt: 'Today, 9:15 AM',
   },
   {
@@ -205,10 +213,19 @@ export default function App() {
   const [requests, setRequests] = useState([]);
   const [dismissedDemoIds, setDismissedDemoIds] = useState([]);
   const [acceptingId, setAcceptingId] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [selectedJob, setSelectedJob] = useState(null);
+  const [jobWorkflows, setJobWorkflows] = useState({});
   const requestAnim = useRef(new Animated.Value(0)).current;
   const tabIndicatorX = useRef(new Animated.Value(0)).current;
+  const tabDragIndex = useRef(null);
+  const tabIsDragging = useRef(false);
+  const tabBarRef = useRef(null);
+  const tabBarPageX = useRef(0);
+  const tabIndicatorPosition = useRef(0);
+  const tabIndicatorTarget = useRef(0);
+  const tabDragFrame = useRef(null);
 
   const visibleDemoRequests = demoRequests.filter(order => !dismissedDemoIds.includes(order.id));
   const dashboardRequests = requests.length ? requests : visibleDemoRequests;
@@ -216,7 +233,7 @@ export default function App() {
   const featuredRequest = dashboardRequests[0];
   const pendingCount = dashboardRequests.length;
   const tabWidth = tabBarWidth ? (tabBarWidth - TAB_BAR_PADDING * 2) / TABS.length : 0;
-  const isLightVisible = !!selectedRequest || (!selectedRequest && (activeScreen === 'home' || activeScreen === 'requests' || activeScreen === 'jobs'));
+  const isLightVisible = !!selectedRequest || (!selectedRequest && (activeScreen === 'home' || activeScreen === 'requests' || activeScreen === 'jobs' || activeScreen === 'earnings' || activeScreen === 'profile'));
 
   useEffect(() => { loadRequests(); }, []);
 
@@ -264,31 +281,106 @@ export default function App() {
     setRequests(c => c.filter(item => item.id !== order.id));
   };
 
+  const updateJobWorkflow = (jobId, patch) => {
+    setJobWorkflows(current => ({
+      ...current,
+      [jobId]: { ...(current[jobId] || {}), ...patch },
+    }));
+  };
+
   const snapTabIndicator = (index) => {
     if (!tabWidth) return;
+    stopTabDragLoop();
+    tabIndicatorX.stopAnimation();
+    const targetX = index * tabWidth;
+    tabIndicatorTarget.current = targetX;
     Animated.spring(tabIndicatorX, {
-      toValue: index * tabWidth,
-      tension: 92,
-      friction: 13,
+      toValue: targetX,
+      tension: 70,
+      friction: 16,
       useNativeDriver: true,
-    }).start();
+    }).start(({ finished }) => {
+      if (finished) tabIndicatorPosition.current = targetX;
+    });
   };
 
   const getTabIndexFromX = (x) => {
     if (!tabWidth) return TABS.findIndex(tab => tab.key === activeTab);
-    const innerX = Math.max(0, Math.min(x - TAB_BAR_PADDING, tabWidth * TABS.length - 1));
+    const safeX = Number.isFinite(x) ? x : TAB_BAR_PADDING + tabWidth * (Math.max(0, TABS.findIndex(tab => tab.key === activeTab)) + 0.5);
+    const innerX = Math.max(0, Math.min(safeX - TAB_BAR_PADDING, tabWidth * TABS.length - 1));
     return Math.max(0, Math.min(TABS.length - 1, Math.floor(innerX / tabWidth)));
+  };
+
+  const getTabLocalX = (event) => {
+    const pageX = event?.nativeEvent?.pageX;
+    if (Number.isFinite(pageX) && Number.isFinite(tabBarPageX.current)) {
+      return pageX - tabBarPageX.current;
+    }
+    return event?.nativeEvent?.locationX;
+  };
+
+  const updateTabBarMeasure = () => {
+    requestAnimationFrame(() => {
+      tabBarRef.current?.measure((x, y, width, height, pageX) => {
+        if (Number.isFinite(pageX)) tabBarPageX.current = pageX;
+      });
+    });
+  };
+
+  const stopTabDragLoop = () => {
+    if (tabDragFrame.current) {
+      cancelAnimationFrame(tabDragFrame.current);
+      tabDragFrame.current = null;
+    }
+  };
+
+  const refreshApp = async () => {
+    if (refreshing) return;
+    pulseTabChange();
+    setRefreshing(true);
+    try {
+      await loadRequests();
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
+  const refreshControl = (
+    <RefreshControl
+      refreshing={refreshing}
+      onRefresh={refreshApp}
+      tintColor="#F04416"
+      colors={['#F04416']}
+      progressBackgroundColor="#FFFFFF"
+    />
+  );
+
+  const runTabDragLoop = () => {
+    const nextX = tabIndicatorTarget.current;
+    const currentX = tabIndicatorPosition.current;
+    const delta = nextX - currentX;
+    const smoothedX = Math.abs(delta) < 0.25 ? nextX : currentX + delta * 0.24;
+    tabIndicatorPosition.current = smoothedX;
+    tabIndicatorX.setValue(smoothedX);
+    tabDragFrame.current = requestAnimationFrame(runTabDragLoop);
+  };
+
+  const startTabDragLoop = () => {
+    stopTabDragLoop();
+    tabDragFrame.current = requestAnimationFrame(runTabDragLoop);
   };
 
   const moveIndicatorWithFinger = (x) => {
     if (!tabWidth) return;
+    const safeX = Number.isFinite(x) ? x : TAB_BAR_PADDING + tabWidth * ((tabDragIndex.current ?? TABS.findIndex(tab => tab.key === activeTab)) + 0.5);
     const maxX = (TABS.length - 1) * tabWidth;
-    const nextX = Math.max(0, Math.min(x - TAB_BAR_PADDING - tabWidth / 2, maxX));
-    tabIndicatorX.setValue(nextX);
+    const nextX = Math.max(0, Math.min(safeX - TAB_BAR_PADDING - tabWidth / 2, maxX));
+    tabIndicatorTarget.current = nextX;
   };
 
   const selectTabAt = (index) => {
     const tab = TABS[index] || TABS[0];
+    tabDragIndex.current = index;
     setActiveTab(tab.key);
     setPreviewTab(tab.key);
     if (tab.screen) setActiveScreen(tab.screen);
@@ -298,10 +390,12 @@ export default function App() {
   const previewTabTouch = (event) => {
     const x = event.nativeEvent.locationX;
     const index = getTabIndexFromX(x);
+    tabDragIndex.current = index;
     setPreviewTab((TABS[index] || TABS[0]).key);
   };
 
   const moveTabTouch = (event) => {
+    tabIsDragging.current = true;
     const x = event.nativeEvent.locationX;
     tabIndicatorX.stopAnimation();
     previewTabTouch(event);
@@ -309,8 +403,56 @@ export default function App() {
   };
 
   const releaseTabTouch = (event) => {
-    selectTabAt(getTabIndexFromX(event.nativeEvent.locationX));
+    const locationX = event?.nativeEvent?.locationX;
+    const index = Number.isFinite(locationX) ? getTabIndexFromX(locationX) : tabDragIndex.current;
+    tabIsDragging.current = false;
+    stopTabDragLoop();
+    selectTabAt(index ?? Math.max(0, TABS.findIndex(tab => tab.key === activeTab)));
   };
+
+  const cancelTabTouch = () => {
+    tabIsDragging.current = false;
+    stopTabDragLoop();
+    const index = Math.max(0, TABS.findIndex(tab => tab.key === activeTab));
+    tabDragIndex.current = index;
+    setPreviewTab(activeTab);
+    snapTabIndicator(index);
+  };
+
+  const tabPanResponder = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onStartShouldSetPanResponderCapture: () => true,
+    onMoveShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponderCapture: () => true,
+    onPanResponderGrant: (event) => {
+      tabIsDragging.current = true;
+      tabIndicatorX.stopAnimation();
+      const activeIndex = Math.max(0, TABS.findIndex(tab => tab.key === activeTab));
+      tabIndicatorPosition.current = activeIndex * tabWidth;
+      tabIndicatorTarget.current = tabIndicatorPosition.current;
+      startTabDragLoop();
+      const x = getTabLocalX(event);
+      const index = getTabIndexFromX(x);
+      tabDragIndex.current = index;
+      setPreviewTab((TABS[index] || TABS[0]).key);
+      moveIndicatorWithFinger(x);
+    },
+    onPanResponderMove: (event) => {
+      const x = getTabLocalX(event);
+      const index = getTabIndexFromX(x);
+      tabDragIndex.current = index;
+      setPreviewTab((TABS[index] || TABS[0]).key);
+      moveIndicatorWithFinger(x);
+    },
+    onPanResponderRelease: (event) => {
+      const x = getTabLocalX(event);
+      const index = Number.isFinite(x) ? getTabIndexFromX(x) : tabDragIndex.current;
+      tabIsDragging.current = false;
+      selectTabAt(index ?? Math.max(0, TABS.findIndex(tab => tab.key === activeTab)));
+    },
+    onPanResponderTerminate: cancelTabTouch,
+    onShouldBlockNativeResponder: () => true,
+  }), [activeTab, tabWidth]);
 
   return (
     <SafeAreaProvider>
@@ -326,9 +468,14 @@ export default function App() {
             onAccept={acceptOrder}
             onDecline={dismissRequest}
             onOpen={setSelectedRequest}
+            refreshControl={refreshControl}
           />
         ) : activeScreen === 'jobs' ? (
-          <JobsScreen jobs={demoJobs} onOpen={setSelectedJob} />
+          <JobsScreen jobs={demoJobs} jobWorkflows={jobWorkflows} onOpen={setSelectedJob} refreshControl={refreshControl} />
+        ) : activeScreen === 'earnings' ? (
+          <EarningsScreen refreshControl={refreshControl} />
+        ) : activeScreen === 'profile' ? (
+          <ProfileScreen online={online} setOnline={setOnline} refreshControl={refreshControl} />
         ) : (
           <HomeScreen
             online={online}
@@ -341,22 +488,27 @@ export default function App() {
             onAccept={acceptOrder}
             onDecline={dismissRequest}
             onOpenRequest={setSelectedRequest}
+            refreshControl={refreshControl}
           />
         )}
 
+        <View pointerEvents="none" style={[styles.tabBarBackdrop, { backgroundColor: isLightVisible ? '#FFFFFF' : '#020C1A' }]} />
+
         <View
+          ref={tabBarRef}
           style={styles.tabBar}
+          {...tabPanResponder.panHandlers}
           onLayout={(event) => {
             const width = event.nativeEvent.layout.width;
             setTabBarWidth(width);
+            updateTabBarMeasure();
+            if (tabIsDragging.current) return;
             const index = Math.max(0, TABS.findIndex(tab => tab.key === activeTab));
-            tabIndicatorX.setValue(index * ((width - TAB_BAR_PADDING * 2) / TABS.length));
+            const nextX = index * ((width - TAB_BAR_PADDING * 2) / TABS.length);
+            tabIndicatorPosition.current = nextX;
+            tabIndicatorTarget.current = nextX;
+            tabIndicatorX.setValue(nextX);
           }}
-          onStartShouldSetResponder={() => false}
-          onMoveShouldSetResponder={() => true}
-          onResponderMove={moveTabTouch}
-          onResponderRelease={releaseTabTouch}
-          onResponderTerminate={releaseTabTouch}
         >
           {!!tabWidth && (
             <Animated.View
@@ -371,11 +523,6 @@ export default function App() {
               label={tab.label}
               active={previewTab === tab.key}
               badge={tab.key === 'requests' ? pendingCount : tab.key === 'jobs' ? activeJobs : undefined}
-              onPress={() => selectTabAt(index)}
-              onPressIn={() => {
-                setPreviewTab(tab.key);
-                snapTabIndicator(index);
-              }}
             />
           ))}
         </View>
@@ -400,6 +547,7 @@ export default function App() {
                   onBack={() => setSelectedRequest(null)}
                   onAccept={async (o) => { await acceptOrder(o); setSelectedRequest(null); }}
                   onDecline={(o) => { dismissRequest(o); setSelectedRequest(null); }}
+                  refreshControl={refreshControl}
                 />
               )}
             </View>
@@ -422,7 +570,10 @@ export default function App() {
               {!!selectedJob && (
                 <JobPopupScreen
                   job={selectedJob}
+                  workflow={jobWorkflows[selectedJob.id] || {}}
+                  onWorkflowChange={(patch) => updateJobWorkflow(selectedJob.id, patch)}
                   onBack={() => setSelectedJob(null)}
+                  refreshControl={refreshControl}
                 />
               )}
             </View>
@@ -433,9 +584,9 @@ export default function App() {
   );
 }
 
-function HomeScreen({ online, setOnline, featuredRequest, requestAnim, acceptingId, pendingCount, activeJobs, onAccept, onDecline, onOpenRequest }) {
+function HomeScreen({ online, setOnline, featuredRequest, requestAnim, acceptingId, pendingCount, activeJobs, onAccept, onDecline, onOpenRequest, refreshControl }) {
   return (
-    <ScrollView style={[styles.container, styles.homeContainer]} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+    <ScrollView style={[styles.container, styles.homeContainer]} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
       <View style={styles.header}>
         <View><Text style={[styles.title, styles.homeTitle]}>Dashboard</Text></View>
         <View style={styles.headerActions}>
@@ -560,7 +711,7 @@ function IncomingRequest({ order, accepting, animation, onAccept, onDecline, onO
   );
 }
 
-function RequestsScreen({ requests, acceptingId, filter, onFilterChange, onAccept, onDecline, onOpen }) {
+function RequestsScreen({ requests, acceptingId, filter, onFilterChange, onAccept, onDecline, onOpen, refreshControl }) {
   const acceptedCount = 2;
   const tabs = [
     { key: 'new', label: `New (${requests.length})` },
@@ -569,7 +720,12 @@ function RequestsScreen({ requests, acceptingId, filter, onFilterChange, onAccep
   ];
 
   return (
-    <ScrollView style={[styles.container, styles.homeContainer]} contentContainerStyle={styles.requestsContent} showsVerticalScrollIndicator={false}>
+    <ScrollView
+      style={[styles.container, styles.homeContainer]}
+      contentContainerStyle={styles.requestsContent}
+      showsVerticalScrollIndicator={false}
+      refreshControl={refreshControl}
+    >
       <View style={styles.requestsHeader}>
         <Text style={styles.requestsTitle}>Requests</Text>
         <TouchableOpacity style={styles.filterButton} activeOpacity={0.8}>
@@ -578,33 +734,39 @@ function RequestsScreen({ requests, acceptingId, filter, onFilterChange, onAccep
         </TouchableOpacity>
       </View>
 
-      <View style={styles.requestTabs}>
-        {tabs.map(tab => (
-          <TouchableOpacity key={tab.key} style={[styles.requestTab, filter === tab.key && styles.requestTabActive]} onPress={() => onFilterChange(tab.key)} activeOpacity={0.8}>
-            <Text style={[styles.requestTabText, filter === tab.key && styles.requestTabTextActive]}>{tab.label}</Text>
-          </TouchableOpacity>
-        ))}
+      <View>
+        <SwipePager
+          tabs={tabs}
+          activeKey={filter}
+          onChange={onFilterChange}
+          tabBarStyle={styles.requestTabs}
+          tabStyle={styles.requestTab}
+          tabTextStyle={styles.requestTabText}
+          pagerStyle={styles.requestsSwipePager}
+          pageStyle={styles.requestsSwipePage}
+        >
+          <View style={styles.requestList}>
+            {requests.map(order => (
+              <RequestCard
+                key={order.id}
+                order={order}
+                accepting={acceptingId === order.id}
+                onAccept={onAccept}
+                onDecline={onDecline}
+                onOpen={onOpen}
+              />
+            ))}
+          </View>
+          <View style={styles.requestEmptyState}>
+            <Ionicons name="checkmark-circle-outline" size={28} color="#7A8BA8" />
+            <Text style={styles.requestEmptyText}>No accepted requests yet</Text>
+          </View>
+          <View style={styles.requestEmptyState}>
+            <Ionicons name="close-circle-outline" size={28} color="#7A8BA8" />
+            <Text style={styles.requestEmptyText}>No declined requests yet</Text>
+          </View>
+        </SwipePager>
       </View>
-
-      {filter === 'new' ? (
-        <View style={styles.requestList}>
-          {requests.map(order => (
-            <RequestCard
-              key={order.id}
-              order={order}
-              accepting={acceptingId === order.id}
-              onAccept={onAccept}
-              onDecline={onDecline}
-              onOpen={onOpen}
-            />
-          ))}
-        </View>
-      ) : (
-        <View style={styles.requestEmptyState}>
-          <Ionicons name={filter === 'accepted' ? 'checkmark-circle-outline' : 'close-circle-outline'} size={28} color="#7A8BA8" />
-          <Text style={styles.requestEmptyText}>{filter === 'accepted' ? 'No accepted requests yet' : 'No declined requests yet'}</Text>
-        </View>
-      )}
     </ScrollView>
   );
 }
@@ -615,56 +777,91 @@ function RequestCard({ order, accepting, onAccept, onDecline, onOpen }) {
   const title = serviceMeta.title;
   const vehicle = getVehicleLabel(order);
   const location = getRequestLocation(order);
-  const distance = getRequestDistance(order);
 
   return (
-    <View style={styles.requestCard}>
-      <TouchableOpacity onPress={() => onOpen && onOpen(order)} activeOpacity={0.88} style={styles.requestCardHit}>
-        <View style={styles.requestListIcon}>
-          <Ionicons name={icon} size={25} color="#17191D" />
+    <TouchableOpacity style={[styles.activeListCard, styles.neutralListCard]} onPress={() => onOpen && onOpen(order)} activeOpacity={0.86}>
+        <View style={styles.activeListIcon}>
+          <Ionicons name={icon} size={20} color="#F04416" />
         </View>
-        <View style={styles.requestListInfo}>
-          <Text style={styles.requestListTitle} numberOfLines={1}>{title}</Text>
-          {!!vehicle && <Text style={styles.requestListVehicle} numberOfLines={1}>{vehicle}</Text>}
-          <View style={styles.requestListMetaRow}>
-            <Ionicons name="location-outline" size={15} color="#5E646D" />
-            <Text style={styles.requestListMeta} numberOfLines={1}>{location}</Text>
-          </View>
-          <View style={styles.requestListMetaRow}>
-            <Ionicons name="navigate-outline" size={15} color="#5E646D" />
-            <Text style={styles.requestListMeta}>{distance}</Text>
-          </View>
+        <View style={styles.activeListInfo}>
+          <Text style={styles.neutralListStatus}>NEW REQUEST</Text>
+          <Text style={styles.activeListTitle} numberOfLines={1}>{title}</Text>
+          {!!vehicle && <Text style={styles.activeListVehicle} numberOfLines={1}>{vehicle}</Text>}
+          <Text style={styles.activeListAddress} numberOfLines={1}>{location}</Text>
         </View>
-        <View style={styles.requestListAside}>
-          <Text style={styles.requestListPrice}>{formatMoney(order)}</Text>
-          <View style={styles.requestListEtaPill}>
-            <Text style={styles.requestListEtaText}>{order.eta || 'ETA 15 min'}</Text>
+        <View style={styles.activeListAside}>
+          <Text style={styles.neutralListPrice}>{formatMoney(order)}</Text>
+          <View style={styles.activeListEtaRow}>
+            <Ionicons name="time-outline" size={10} color="#F04416" style={styles.activeListEtaIcon} />
+            <Text style={styles.neutralListEta} numberOfLines={1}>{order.eta || 'ETA 15 min'}</Text>
           </View>
         </View>
-      </TouchableOpacity>
-      <View style={styles.incomingActions}>
-        <TouchableOpacity style={styles.reviewRequestBtn} onPress={() => onOpen && onOpen(order)} activeOpacity={0.84}>
-          <Text style={styles.reviewRequestText}>Review request</Text>
-          <Ionicons name="chevron-forward" size={16} color="#FFFFFF" />
-        </TouchableOpacity>
-      </View>
-    </View>
+    </TouchableOpacity>
   );
 }
 
-function JobsScreen({ jobs, onOpen }) {
+function JobsScreen({ jobs, jobWorkflows = {}, onOpen, refreshControl }) {
   const [activeTab, setActiveTab] = useState('active');
-  const activeJobsList = jobs.filter(job => job.status !== 'completed' && job.status !== 'scheduled');
-  const completedJobs = jobs.filter(job => job.status === 'completed');
+  const jobsWithStatus = jobs.map(job => ({
+    ...job,
+    displayStatus: getWorkflowJobStatus(job.status, jobWorkflows[job.id]),
+  }));
+  const activeJobsList = jobsWithStatus.filter(job => job.displayStatus !== 'completed' && job.displayStatus !== 'scheduled');
+  const completedJobs = jobsWithStatus.filter(job => job.displayStatus === 'completed');
   const tabs = [
     { key: 'active', label: `Active (${activeJobsList.length})` },
     { key: 'scheduled', label: `Scheduled (${scheduledJobs.length})` },
     { key: 'completed', label: `Completed (${Math.max(128, completedJobs.length)})` },
   ];
-  const visibleJobs = activeTab === 'scheduled' ? scheduledJobs : activeTab === 'completed' ? completedJobs : activeJobsList;
+  const renderJobsPage = (tabKey) => {
+    const pageJobs = tabKey === 'scheduled' ? scheduledJobs : tabKey === 'completed' ? completedJobs : activeJobsList;
+    return (
+      <View>
+        <View style={styles.jobsStatsRow}>
+          <JobMetric title="Today's Earnings" value="$423" meta="4 completed jobs" icon="wallet-outline" color="#F04416" />
+          <JobMetric title="This Week" value="$1,247" meta="12 completed jobs" icon="stats-chart-outline" color="#17191D" />
+          <JobMetric title="Rating" value="4.9" meta="Based on 128 reviews" icon="star" color="#FFC107" star />
+        </View>
+
+        <View style={styles.jobsSectionHeader}>
+          <Text style={styles.jobsSectionTitle}>{tabKey === 'scheduled' ? 'Scheduled Jobs' : tabKey === 'completed' ? 'Completed Jobs' : 'Active Jobs'}</Text>
+          {tabKey === 'active' && <Text style={styles.jobsSortText}>Sort by: Status</Text>}
+        </View>
+
+        <View style={styles.activeJobsList}>
+          {pageJobs.length ? pageJobs.map(job => (
+            tabKey === 'scheduled'
+              ? <ScheduledJobCard key={job.id} job={job} onOpen={onOpen} />
+              : <ActiveJobCard key={job.id} job={job} onOpen={onOpen} completed={tabKey === 'completed'} />
+          )) : (
+            <View style={styles.requestEmptyState}>
+              <Ionicons name="briefcase-outline" size={28} color="#7A8BA8" />
+              <Text style={styles.requestEmptyText}>No jobs in this view</Text>
+            </View>
+          )}
+        </View>
+
+        {tabKey === 'active' && (
+          <>
+            <View style={styles.jobsSectionHeaderAlt}>
+              <Text style={styles.jobsSectionTitle}>Scheduled Jobs</Text>
+            </View>
+            <View style={styles.activeJobsList}>
+              {scheduledJobs.slice(0, 1).map(job => <ScheduledJobCard key={job.id} job={job} onOpen={onOpen} />)}
+            </View>
+          </>
+        )}
+      </View>
+    );
+  };
 
   return (
-    <ScrollView style={[styles.container, styles.homeContainer]} contentContainerStyle={styles.jobsContent} showsVerticalScrollIndicator={false}>
+    <ScrollView
+      style={[styles.container, styles.homeContainer]}
+      contentContainerStyle={styles.jobsContent}
+      showsVerticalScrollIndicator={false}
+      refreshControl={refreshControl}
+    >
       <View style={styles.jobsHeader}>
         <Text style={styles.jobsTitle}>Jobs</Text>
         <TouchableOpacity style={styles.calendarBtn} activeOpacity={0.84}>
@@ -673,49 +870,306 @@ function JobsScreen({ jobs, onOpen }) {
         </TouchableOpacity>
       </View>
 
-      <View style={styles.jobsTabs}>
-        {tabs.map(tab => (
-          <TouchableOpacity key={tab.key} style={[styles.jobsTab, activeTab === tab.key && styles.jobsTabActive]} onPress={() => setActiveTab(tab.key)} activeOpacity={0.84}>
-            <Text style={[styles.jobsTabText, activeTab === tab.key && styles.jobsTabActiveText]}>{tab.label}</Text>
+      <View>
+        <SwipePager
+          tabs={tabs}
+          activeKey={activeTab}
+          onChange={setActiveTab}
+          tabBarStyle={styles.jobsTabs}
+          tabStyle={styles.jobsTab}
+          tabTextStyle={styles.jobsTabText}
+        >
+          {renderJobsPage('active')}
+          {renderJobsPage('scheduled')}
+          {renderJobsPage('completed')}
+        </SwipePager>
+      </View>
+    </ScrollView>
+  );
+}
+
+function EarningsScreen({ refreshControl }) {
+  const chartValues = [620, 1180, 760, 1120, 960, 1320, 1500];
+  const chartMax = 1500;
+  const chartDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+  const revenueCards = [
+    { title: 'Labor Revenue', value: '$1,480.00', meta: '35 Jobs', icon: 'construct-outline', color: '#16A34A', bg: 'rgba(22,163,74,0.10)' },
+    { title: 'Parts Revenue', value: '$540.00', meta: '12 Jobs', icon: 'settings-outline', color: '#2F80FF', bg: 'rgba(47,128,255,0.10)' },
+  ];
+  const kpis = [
+    { label: 'Completed Jobs', value: '42', icon: 'briefcase-outline', color: '#F04416', bg: 'rgba(240,68,22,0.10)' },
+    { label: 'Avg Ticket', value: '$102', icon: 'ticket-outline', color: '#2F80FF', bg: 'rgba(47,128,255,0.10)' },
+    { label: 'Online Hours', value: '34h', icon: 'time-outline', color: '#16A34A', bg: 'rgba(22,163,74,0.10)' },
+  ];
+  const transactions = [
+    { icon: 'car-outline', title: 'Toyota Camry - Jump Start', meta: 'Today, 10:30 AM', amount: '+$85.00' },
+    { icon: 'disc-outline', title: 'Honda Accord - Tire Change', meta: 'Today, 12:15 PM', amount: '+$140.00' },
+    { icon: 'settings-outline', title: 'BMW X5 - Diagnostics', meta: 'Today, 2:00 PM', amount: '+$220.00' },
+    { icon: 'car-sport-outline', title: 'Ford F-150 - Towing', meta: 'Yesterday, 4:45 PM', amount: '+$310.00' },
+  ];
+  const payouts = [
+    { date: 'Jun 18, 2024', meta: 'Bank Deposit', amount: '$1,750.00' },
+    { date: 'Jun 11, 2024', meta: 'Bank Deposit', amount: '$2,040.00' },
+    { date: 'Jun 4, 2024', meta: 'Bank Deposit', amount: '$1,890.00' },
+  ];
+
+  return (
+    <ScrollView style={[styles.container, styles.homeContainer]} contentContainerStyle={styles.earningsContent} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
+      <View style={styles.earningsHeader}>
+        <Text style={styles.earningsTitle}>Earnings</Text>
+      </View>
+
+      <View style={styles.earningsChartCard}>
+        <View style={styles.earningsChartTop}>
+          <View>
+            <Text style={styles.earningsChartLabel}>This Week</Text>
+            <Text style={styles.earningsChartValue}>$4,285.00</Text>
+            <View style={styles.earningsTrendRow}>
+              <Ionicons name="caret-up" size={10} color="#16A34A" />
+              <Text style={styles.earningsTrendText}>18% vs last week</Text>
+            </View>
+          </View>
+          <TouchableOpacity style={styles.earningsPeriodBtn} activeOpacity={0.84}>
+            <Text style={styles.earningsPeriodText}>This Week</Text>
+            <Ionicons name="chevron-down" size={13} color="#17191D" />
           </TouchableOpacity>
+        </View>
+        <View style={styles.earningsChartArea}>
+          {[1500, 1000, 500, 0].map(value => (
+            <View key={value} style={styles.earningsChartGridRow}>
+              <Text style={styles.earningsChartAxis}>{value === 1500 ? '$1.5K' : value === 1000 ? '$1K' : value === 500 ? '$500' : '$0'}</Text>
+              <View style={styles.earningsChartGridLine} />
+            </View>
+          ))}
+          <View style={styles.earningsBarsLayer}>
+            {chartValues.map((value, index) => {
+              const height = Math.max(8, Math.round((value / chartMax) * 88));
+              return (
+                <View key={`${chartDays[index]}-${value}`} style={styles.earningsBarColumn}>
+                  <View style={[styles.earningsBarFill, { height }]} />
+                </View>
+              );
+            })}
+          </View>
+        </View>
+        <View style={styles.earningsDaysRow}>
+          {chartDays.map(day => <Text key={day} style={[styles.earningsDayText, day === 'Sun' && styles.earningsDayActive]}>{day}</Text>)}
+        </View>
+      </View>
+
+      <View style={styles.earningsMetricGrid}>
+        {revenueCards.map(card => <EarningsMetric key={card.title} {...card} />)}
+      </View>
+
+      <View style={styles.earningsKpiCard}>
+        {kpis.map((item, index) => (
+          <View key={item.label} style={[styles.earningsKpiItem, index > 0 && styles.earningsKpiDivider]}>
+            <View style={[styles.earningsKpiIcon, { backgroundColor: item.bg }]}>
+              <Ionicons name={item.icon} size={20} color={item.color} />
+            </View>
+            <View style={styles.earningsKpiText}>
+              <Text style={styles.earningsKpiValue}>{item.value}</Text>
+              <Text style={styles.earningsKpiLabel}>{item.label}</Text>
+            </View>
+          </View>
         ))}
       </View>
 
-      <View style={styles.jobsStatsRow}>
-        <JobMetric title="Today's Earnings" value="$423" meta="4 completed jobs" icon="wallet-outline" color="#F04416" />
-        <JobMetric title="This Week" value="$1,247" meta="12 completed jobs" icon="stats-chart-outline" color="#17191D" />
-        <JobMetric title="Rating" value="4.9" meta="Based on 128 reviews" icon="star" color="#FFC107" star />
+      <View style={styles.balanceCard}>
+        <View style={styles.balanceTextBlock}>
+          <View style={styles.balanceTitleRow}>
+            <Text style={styles.balanceLabel}>Available Balance</Text>
+            <Ionicons name="information-circle-outline" size={14} color="#8B9098" />
+          </View>
+          <Text style={styles.balanceAmount}>$2,180.00</Text>
+          <Text style={styles.balanceMeta}>Will be paid out on Jun 25</Text>
+        </View>
+        <View style={styles.balanceActionBlock}>
+          <TouchableOpacity style={styles.withdrawBtn} activeOpacity={0.86}>
+            <Text style={styles.withdrawText}>Withdraw</Text>
+          </TouchableOpacity>
+          <View style={styles.nextPayoutRow}>
+            <Ionicons name="calendar-outline" size={15} color="#16A34A" />
+            <Text style={styles.nextPayoutText}>Next payout: Jun 25</Text>
+          </View>
+        </View>
       </View>
 
-      <View style={styles.jobsSectionHeader}>
-        <Text style={styles.jobsSectionTitle}>{activeTab === 'scheduled' ? 'Scheduled Jobs' : activeTab === 'completed' ? 'Completed Jobs' : 'Active Jobs'}</Text>
-        {activeTab === 'active' && <Text style={styles.jobsSortText}>Sort by: Status</Text>}
-      </View>
+      <EarningsListSection title="Recent Transactions">
+        {transactions.map(item => <EarningsTransaction key={item.title} {...item} />)}
+      </EarningsListSection>
 
-      <View style={styles.activeJobsList}>
-        {visibleJobs.length ? visibleJobs.map(job => (
-          activeTab === 'scheduled'
-            ? <ScheduledJobCard key={job.id} job={job} onOpen={onOpen} />
-            : <ActiveJobCard key={job.id} job={job} onOpen={onOpen} completed={activeTab === 'completed'} />
-        )) : (
-          <View style={styles.requestEmptyState}>
-            <Ionicons name="briefcase-outline" size={28} color="#7A8BA8" />
-            <Text style={styles.requestEmptyText}>No jobs in this view</Text>
-          </View>
-        )}
-      </View>
-
-      {activeTab === 'active' && (
-        <>
-          <View style={styles.jobsSectionHeaderAlt}>
-            <Text style={styles.jobsSectionTitle}>Scheduled Jobs</Text>
-          </View>
-          <View style={styles.activeJobsList}>
-            {scheduledJobs.slice(0, 1).map(job => <ScheduledJobCard key={job.id} job={job} onOpen={onOpen} />)}
-          </View>
-        </>
-      )}
+      <EarningsListSection title="Payout History">
+        {payouts.map(item => <PayoutRow key={item.date} {...item} />)}
+      </EarningsListSection>
     </ScrollView>
+  );
+}
+
+function EarningsMetric({ title, value, meta, icon, color, bg }) {
+  return (
+    <View style={styles.earningsMetricCard}>
+      <View style={[styles.earningsMetricIcon, { backgroundColor: bg }]}>
+        <Ionicons name={icon} size={28} color={color} />
+      </View>
+      <View style={styles.earningsMetricText}>
+        <Text style={styles.earningsMetricTitle}>{title}</Text>
+        <Text style={styles.earningsMetricValue}>{value}</Text>
+        <Text style={styles.earningsMetricMeta}>{meta}</Text>
+      </View>
+    </View>
+  );
+}
+
+function EarningsListSection({ title, children }) {
+  return (
+    <View style={styles.earningsListCard}>
+      <View style={styles.earningsListHeader}>
+        <Text style={styles.earningsListTitle}>{title}</Text>
+        <TouchableOpacity activeOpacity={0.8}>
+          <Text style={styles.earningsViewAll}>View all</Text>
+        </TouchableOpacity>
+      </View>
+      {children}
+    </View>
+  );
+}
+
+function EarningsTransaction({ icon, title, meta, amount }) {
+  return (
+    <TouchableOpacity style={styles.earningsTransactionRow} activeOpacity={0.84}>
+      <View style={styles.earningsTransactionIcon}>
+        <Ionicons name={icon} size={17} color="#17191D" />
+      </View>
+      <View style={styles.earningsTransactionInfo}>
+        <Text style={styles.earningsTransactionTitle} numberOfLines={1}>{title}</Text>
+        <Text style={styles.earningsTransactionMeta}>{meta}</Text>
+      </View>
+      <Text style={styles.earningsTransactionAmount}>{amount}</Text>
+      <Ionicons name="chevron-forward" size={16} color="#8B9098" />
+    </TouchableOpacity>
+  );
+}
+
+function PayoutRow({ date, meta, amount }) {
+  return (
+    <TouchableOpacity style={styles.earningsTransactionRow} activeOpacity={0.84}>
+      <View style={styles.earningsTransactionIcon}>
+        <Ionicons name="business-outline" size={17} color="#17191D" />
+      </View>
+      <View style={styles.earningsTransactionInfo}>
+        <Text style={styles.earningsTransactionTitle}>{date}</Text>
+        <Text style={styles.earningsTransactionMeta}>{meta}</Text>
+      </View>
+      <Text style={styles.earningsTransactionAmount}>{amount}</Text>
+      <Ionicons name="chevron-forward" size={16} color="#8B9098" />
+    </TouchableOpacity>
+  );
+}
+
+function ProfileScreen({ online, setOnline, refreshControl }) {
+  const trustItems = [
+    { title: 'Identity verified', detail: 'Government ID checked', icon: 'shield-checkmark-outline', done: true },
+    { title: 'Insurance active', detail: 'Expires Sep 18, 2026', icon: 'document-text-outline', done: true },
+    { title: 'Background check', detail: 'Approved', icon: 'checkmark-done-outline', done: true },
+  ];
+  const serviceItems = [
+    { title: 'Service radius', value: '18 mi', icon: 'navigate-outline' },
+    { title: 'Primary services', value: 'Battery, Tires, Diagnostics', icon: 'construct-outline' },
+    { title: 'Response time', value: '12 min avg', icon: 'timer-outline' },
+  ];
+
+  return (
+    <ScrollView style={[styles.container, styles.homeContainer]} contentContainerStyle={styles.profileContent} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
+      <View style={styles.profileHeader}>
+        <Text style={styles.profileTitle}>Profile</Text>
+      </View>
+
+      <View style={styles.profileHeroCard}>
+        <View style={styles.profileAvatar}>
+          <Text style={styles.profileAvatarText}>{PROVIDER.initials}</Text>
+        </View>
+        <View style={styles.profileHeroInfo}>
+          <Text style={styles.profileName}>{PROVIDER.company}</Text>
+          <Text style={styles.profileSub}>Mobile Service Provider</Text>
+          <View style={styles.profileRatingRow}>
+            <Ionicons name="star" size={13} color="#F5B301" />
+            <Text style={styles.profileRatingText}>{PROVIDER.rating} rating</Text>
+            <View style={styles.profileDot} />
+            <Text style={styles.profileRatingText}>128 reviews</Text>
+          </View>
+        </View>
+      </View>
+
+      <View style={styles.profileStatusCard}>
+        <View>
+          <Text style={styles.profileStatusTitle}>Availability</Text>
+          <Text style={styles.profileStatusMeta}>{online ? 'You are visible for new requests' : 'You are not receiving requests'}</Text>
+        </View>
+        <View style={styles.profileStatusToggle}>
+          <Text style={[styles.profileStatusText, online && styles.profileStatusTextOnline]}>{online ? 'Online' : 'Offline'}</Text>
+          <Switch value={online} onValueChange={setOnline} trackColor={{ false: '#D9DDE2', true: '#D9DDE2' }} thumbColor={online ? '#128A3A' : '#F04416'} />
+        </View>
+      </View>
+
+      <View style={styles.profileStatsRow}>
+        <ProfileStat label="Jobs" value="128" />
+        <ProfileStat label="On-time" value="96%" />
+        <ProfileStat label="Repeat" value="31%" />
+      </View>
+
+      <ProfileSection title="Trust & Compliance">
+        {trustItems.map(item => <ProfileRow key={item.title} {...item} />)}
+      </ProfileSection>
+
+      <ProfileSection title="Service Settings">
+        {serviceItems.map(item => <ProfileRow key={item.title} detail={item.value} icon={item.icon} />)}
+      </ProfileSection>
+
+      <ProfileSection title="Account">
+        <ProfileRow title="Payout method" detail="Bank ending 4821" icon="card-outline" />
+        <ProfileRow title="Business documents" detail="W-9 and licenses" icon="folder-open-outline" />
+        <ProfileRow title="Notification preferences" detail="Push, SMS, Email" icon="notifications-outline" />
+      </ProfileSection>
+
+      <ProfileSection title="Support">
+        <ProfileRow title="Contact Auterio support" detail="Get help with a job or payout" icon="headset-outline" />
+        <ProfileRow title="Safety center" detail="Policies and emergency guidance" icon="medical-outline" />
+      </ProfileSection>
+    </ScrollView>
+  );
+}
+
+function ProfileStat({ label, value }) {
+  return (
+    <View style={styles.profileStatCard}>
+      <Text style={styles.profileStatValue}>{value}</Text>
+      <Text style={styles.profileStatLabel}>{label}</Text>
+    </View>
+  );
+}
+
+function ProfileSection({ title, children }) {
+  return (
+    <View style={styles.profileSection}>
+      <Text style={styles.profileSectionTitle}>{title}</Text>
+      {children}
+    </View>
+  );
+}
+
+function ProfileRow({ title, detail, icon, done }) {
+  return (
+    <TouchableOpacity style={styles.profileRow} activeOpacity={0.84}>
+      <View style={[styles.profileRowIcon, done && styles.profileRowIconDone]}>
+        <Ionicons name={icon} size={18} color={done ? '#16A34A' : '#17191D'} />
+      </View>
+      <View style={styles.profileRowInfo}>
+        <Text style={styles.profileRowTitle}>{title}</Text>
+        <Text style={styles.profileRowDetail}>{detail}</Text>
+      </View>
+      {done ? <Ionicons name="checkmark-circle" size={18} color="#16A34A" /> : <Ionicons name="chevron-forward" size={17} color="#8B9098" />}
+    </TouchableOpacity>
   );
 }
 
@@ -737,47 +1191,157 @@ function JobMetric({ title, value, meta, icon, color, star }) {
   );
 }
 
-function ActiveJobCard({ job, onOpen, completed }) {
-  const accent = '#F04416';
-  const meta = getJobStatusMeta(job.status);
-  const vehicle = `${job.vehicle.make} - ${job.vehicle.year}`;
-  const note = job.status === 'waiting_approval' ? 'Waiting 12 min' : job.status === 'arrived' ? 'Waiting inspection' : '15 min to customer';
+function pulseTabChange() {
+  Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+}
+
+function SwipePager({ tabs, activeKey, onChange, children, tabBarStyle, tabStyle, tabTextStyle, pagerStyle, pageStyle }) {
+  const pages = Array.isArray(children) ? children : [children];
+  const [pagerWidth, setPagerWidth] = useState(0);
+  const [tabBarWidth, setTabBarWidth] = useState(0);
+  const scrollRef = useRef(null);
+  const scrollX = useRef(new Animated.Value(0)).current;
+  const activeIndex = Math.max(0, tabs.findIndex(tab => tab.key === activeKey));
+  const tactileIndexRef = useRef(activeIndex);
+  const tabWidth = tabBarWidth ? (tabBarWidth - 6) / tabs.length : 0;
+
+  useEffect(() => {
+    if (!pagerWidth) return;
+    tactileIndexRef.current = activeIndex;
+    scrollRef.current?.scrollTo({ x: activeIndex * pagerWidth, animated: true });
+  }, [activeIndex, pagerWidth]);
+
+  const pulseCrossedPage = (event) => {
+    if (!pagerWidth) return;
+    const offsetX = event.nativeEvent.contentOffset.x;
+    const nextIndex = Math.max(0, Math.min(tabs.length - 1, Math.round(offsetX / pagerWidth)));
+    if (nextIndex !== tactileIndexRef.current) {
+      tactileIndexRef.current = nextIndex;
+      pulseTabChange();
+    }
+  };
+
+  const syncActivePage = (event) => {
+    if (!pagerWidth) return;
+    const offsetX = event.nativeEvent.contentOffset.x;
+    const nextIndex = Math.max(0, Math.min(tabs.length - 1, Math.round(offsetX / pagerWidth)));
+    tactileIndexRef.current = nextIndex;
+    if (nextIndex !== activeIndex) onChange(tabs[nextIndex].key);
+  };
+
+  const selectTab = (tabKey) => {
+    if (tabKey !== activeKey) pulseTabChange();
+    onChange(tabKey);
+  };
 
   return (
-    <TouchableOpacity style={[styles.activeJobCard, { borderColor: accent + '50' }]} onPress={() => onOpen(job)} activeOpacity={0.86}>
-      <View style={styles.activeJobTop}>
-        <View style={styles.activeJobIcon}>
-          <Ionicons name={job.icon || job.service.icon || 'briefcase-outline'} size={24} color={accent} />
-        </View>
-        <View style={styles.activeJobInfo}>
-          <Text style={styles.activeJobTitle}>{job.service.type}</Text>
-          <Text style={styles.activeJobVehicle}>{vehicle}</Text>
-          <View style={styles.activeJobAddressRow}>
-            <Ionicons name="location" size={12} color="#5E646D" />
-            <Text style={styles.activeJobAddress} numberOfLines={1}>{job.pickup.address}</Text>
-          </View>
-        </View>
-        <View style={styles.activeJobAside}>
-          <View style={[styles.activeJobStatusPill, { backgroundColor: accent + '20' }]}>
-            <Text style={[styles.activeJobStatusText, { color: accent }]}>{meta.label}</Text>
-          </View>
-          <Text style={[styles.activeJobPrice, { color: accent }]}>${job.payment.total}</Text>
-          <Text style={styles.activeJobNote}>{note}</Text>
-        </View>
+    <View>
+      <View style={tabBarStyle} onLayout={event => setTabBarWidth(event.nativeEvent.layout.width)}>
+        {!!tabWidth && (
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.swipeTabsIndicator,
+              {
+                width: tabWidth,
+                transform: [{
+                  translateX: scrollX.interpolate({
+                    inputRange: tabs.map((_, index) => index * Math.max(1, pagerWidth)),
+                    outputRange: tabs.map((_, index) => index * tabWidth),
+                    extrapolate: 'clamp',
+                  }),
+                }],
+              },
+            ]}
+          />
+        )}
+        {tabs.map((tab, index) => {
+          const activeOpacity = scrollX.interpolate({
+            inputRange: [
+              (index - 1) * Math.max(1, pagerWidth),
+              index * Math.max(1, pagerWidth),
+              (index + 1) * Math.max(1, pagerWidth),
+            ],
+            outputRange: [0, 1, 0],
+            extrapolate: 'clamp',
+          });
+          const inactiveOpacity = scrollX.interpolate({
+            inputRange: [
+              (index - 1) * Math.max(1, pagerWidth),
+              index * Math.max(1, pagerWidth),
+              (index + 1) * Math.max(1, pagerWidth),
+            ],
+            outputRange: [1, 0, 1],
+            extrapolate: 'clamp',
+          });
+          return (
+          <TouchableOpacity key={tab.key} style={tabStyle} onPress={() => selectTab(tab.key)} activeOpacity={0.84}>
+            <View style={styles.swipeTabLabelWrap}>
+              <Text style={[tabTextStyle, styles.swipeTabLabelSizer]}>{tab.label}</Text>
+              <Animated.Text pointerEvents="none" style={[tabTextStyle, styles.swipeTabLabelLayer, { opacity: inactiveOpacity }]}>{tab.label}</Animated.Text>
+              <Animated.Text pointerEvents="none" style={[tabTextStyle, styles.swipeTabMaskedText, styles.swipeTabLabelLayer, { opacity: activeOpacity }]}>{tab.label}</Animated.Text>
+            </View>
+          </TouchableOpacity>
+          );
+        })}
       </View>
 
-      {job.status !== 'waiting_approval' && <MiniJobProgress status={job.status} accent={accent} />}
+      <View style={[styles.swipePager, pagerStyle]} onLayout={event => setPagerWidth(event.nativeEvent.layout.width)}>
+        <Animated.ScrollView
+        ref={scrollRef}
+        horizontal
+        pagingEnabled
+        nestedScrollEnabled
+        directionalLockEnabled
+        decelerationRate="fast"
+        showsHorizontalScrollIndicator={false}
+        scrollEventThrottle={16}
+        contentContainerStyle={styles.swipePagerTrack}
+        onScroll={Animated.event(
+          [{ nativeEvent: { contentOffset: { x: scrollX } } }],
+          { useNativeDriver: true, listener: pulseCrossedPage }
+        )}
+        onMomentumScrollEnd={syncActivePage}
+      >
+        {pages.map((page, index) => (
+          <View key={tabs[index]?.key || index} style={[styles.swipePagerPage, pageStyle, pagerWidth ? { width: pagerWidth } : null]}>
+            {page}
+          </View>
+        ))}
+        </Animated.ScrollView>
+      </View>
+    </View>
+  );
+}
 
-      {job.status === 'waiting_approval' && (
-        <View style={styles.waitingBanner}>
-          <Ionicons name="time-outline" size={13} color={accent} />
-          <Text style={styles.waitingBannerText}>Customer reviewing your estimate</Text>
+function ActiveJobCard({ job, onOpen, completed }) {
+  const status = job.displayStatus || job.status;
+  const meta = getJobStatusMeta(status);
+  const isInProgress = !completed;
+  const accent = isInProgress ? (meta.color || '#F04416') : '#F04416';
+  const vehicle = `${job.vehicle.make} - ${job.vehicle.year}`;
+  const note = getJobStatusNote(status, job);
+  const distance = job.distance || (status === 'waiting_approval' ? '' : '6.2 mi');
+
+  return (
+    <TouchableOpacity style={[styles.activeListCard, !isInProgress && styles.neutralListCard]} onPress={() => onOpen(job)} activeOpacity={0.86}>
+      {isInProgress && <View style={[styles.activeListAccent, { backgroundColor: accent }]} />}
+      <View style={styles.activeListIcon}>
+        <Ionicons name={job.icon || job.service.icon || 'briefcase-outline'} size={20} color={accent} />
+      </View>
+      <View style={styles.activeListInfo}>
+        <Text style={[styles.activeListStatus, { color: accent }]}>{completed ? 'COMPLETED' : meta.label}</Text>
+        <Text style={styles.activeListTitle} numberOfLines={1}>{job.service.type}</Text>
+        <Text style={styles.activeListVehicle} numberOfLines={1}>{vehicle}</Text>
+        <Text style={styles.activeListAddress} numberOfLines={1}>{job.pickup.address}</Text>
+      </View>
+      <View style={styles.activeListAside}>
+        <Text style={[styles.activeListPrice, { color: accent }]}>${job.payment.total}</Text>
+        <View style={styles.activeListEtaRow}>
+          <Ionicons name="time-outline" size={10} color={accent} style={styles.activeListEtaIcon} />
+          <Text style={[styles.activeListEta, { color: accent }]} numberOfLines={1}>{completed ? 'Receipt ready' : note}</Text>
         </View>
-      )}
-
-      <View style={styles.activeJobActions}>
-        <JobAction label="View Details" icon="document-text-outline" color={accent} onPress={() => onOpen(job)} />
-        <JobAction label={meta.actionLabel} icon={meta.actionIcon} color={accent} onPress={() => onOpen(job)} filled={job.status === 'arrived'} />
+        {!!distance && <Text style={styles.activeListDistance} numberOfLines={1}>{distance}</Text>}
       </View>
     </TouchableOpacity>
   );
@@ -814,22 +1378,23 @@ function JobAction({ label, icon, color, onPress, filled }) {
 
 function ScheduledJobCard({ job, onOpen }) {
   return (
-    <TouchableOpacity style={styles.scheduledJobCard} onPress={() => onOpen(job)} activeOpacity={0.86}>
-      <View style={styles.scheduledIcon}>
-        <Ionicons name="calendar-outline" size={22} color="#F04416" />
+    <TouchableOpacity style={[styles.activeListCard, styles.neutralListCard]} onPress={() => onOpen(job)} activeOpacity={0.86}>
+      <View style={styles.activeListIcon}>
+        <Ionicons name={job.icon || job.service.icon || 'calendar-outline'} size={20} color="#F04416" />
       </View>
-      <View style={styles.scheduledInfo}>
-        <Text style={styles.scheduledTime}>{job.time}</Text>
-        <Text style={styles.scheduledTitle}>{job.service.type}</Text>
-        <Text style={styles.scheduledVehicle}>{job.vehicle.make} - {job.vehicle.year}</Text>
-        <Text style={styles.scheduledAddress} numberOfLines={1}>{job.pickup.address}</Text>
+      <View style={styles.activeListInfo}>
+        <Text style={styles.neutralListStatus}>{job.time || 'SCHEDULED'}</Text>
+        <Text style={styles.activeListTitle} numberOfLines={1}>{job.service.type}</Text>
+        <Text style={styles.activeListVehicle} numberOfLines={1}>{job.vehicle.make} - {job.vehicle.year}</Text>
+        <Text style={styles.activeListAddress} numberOfLines={1}>{job.pickup.address}</Text>
       </View>
-      <View style={styles.scheduledAside}>
-        <View style={styles.scheduledPill}><Text style={styles.scheduledPillText}>SCHEDULED</Text></View>
-        <Text style={styles.scheduledEta}>{job.eta}</Text>
-        <Text style={styles.scheduledPay}>Estimated earnings ${job.payment.total}</Text>
+      <View style={styles.activeListAside}>
+        <Text style={styles.neutralListPrice}>${job.payment.total}</Text>
+        <View style={styles.activeListEtaRow}>
+          <Ionicons name="time-outline" size={10} color="#F04416" style={styles.activeListEtaIcon} />
+          <Text style={styles.neutralListEta} numberOfLines={1}>{job.eta || 'Scheduled'}</Text>
+        </View>
       </View>
-      <Ionicons name="chevron-forward" size={18} color="#7A8BA8" />
     </TouchableOpacity>
   );
 }
@@ -838,19 +1403,43 @@ function getJobProgressIndex(status) {
   if (status === 'accepted') return 0;
   if (status === 'on_the_way') return 1;
   if (status === 'arrived') return 2;
-  if (status === 'inspection' || status === 'waiting_approval') return 3;
+  if (status === 'inspection' || status === 'estimate' || status === 'waiting_approval') return 3;
   if (status === 'completed') return 4;
   return 0;
 }
 
 function getJobStatusMeta(status) {
-  if (status === 'arrived') return { label: 'ARRIVED', actionLabel: 'Start Inspection', actionIcon: 'construct-outline' };
-  if (status === 'waiting_approval') return { label: 'WAITING APPROVAL', actionLabel: 'Message Customer', actionIcon: 'chatbubble-outline' };
-  if (status === 'completed') return { label: 'COMPLETED', actionLabel: 'Receipt', actionIcon: 'receipt-outline' };
-  return { label: 'ON THE WAY', actionLabel: 'Navigate', actionIcon: 'navigate-outline' };
+  if (status === 'arrived') return { label: 'ARRIVED', actionLabel: 'Start Inspection', actionIcon: 'construct-outline', color: '#22C55E' };
+  if (status === 'inspection') return { label: 'WORKING', actionLabel: 'Continue Diagnosis', actionIcon: 'construct-outline', color: '#F04416' };
+  if (status === 'estimate') return { label: 'BUILD ESTIMATE', actionLabel: 'Send Estimate', actionIcon: 'document-text-outline', color: '#F04416' };
+  if (status === 'waiting_approval') return { label: 'WAITING APPROVAL', actionLabel: 'Message Customer', actionIcon: 'chatbubble-outline', color: '#1F6BFF' };
+  if (status === 'completed') return { label: 'COMPLETED', actionLabel: 'Receipt', actionIcon: 'receipt-outline', color: '#22C55E' };
+  return { label: 'ON THE WAY', actionLabel: 'Navigate', actionIcon: 'navigate-outline', color: '#F04416' };
 }
 
-function RequestDetailScreen({ order, accepting, onBack, onAccept, onDecline }) {
+function getWorkflowJobStatus(baseStatus, workflow) {
+  if (!workflow?.stage || workflow.stage === 'details') return baseStatus;
+  if (workflow.stage === 'route') return 'on_the_way';
+  if (workflow.stage === 'arrived') return 'arrived';
+  if (workflow.stage === 'diagnosis') return 'inspection';
+  if (workflow.stage === 'estimate') return 'estimate';
+  if (workflow.stage === 'approval') return 'waiting_approval';
+  if (workflow.stage === 'working') return 'inspection';
+  if (workflow.stage === 'complete_review') return 'inspection';
+  if (workflow.stage === 'completed') return 'completed';
+  return baseStatus;
+}
+
+function getJobStatusNote(status, job) {
+  if (status === 'waiting_approval') return 'Waiting 12 min';
+  if (status === 'arrived') return 'Ready for checklist';
+  if (status === 'inspection') return 'Diagnosis in progress';
+  if (status === 'estimate') return 'Preparing estimate';
+  if (status === 'completed') return 'Receipt ready';
+  return job.eta ? `${job.eta} away` : '15 min away';
+}
+
+function RequestDetailScreen({ order, accepting, onBack, onAccept, onDecline, refreshControl }) {
   const [noteOpen, setNoteOpen] = useState(false);
   const [bottomPanelHeight, setBottomPanelHeight] = useState(0);
   const accent = order.accent || '#42D463';
@@ -897,6 +1486,7 @@ function RequestDetailScreen({ order, accepting, onBack, onAccept, onDecline }) 
         style={[styles.container, styles.requestDetailScroll, { marginBottom: bottomPanelHeight + 28 }]}
         contentContainerStyle={styles.requestDetailContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={refreshControl}
       >
         <View style={styles.requestSummaryCard}>
           <View style={styles.earningsMain}>
@@ -1073,9 +1663,60 @@ function RequestInfoRow({ icon, color, label, value, chevron, onPress }) {
   );
 }
 
-function JobPopupScreen({ job, onBack }) {
+function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshControl }) {
   const [noteOpen, setNoteOpen] = useState(false);
-  const [routeOpen, setRouteOpen] = useState(false);
+  const [routeOpen, setRouteOpen] = useState(workflow.stage === 'route');
+  const [arrivedOpen, setArrivedOpen] = useState(workflow.stage === 'arrived');
+  const [diagnosisOpen, setDiagnosisOpen] = useState(workflow.stage === 'diagnosis');
+  const [estimateOpen, setEstimateOpen] = useState(workflow.stage === 'estimate');
+  const [approvalOpen, setApprovalOpen] = useState(workflow.stage === 'approval');
+  const [workOpen, setWorkOpen] = useState(workflow.stage === 'working');
+  const [completeOpen, setCompleteOpen] = useState(workflow.stage === 'complete_review');
+  const [estimateItems, setEstimateItems] = useState(workflow.estimateItems || []);
+  const [estimateRemovedItems, setEstimateRemovedItems] = useState(workflow.estimateRemovedItems || []);
+  const [estimatePickerOpen, setEstimatePickerOpen] = useState(false);
+  const [estimatePickerMode, setEstimatePickerMode] = useState('labor');
+  const [estimateItemScope, setEstimateItemScope] = useState('required');
+  const [estimatePreviewOpen, setEstimatePreviewOpen] = useState(false);
+  const [estimateSearch, setEstimateSearch] = useState('');
+  const [customEstimateName, setCustomEstimateName] = useState('');
+  const [customEstimateHours, setCustomEstimateHours] = useState('');
+  const [customEstimateAmount, setCustomEstimateAmount] = useState('');
+  const [additionalApprovals, setAdditionalApprovals] = useState((workflow.additionalApprovals || []).filter(item => item.kind === 'required'));
+  const [changeRequestOpen, setChangeRequestOpen] = useState(false);
+  const [changeRequestName, setChangeRequestName] = useState('');
+  const [changeRequestReason, setChangeRequestReason] = useState('');
+  const [changeRequestAmount, setChangeRequestAmount] = useState('');
+  const [changeRequestEvidence, setChangeRequestEvidence] = useState('');
+  const [workPhotos, setWorkPhotos] = useState(workflow.workPhotos || ['Old battery', 'New battery', 'System test']);
+  const [workSummary, setWorkSummary] = useState(workflow.workSummary || 'Replaced old battery with new Group 35 battery.\nSystem tested. Vehicle starts normally.');
+  const [workCustomerNote, setWorkCustomerNote] = useState(workflow.workCustomerNote || 'Thanks for choosing our service!');
+  const [diagnosisAnswers, setDiagnosisAnswers] = useState(workflow.diagnosisAnswers || {
+    jumpStart: 'started',
+    alternator: 'failed',
+    loadTest: 'weak',
+  });
+  const [batteryVoltage, setBatteryVoltage] = useState(workflow.batteryVoltage || '');
+  const [diagnosisNotes, setDiagnosisNotes] = useState(workflow.diagnosisNotes || '');
+  const [arrivedChecklist, setArrivedChecklist] = useState(workflow.arrivedChecklist || {
+    photos: false,
+    complaint: false,
+    notes: false,
+  });
+  const [arrivedChecklistData, setArrivedChecklistData] = useState(workflow.arrivedChecklistData || {
+    photos: '',
+    complaint: '',
+    notes: '',
+  });
+  const [complaintConfirmations, setComplaintConfirmations] = useState(workflow.complaintConfirmations || {});
+  const [requiredPhotos, setRequiredPhotos] = useState(workflow.requiredPhotos || {
+    front: null,
+    vin: null,
+    odometer: null,
+    problem: null,
+  });
+  const [activeChecklistItem, setActiveChecklistItem] = useState(null);
+  const [checklistDraft, setChecklistDraft] = useState('');
   const [navigationChoiceOpen, setNavigationChoiceOpen] = useState(false);
   const currentStepIndex = getJobProgressIndex(job.status);
   const address = job.pickup?.address || 'Location pending';
@@ -1085,6 +1726,7 @@ function JobPopupScreen({ job, onBack }) {
   const phone = job.customer?.phone || '';
   const customerNote = job.customerNote || 'No note provided';
   const acceptedLabel = getAcceptedAtLabel(job);
+  const customerFirstName = (job.customer?.name || 'customer').split(' ')[0] || 'customer';
   const rawCustomerFiles = job.orderContext?.files || job.files || job.photos || [
     { name: 'Inspection photo', type: 'image' },
     { name: 'Customer attachment', type: 'file' },
@@ -1119,11 +1761,80 @@ function JobPopupScreen({ job, onBack }) {
     Linking.openURL(canOpenApp ? target.app : target.web);
   };
 
-  if (routeOpen) {
+  if (estimateOpen) {
+    const workingIndex = Math.max(0, JOB_STEPS.findIndex(step => step.key === 'inspection'));
+    const estimate = getDemoEstimate(diagnosisAnswers, batteryVoltage, estimateItems, estimateRemovedItems);
+    const estimateCatalog = getEstimateCatalog(estimatePickerMode);
+    const filteredEstimateCatalog = estimateCatalog.filter(item => {
+      const query = estimateSearch.trim().toLowerCase();
+      if (!query) return true;
+      return `${item.label} ${item.category || ''}`.toLowerCase().includes(query);
+    });
+    const openEstimatePicker = (mode = 'labor') => {
+      pulseTabChange();
+      setEstimatePickerMode(mode);
+      setEstimateSearch('');
+      setEstimateItemScope('required');
+      setCustomEstimateName('');
+      setCustomEstimateHours('');
+      setCustomEstimateAmount('');
+      setEstimatePickerOpen(true);
+    };
+    const addEstimateItem = (item) => {
+      pulseTabChange();
+      const nextItems = [...estimateItems, { ...item, scope: estimateItemScope, id: `${item.type}-${estimateItemScope}-${item.label}-${Date.now()}` }];
+      setEstimateItems(nextItems);
+      onWorkflowChange?.({ stage: 'estimate', estimateItems: nextItems, estimateRemovedItems });
+      setEstimatePickerOpen(false);
+      setEstimateSearch('');
+      setEstimateItemScope('required');
+      setCustomEstimateName('');
+      setCustomEstimateHours('');
+      setCustomEstimateAmount('');
+    };
+    const customAmount = Number.parseFloat(String(customEstimateAmount || '').replace(',', '.'));
+    const customHours = Number.parseFloat(String(customEstimateHours || '').replace(',', '.'));
+    const customPriceCheck = getEstimatePriceCheck(estimatePickerMode, customEstimateName, customAmount);
+    const canAddCustomEstimate = customEstimateName.trim()
+      && Number.isFinite(customAmount)
+      && customAmount > 0
+      && (estimatePickerMode === 'parts' || (Number.isFinite(customHours) && customHours > 0));
+    const addCustomEstimateItem = () => {
+      if (!canAddCustomEstimate) return;
+      addEstimateItem({
+        type: estimatePickerMode === 'parts' ? 'parts' : 'labor',
+        label: customEstimateName.trim(),
+        hours: estimatePickerMode === 'labor' ? `${customHours.toFixed(1)} hr` : undefined,
+        amount: Math.round(customAmount * 100) / 100,
+        category: 'Custom',
+        priceWarning: customPriceCheck.warning,
+      });
+    };
+    const removeEstimateItem = (item) => {
+      pulseTabChange();
+      const nextItems = estimateItems.filter(current => current.id !== item.id);
+      const nextRemovedItems = item.source === 'custom'
+        ? estimateRemovedItems
+        : [...new Set([...estimateRemovedItems, item.id])];
+      setEstimateItems(nextItems);
+      setEstimateRemovedItems(nextRemovedItems);
+      onWorkflowChange?.({ stage: 'estimate', estimateItems: nextItems, estimateRemovedItems: nextRemovedItems });
+    };
+    const sendEstimateToCustomer = () => {
+      pulseTabChange();
+      setEstimateOpen(false);
+      setApprovalOpen(true);
+      onWorkflowChange?.({
+        stage: 'approval',
+        estimateItems,
+        estimateRemovedItems,
+        estimateSentAt: workflow.estimateSentAt || 'Sent just now',
+      });
+    };
     return (
       <View style={styles.requestDetailShell}>
         <View style={styles.requestDetailHeader}>
-          <TouchableOpacity onPress={() => setRouteOpen(false)} activeOpacity={0.8} style={styles.requestHeaderIconBtn}>
+          <TouchableOpacity onPress={() => { setEstimateOpen(false); setDiagnosisOpen(true); onWorkflowChange?.({ stage: 'diagnosis' }); }} activeOpacity={0.8} style={styles.requestHeaderIconBtn}>
             <Ionicons name="chevron-back" size={24} color="#17191D" />
           </TouchableOpacity>
           <View style={styles.jobPopupHeaderTextWrap}>
@@ -1135,7 +1846,1087 @@ function JobPopupScreen({ job, onBack }) {
           </TouchableOpacity>
         </View>
 
-        <ScrollView style={[styles.container, styles.requestDetailScroll]} contentContainerStyle={styles.jobRouteContent} showsVerticalScrollIndicator={false}>
+        <ScrollView style={[styles.container, styles.requestDetailScroll]} contentContainerStyle={styles.estimateContent} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
+          <View style={styles.jobProgressCard}>
+            <JobStepper steps={JOB_STEPS} currentIndex={workingIndex} />
+          </View>
+
+          <View style={styles.estimateHeaderRow}>
+            <View style={styles.estimateHeaderText}>
+              <Text style={styles.arrivedChecklistTitle}>Build Estimate</Text>
+              <Text style={styles.arrivedChecklistSubtitle}>Add recommended services and parts.</Text>
+            </View>
+          </View>
+
+          <View style={styles.recommendedReminderCard}>
+            <View style={styles.recommendedReminderIcon}>
+              <Ionicons name="bulb-outline" size={18} color="#F04416" />
+            </View>
+            <Text style={styles.recommendedReminderText}>
+              If you find another issue, add it as Recommended. It will appear in the final estimate as an optional repair after customer approval.
+            </Text>
+          </View>
+
+          <EstimateSection title="Labor" icon="construct-outline" color="#17191D" onAdd={() => openEstimatePicker('labor')}>
+            {estimate.labor.map((item, index) => <EstimateLine key={`${item.id}-${index}`} {...item} onRemove={() => removeEstimateItem(item)} />)}
+            <EstimateLine label="Labor Subtotal" amount={estimate.laborSubtotal} strong />
+          </EstimateSection>
+
+          <EstimateSection title="Parts" icon="cube-outline" color="#16A34A" onAdd={() => openEstimatePicker('parts')}>
+            {estimate.parts.map((item, index) => <EstimateLine key={`${item.id}-${index}`} {...item} onRemove={() => removeEstimateItem(item)} />)}
+            <EstimateLine label="Parts Subtotal" amount={estimate.partsSubtotal} strong mutedLabel />
+          </EstimateSection>
+
+          <EstimateSection title="Fees" icon="cash-outline" color="#7C3AED">
+            {estimate.fees.map((item, index) => <EstimateLine key={`${item.label}-${index}`} {...item} />)}
+          </EstimateSection>
+
+          {(estimate.optionalLabor.length > 0 || estimate.optionalParts.length > 0) && (
+            <View style={styles.optionalEstimateWrap}>
+              <Text style={styles.optionalEstimateTitle}>Recommended repairs</Text>
+              <Text style={styles.optionalEstimateSubtitle}>Additional issues found by the provider. Customer approval is separate.</Text>
+              {estimate.optionalLabor.length > 0 && (
+                <EstimateSection title="Recommended Labor" icon="construct-outline" color="#F04416" optional>
+                  {estimate.optionalLabor.map((item, index) => <EstimateLine key={`${item.id}-${index}`} {...item} onRemove={() => removeEstimateItem(item)} />)}
+                  <EstimateLine label="Recommended Labor Subtotal" amount={estimate.optionalLaborSubtotal} strong />
+                </EstimateSection>
+              )}
+              {estimate.optionalParts.length > 0 && (
+                <EstimateSection title="Recommended Parts" icon="cube-outline" color="#F04416" optional>
+                  {estimate.optionalParts.map((item, index) => <EstimateLine key={`${item.id}-${index}`} {...item} onRemove={() => removeEstimateItem(item)} />)}
+                  <EstimateLine label="Recommended Parts Subtotal" amount={estimate.optionalPartsSubtotal} strong mutedLabel />
+                </EstimateSection>
+              )}
+            </View>
+          )}
+
+          <View style={styles.estimateTotalCard}>
+            <EstimateLine label="Required Subtotal" amount={estimate.subtotal} strong />
+            <EstimateLine label="Tax (6.75%)" amount={estimate.tax} />
+            <EstimateLine label="Required Total" amount={estimate.total} total />
+            {estimate.optionalSubtotal > 0 && (
+              <>
+                <EstimateLine label="Recommended Add-ons" amount={estimate.optionalSubtotal} strong mutedLabel />
+                <EstimateLine label="Recommended Tax" amount={estimate.optionalTax} />
+                <EstimateLine label="Total if approved" amount={estimate.totalIfApproved} total />
+              </>
+            )}
+          </View>
+
+          <TouchableOpacity style={styles.previewEstimateBtn} activeOpacity={0.84} onPress={() => { pulseTabChange(); setEstimatePreviewOpen(true); }}>
+            <Ionicons name="eye-outline" size={18} color="#16A34A" />
+            <Text style={styles.previewEstimateText}>Preview for Customer</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.startInspectionBtn} activeOpacity={0.86} onPress={sendEstimateToCustomer}>
+            <Text style={styles.startInspectionText}>Send Estimate to Customer</Text>
+          </TouchableOpacity>
+
+          <View style={styles.estimateApprovalNote}>
+            <Ionicons name="lock-closed-outline" size={14} color="#8B9098" />
+            <Text style={styles.estimateApprovalText}>Customer approval required to start work</Text>
+          </View>
+        </ScrollView>
+
+        <Modal visible={estimatePreviewOpen} transparent animationType="fade" onRequestClose={() => setEstimatePreviewOpen(false)}>
+          <CustomerEstimatePreview job={job} estimate={estimate} onClose={() => setEstimatePreviewOpen(false)} />
+        </Modal>
+
+        <Modal visible={estimatePickerOpen} transparent animationType="fade" onRequestClose={() => setEstimatePickerOpen(false)}>
+          <View style={styles.estimatePickerOverlay}>
+            <TouchableOpacity style={styles.navChoiceBackdrop} activeOpacity={1} onPress={() => setEstimatePickerOpen(false)} />
+            <View style={styles.estimatePickerCard}>
+              <View style={styles.navChoiceHeader}>
+                <Text style={styles.navChoiceTitle}>{estimatePickerMode === 'labor' ? 'Add Labor' : 'Add Part'}</Text>
+                <TouchableOpacity style={styles.noteCloseBtn} activeOpacity={0.8} onPress={() => setEstimatePickerOpen(false)}>
+                  <Ionicons name="close" size={20} color="#17191D" />
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.estimateSearchBox}>
+                <Ionicons name="search-outline" size={16} color="#8B9098" />
+                <TextInput
+                  style={styles.estimateSearchInput}
+                  value={estimateSearch}
+                  onChangeText={setEstimateSearch}
+                  placeholder={estimatePickerMode === 'labor' ? 'Search labor' : 'Search parts'}
+                  placeholderTextColor="#8B9098"
+                />
+              </View>
+
+              <View style={styles.estimateScopeControl}>
+                {['required', 'optional'].map(scope => {
+                  const active = estimateItemScope === scope;
+                  return (
+                    <TouchableOpacity
+                      key={scope}
+                      style={[styles.estimateScopeBtn, active && styles.estimateScopeBtnActive]}
+                      activeOpacity={0.84}
+                      onPress={() => {
+                        pulseTabChange();
+                        setEstimateItemScope(scope);
+                      }}
+                    >
+                      <Text style={[styles.estimateScopeText, active && styles.estimateScopeTextActive]}>
+                        {scope === 'required' ? 'Required' : 'Recommended'}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+
+              <View style={styles.customEstimateBox}>
+                <Text style={styles.customEstimateTitle}>{estimatePickerMode === 'labor' ? 'Custom labor' : 'Custom part'}</Text>
+                <TextInput
+                  style={styles.customEstimateInput}
+                  value={customEstimateName}
+                  onChangeText={setCustomEstimateName}
+                  placeholder={estimatePickerMode === 'labor' ? 'Labor name' : 'Part name'}
+                  placeholderTextColor="#8B9098"
+                />
+                <View style={styles.customEstimateRow}>
+                  {estimatePickerMode === 'labor' && (
+                    <TextInput
+                      style={[styles.customEstimateInput, styles.customEstimateSmallInput]}
+                      value={customEstimateHours}
+                      onChangeText={setCustomEstimateHours}
+                      placeholder="Hours"
+                      placeholderTextColor="#8B9098"
+                      keyboardType="decimal-pad"
+                    />
+                  )}
+                  <TextInput
+                    style={[styles.customEstimateInput, styles.customEstimateSmallInput]}
+                    value={customEstimateAmount}
+                    onChangeText={setCustomEstimateAmount}
+                    placeholder={estimatePickerMode === 'labor' ? 'Labor price' : 'Part price'}
+                    placeholderTextColor="#8B9098"
+                    keyboardType="decimal-pad"
+                  />
+                </View>
+                {!!customPriceCheck.warning && (
+                  <View style={styles.priceWarningBox}>
+                    <Ionicons name="alert-circle-outline" size={15} color="#F04416" />
+                    <Text style={styles.priceWarningText}>Above typical range {formatCurrency(customPriceCheck.min)}-{formatCurrency(customPriceCheck.max)}</Text>
+                  </View>
+                )}
+                <TouchableOpacity style={[styles.customEstimateAddBtn, !canAddCustomEstimate && styles.startInspectionBtnDisabled]} activeOpacity={canAddCustomEstimate ? 0.84 : 1} disabled={!canAddCustomEstimate} onPress={addCustomEstimateItem}>
+                  <Text style={[styles.customEstimateAddText, !canAddCustomEstimate && styles.startInspectionTextDisabled]}>{estimateItemScope === 'optional' ? 'Add Recommended' : 'Add Required'}</Text>
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView style={styles.estimatePickerList} showsVerticalScrollIndicator={false}>
+                {filteredEstimateCatalog.map(item => (
+                  <TouchableOpacity key={`${item.type}-${item.label}`} style={styles.estimatePickerRow} activeOpacity={0.84} onPress={() => addEstimateItem(item)}>
+                    <View style={styles.estimatePickerRowInfo}>
+                      <Text style={styles.estimatePickerRowTitle}>{item.label}</Text>
+                      <Text style={styles.estimatePickerRowMeta}>{estimateItemScope === 'optional' ? 'Recommended - ' : 'Required - '}{item.type === 'labor' ? `${item.hours || '1.0 hr'} labor` : item.category || 'Part'}</Text>
+                    </View>
+                    <Text style={styles.estimatePickerPrice}>{formatCurrency(item.amount)}</Text>
+                    <Ionicons name="add-circle-outline" size={21} color="#16A34A" />
+                  </TouchableOpacity>
+                ))}
+                {!filteredEstimateCatalog.length && (
+                  <View style={styles.estimatePickerEmpty}>
+                    <Text style={styles.requestEmptyText}>No items found</Text>
+                  </View>
+                )}
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
+      </View>
+    );
+  }
+
+  if (approvalOpen) {
+    const workingIndex = Math.max(0, JOB_STEPS.findIndex(step => step.key === 'inspection'));
+    const estimate = getDemoEstimate(diagnosisAnswers, batteryVoltage, estimateItems, estimateRemovedItems);
+    const sentTotal = estimate.optionalSubtotal > 0 ? estimate.totalIfApproved : estimate.total;
+    const sentLabel = workflow.estimateSentAt || 'Sent just now';
+    const approveEstimateDemo = () => {
+      pulseTabChange();
+      setApprovalOpen(false);
+      setWorkOpen(true);
+      onWorkflowChange?.({
+        stage: 'working',
+        estimateItems,
+        estimateRemovedItems,
+        estimateApprovedAt: 'Approved just now',
+        additionalApprovals,
+      });
+    };
+    return (
+      <View style={styles.requestDetailShell}>
+        <View style={styles.requestDetailHeader}>
+          <TouchableOpacity onPress={() => { setApprovalOpen(false); setEstimateOpen(true); onWorkflowChange?.({ stage: 'estimate' }); }} activeOpacity={0.8} style={styles.requestHeaderIconBtn}>
+            <Ionicons name="chevron-back" size={24} color="#17191D" />
+          </TouchableOpacity>
+          <View style={styles.jobPopupHeaderTextWrap}>
+            <Text style={styles.jobPopupHeaderTitle}>Job #{job.number}</Text>
+            <Text style={styles.jobPopupAcceptedText}>{acceptedLabel}</Text>
+          </View>
+          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={[styles.requestHeaderIconBtn, { alignItems: 'flex-end' }]}>
+            <Ionicons name="close" size={24} color="#17191D" />
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView style={[styles.container, styles.requestDetailScroll]} contentContainerStyle={styles.approvalContent} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
+          <View style={styles.jobProgressCard}>
+            <JobStepper steps={JOB_STEPS} currentIndex={workingIndex} />
+          </View>
+
+          <View style={styles.approvalHero}>
+            <View style={styles.approvalClock}>
+              <Ionicons name="time" size={34} color="#FFFFFF" />
+            </View>
+            <Text style={styles.approvalTitle}>Waiting Customer Approval</Text>
+            <Text style={styles.approvalSubtitle}>We've sent the estimate to {customerFirstName}.</Text>
+          </View>
+
+          <TouchableOpacity style={styles.approvalEstimateCard} activeOpacity={0.86} onPress={() => { pulseTabChange(); setEstimatePreviewOpen(true); }}>
+            <View style={styles.approvalEstimateTop}>
+              <View>
+                <Text style={styles.approvalCardLabel}>Estimate Sent</Text>
+                <Text style={styles.approvalAmount}>{formatCurrency(sentTotal)}</Text>
+                <Text style={styles.approvalSentTime}>{sentLabel}</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color="#8B9098" />
+            </View>
+            <View style={styles.approvalViewRow}>
+              <Ionicons name="eye-outline" size={15} color="#5E646D" />
+              <Text style={styles.approvalViewText}>View Estimate</Text>
+            </View>
+          </TouchableOpacity>
+
+          <View style={styles.approvalNextCard}>
+            <Text style={styles.approvalNextTitle}>What happens next?</Text>
+            <View style={styles.approvalNextRow}>
+              <Ionicons name="ellipse-outline" size={15} color="#EAB308" />
+              <Text style={styles.approvalNextText}>{customerFirstName} will review and approve the estimate.</Text>
+            </View>
+            <View style={styles.approvalNextRow}>
+              <Ionicons name="ellipse-outline" size={15} color="#EAB308" />
+              <Text style={styles.approvalNextText}>You'll be notified as soon as we get a response.</Text>
+            </View>
+            <View style={styles.approvalNextRow}>
+              <Ionicons name="ellipse-outline" size={15} color="#EAB308" />
+              <Text style={styles.approvalNextText}>After the customer approves the estimate, you can start the work.</Text>
+            </View>
+          </View>
+
+          <View style={styles.approvalActions}>
+            <TouchableOpacity style={styles.approvalEditBtn} activeOpacity={0.86} onPress={() => { pulseTabChange(); setApprovalOpen(false); setEstimateOpen(true); onWorkflowChange?.({ stage: 'estimate' }); }}>
+              <Text style={styles.approvalEditText}>Edit Estimate</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.approvalCallBtn} activeOpacity={0.86} onPress={() => phone && Linking.openURL(`tel:${phone}`)}>
+              <Text style={styles.approvalCallText}>Call Customer</Text>
+            </TouchableOpacity>
+          </View>
+
+          <TouchableOpacity style={styles.approvalDemoBtn} activeOpacity={0.86} onPress={approveEstimateDemo}>
+            <Text style={styles.approvalDemoText}>Demo: Customer Approved</Text>
+            <Ionicons name="chevron-forward" size={17} color="#FFFFFF" />
+          </TouchableOpacity>
+        </ScrollView>
+
+        <Modal visible={estimatePreviewOpen} transparent animationType="fade" onRequestClose={() => setEstimatePreviewOpen(false)}>
+          <CustomerEstimatePreview job={job} estimate={estimate} onClose={() => setEstimatePreviewOpen(false)} />
+        </Modal>
+      </View>
+    );
+  }
+
+  if (workOpen) {
+    const workingIndex = Math.max(0, JOB_STEPS.findIndex(step => step.key === 'inspection'));
+    const estimate = getDemoEstimate(diagnosisAnswers, batteryVoltage, estimateItems, estimateRemovedItems);
+    const originalTotal = estimate.optionalSubtotal > 0 ? estimate.totalIfApproved : estimate.total;
+    const approvedAdditionalTotal = sumAmounts(additionalApprovals.filter(item => item.status === 'approved'));
+    const pendingAdditionalTotal = sumAmounts(additionalApprovals.filter(item => item.status === 'pending'));
+    const saveAdditionalApprovals = (nextItems) => {
+      setAdditionalApprovals(nextItems);
+      onWorkflowChange?.({ stage: 'working', additionalApprovals: nextItems, estimateItems, estimateRemovedItems, workPhotos, workSummary, workCustomerNote });
+    };
+    const openRequiredChangeRequest = () => {
+      pulseTabChange();
+      setChangeRequestName('');
+      setChangeRequestReason('');
+      setChangeRequestAmount('');
+      setChangeRequestEvidence('');
+      setChangeRequestOpen(true);
+    };
+    const changeRequestParsedAmount = Number.parseFloat(String(changeRequestAmount || '').replace(',', '.'));
+    const canSubmitChangeRequest = changeRequestName.trim()
+      && changeRequestReason.trim()
+      && Number.isFinite(changeRequestParsedAmount)
+      && changeRequestParsedAmount > 0
+      && changeRequestEvidence.trim();
+    const submitRequiredChangeRequest = () => {
+      if (!canSubmitChangeRequest) return;
+      pulseTabChange();
+      const nextItem = {
+        id: `required-change-${Date.now()}`,
+        kind: 'required',
+        status: 'pending',
+        title: changeRequestName.trim(),
+        description: changeRequestReason.trim(),
+        evidence: changeRequestEvidence.trim(),
+        amount: Math.round(changeRequestParsedAmount * 100) / 100,
+      };
+      saveAdditionalApprovals([...additionalApprovals, nextItem]);
+      setChangeRequestOpen(false);
+    };
+    const updateAdditionalApproval = (id, status) => {
+      pulseTabChange();
+      saveAdditionalApprovals(additionalApprovals.map(item => item.id === id ? { ...item, status } : item));
+    };
+    const addWorkPhoto = () => {
+      pulseTabChange();
+      const nextPhotos = [...workPhotos, `Repair photo ${workPhotos.length + 1}`];
+      setWorkPhotos(nextPhotos);
+      onWorkflowChange?.({ stage: 'working', workPhotos: nextPhotos, workSummary, workCustomerNote, additionalApprovals });
+    };
+    const updateWorkSummary = (value) => {
+      setWorkSummary(value);
+      onWorkflowChange?.({ stage: 'working', workSummary: value, workCustomerNote, workPhotos, additionalApprovals });
+    };
+    const updateWorkCustomerNote = (value) => {
+      setWorkCustomerNote(value);
+      onWorkflowChange?.({ stage: 'working', workCustomerNote: value, workSummary, workPhotos, additionalApprovals });
+    };
+    const openCompleteReview = () => {
+      pulseTabChange();
+      setWorkOpen(false);
+      setCompleteOpen(true);
+      onWorkflowChange?.({ stage: 'complete_review', workPhotos, workSummary, workCustomerNote, additionalApprovals, estimateItems, estimateRemovedItems });
+    };
+    return (
+      <View style={styles.requestDetailShell}>
+        <View style={styles.requestDetailHeader}>
+          <TouchableOpacity onPress={() => { setWorkOpen(false); setApprovalOpen(true); onWorkflowChange?.({ stage: 'approval' }); }} activeOpacity={0.8} style={styles.requestHeaderIconBtn}>
+            <Ionicons name="chevron-back" size={24} color="#17191D" />
+          </TouchableOpacity>
+          <View style={styles.jobPopupHeaderTextWrap}>
+            <Text style={styles.jobPopupHeaderTitle}>Job #{job.number}</Text>
+            <Text style={styles.jobPopupAcceptedText}>{workflow.estimateApprovedAt || 'Estimate approved'}</Text>
+          </View>
+          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={[styles.requestHeaderIconBtn, { alignItems: 'flex-end' }]}>
+            <Ionicons name="close" size={24} color="#17191D" />
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView style={[styles.container, styles.requestDetailScroll]} contentContainerStyle={styles.workContent} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
+          <View style={styles.jobProgressCard}>
+            <JobStepper steps={JOB_STEPS} currentIndex={workingIndex} />
+          </View>
+
+          <View style={styles.repairProgressCard}>
+            <View style={styles.repairProgressHeader}>
+              <View>
+                <Text style={styles.repairProgressTitle}>Repair in Progress</Text>
+                <Text style={styles.repairProgressMeta}>Timer</Text>
+                <Text style={styles.repairTimer}>00:18:32</Text>
+              </View>
+              <View style={styles.repairLivePill}>
+                <View style={styles.repairLiveDot} />
+                <Text style={styles.repairLiveText}>In progress</Text>
+              </View>
+            </View>
+
+            <View style={styles.repairFieldBlock}>
+              <Text style={styles.repairFieldLabel}>Work Description</Text>
+              <Text style={styles.repairFieldText}>Replacing battery and testing system.</Text>
+            </View>
+
+            <View style={styles.repairFieldBlock}>
+              <Text style={styles.repairFieldLabel}>Photos</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.repairPhotosRow}>
+                {workPhotos.map((photo, index) => (
+                  <View key={`${photo}-${index}`} style={styles.repairPhotoTile}>
+                    <Ionicons name={index === 2 ? 'speedometer-outline' : 'battery-charging-outline'} size={22} color="#F04416" />
+                    <Text style={styles.repairPhotoText} numberOfLines={2}>{photo}</Text>
+                  </View>
+                ))}
+                <TouchableOpacity style={styles.repairAddPhotoTile} activeOpacity={0.84} onPress={addWorkPhoto}>
+                  <Ionicons name="add" size={22} color="#5E646D" />
+                  <Text style={styles.repairAddPhotoText}>Add More</Text>
+                </TouchableOpacity>
+              </ScrollView>
+            </View>
+          </View>
+
+          <View style={styles.workContactCard}>
+            <View style={styles.customerPopupAvatar}>
+              <Text style={styles.customerPopupInitials}>{job.customer?.initials || 'CU'}</Text>
+            </View>
+            <View style={styles.workContactInfo}>
+              <Text style={styles.workContactName} numberOfLines={1}>{job.customer?.name || 'Customer'}</Text>
+              <Text style={styles.workContactMeta}>Verified & trusted</Text>
+            </View>
+            <View style={styles.workContactActions}>
+              <TouchableOpacity style={styles.workContactBtn} activeOpacity={0.84} onPress={() => phone && Linking.openURL(`tel:${phone}`)}>
+                <Ionicons name="call-outline" size={18} color="#17191D" />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.workContactBtn} activeOpacity={0.84} onPress={() => phone && Linking.openURL(`sms:${phone}`)}>
+                <Ionicons name="chatbubble-outline" size={18} color="#17191D" />
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <View style={styles.repairNoteCard}>
+            <Text style={styles.repairFieldLabel}>Work Summary</Text>
+            <TextInput
+              style={styles.repairSummaryInput}
+              value={workSummary}
+              onChangeText={updateWorkSummary}
+              multiline
+              placeholder="Describe completed work"
+              placeholderTextColor="#8B9098"
+            />
+          </View>
+
+          <View style={styles.repairNoteCard}>
+            <Text style={styles.repairFieldLabel}>Customer Note (Optional)</Text>
+            <TextInput
+              style={styles.repairCustomerNoteInput}
+              value={workCustomerNote}
+              onChangeText={updateWorkCustomerNote}
+              multiline
+              placeholder="Add a short note for the customer"
+              placeholderTextColor="#8B9098"
+            />
+          </View>
+
+          <View style={styles.workSummaryCard}>
+            <EstimateLine label="Approved estimate" amount={originalTotal} strong />
+            <EstimateLine label="Approved required changes" amount={approvedAdditionalTotal} />
+            <EstimateLine label="Pending required changes" amount={pendingAdditionalTotal} mutedLabel />
+            <EstimateLine label="Current approved total" amount={originalTotal + approvedAdditionalTotal} total />
+          </View>
+
+          <View style={styles.additionalApprovalCard}>
+            <Text style={styles.approvalNextTitle}>Required change requests</Text>
+            <Text style={styles.additionalApprovalSubtitle}>Use this only if the approved repair cannot be completed without an extra required item. Non-urgent recommendations should be saved for a future service.</Text>
+            <View style={styles.additionalActionRow}>
+              <TouchableOpacity style={styles.additionalRequiredBtn} activeOpacity={0.86} onPress={openRequiredChangeRequest}>
+                <Ionicons name="alert-circle-outline" size={17} color="#FFFFFF" />
+                <Text style={styles.additionalRequiredText}>Request required change</Text>
+              </TouchableOpacity>
+            </View>
+
+            {additionalApprovals.length === 0 ? (
+              <View style={styles.additionalEmptyBox}>
+                <Ionicons name="document-text-outline" size={20} color="#8B9098" />
+                <Text style={styles.additionalEmptyText}>No additional approvals yet.</Text>
+              </View>
+            ) : (
+              additionalApprovals.map(item => (
+                <View key={item.id} style={[styles.additionalItem, styles.additionalItemRequired]}>
+                  <View style={styles.additionalItemTop}>
+                    <View style={styles.additionalItemInfo}>
+                      <Text style={styles.additionalItemKind}>Required to continue</Text>
+                      <Text style={styles.additionalItemTitle}>{item.title}</Text>
+                      <Text style={styles.additionalItemDescription}>{item.description}</Text>
+                      <View style={styles.additionalEvidenceRow}>
+                        <Ionicons name="camera-outline" size={13} color="#5E646D" />
+                        <Text style={styles.additionalEvidenceText}>{item.evidence || 'Evidence required before sending to customer.'}</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.additionalItemAmount}>{formatCurrency(item.amount)}</Text>
+                  </View>
+                  <View style={styles.additionalItemBottom}>
+                    <View style={[styles.additionalStatusPill, item.status === 'approved' && styles.additionalStatusApproved, item.status === 'declined' && styles.additionalStatusDeclined]}>
+                      <Text style={[styles.additionalStatusText, item.status === 'approved' && styles.additionalStatusTextApproved, item.status === 'declined' && styles.additionalStatusTextDeclined]}>{item.status === 'pending' ? 'Pending customer approval' : item.status === 'approved' ? 'Approved by customer' : 'Declined by customer'}</Text>
+                    </View>
+                    {item.status === 'pending' && (
+                      <View style={styles.additionalDemoActions}>
+                        <TouchableOpacity style={styles.additionalApproveMini} activeOpacity={0.84} onPress={() => updateAdditionalApproval(item.id, 'approved')}>
+                          <Ionicons name="checkmark" size={14} color="#FFFFFF" />
+                        </TouchableOpacity>
+                        <TouchableOpacity style={styles.additionalDeclineMini} activeOpacity={0.84} onPress={() => updateAdditionalApproval(item.id, 'declined')}>
+                          <Ionicons name="close" size={14} color="#F04416" />
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                  </View>
+                </View>
+              ))
+            )}
+          </View>
+
+          <TouchableOpacity style={styles.completeWorkBtn} activeOpacity={0.86} onPress={openCompleteReview}>
+            <Ionicons name="checkmark-done-outline" size={18} color="#FFFFFF" />
+            <Text style={styles.completeWorkText}>Complete Work</Text>
+          </TouchableOpacity>
+
+        </ScrollView>
+
+        <Modal visible={changeRequestOpen} transparent animationType="fade" onRequestClose={() => setChangeRequestOpen(false)}>
+          <KeyboardAvoidingView style={styles.checklistKeyboardAvoider} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+            <View style={styles.changeRequestOverlay}>
+              <TouchableOpacity style={styles.navChoiceBackdrop} activeOpacity={1} onPress={() => setChangeRequestOpen(false)} />
+              <View style={styles.changeRequestCard}>
+                <View style={styles.navChoiceHeader}>
+                  <View style={styles.changeRequestHeaderText}>
+                    <Text style={styles.navChoiceTitle}>Required Change Request</Text>
+                    <Text style={styles.changeRequestSubtitle}>Only use this if the approved repair cannot be completed without it.</Text>
+                  </View>
+                  <TouchableOpacity style={styles.noteCloseBtn} activeOpacity={0.8} onPress={() => setChangeRequestOpen(false)}>
+                    <Ionicons name="close" size={20} color="#17191D" />
+                  </TouchableOpacity>
+                </View>
+
+                <Text style={styles.changeRequestLabel}>Work or part needed</Text>
+                <TextInput
+                  style={styles.changeRequestInput}
+                  value={changeRequestName}
+                  onChangeText={setChangeRequestName}
+                  placeholder="Example: Battery terminal replacement"
+                  placeholderTextColor="#8B9098"
+                />
+
+                <Text style={styles.changeRequestLabel}>Why is it required?</Text>
+                <TextInput
+                  style={styles.changeRequestTextArea}
+                  value={changeRequestReason}
+                  onChangeText={setChangeRequestReason}
+                  multiline
+                  placeholder="Explain why the approved repair cannot be completed without this change."
+                  placeholderTextColor="#8B9098"
+                />
+
+                <Text style={styles.changeRequestLabel}>Price</Text>
+                <TextInput
+                  style={styles.changeRequestInput}
+                  value={changeRequestAmount}
+                  onChangeText={setChangeRequestAmount}
+                  placeholder="64.00"
+                  placeholderTextColor="#8B9098"
+                  keyboardType="decimal-pad"
+                />
+
+                <Text style={styles.changeRequestLabel}>Evidence</Text>
+                <TouchableOpacity style={styles.changeRequestEvidenceBox} activeOpacity={0.84} onPress={() => setChangeRequestEvidence('Photo attached: damaged battery terminal')}>
+                  <Ionicons name={changeRequestEvidence ? 'checkmark-circle' : 'camera-outline'} size={20} color={changeRequestEvidence ? '#16A34A' : '#F04416'} />
+                  <View style={styles.changeRequestEvidenceTextWrap}>
+                    <Text style={styles.changeRequestEvidenceTitle}>{changeRequestEvidence ? 'Evidence attached' : 'Add required photo'}</Text>
+                    <Text style={styles.changeRequestEvidenceHint}>{changeRequestEvidence || 'Demo: tap to attach a photo/note for the customer.'}</Text>
+                  </View>
+                </TouchableOpacity>
+
+                <TouchableOpacity style={[styles.startInspectionBtn, !canSubmitChangeRequest && styles.startInspectionBtnDisabled]} activeOpacity={canSubmitChangeRequest ? 0.86 : 1} disabled={!canSubmitChangeRequest} onPress={submitRequiredChangeRequest}>
+                  <Text style={[styles.startInspectionText, !canSubmitChangeRequest && styles.startInspectionTextDisabled]}>Send to Customer</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
+      </View>
+    );
+  }
+
+  if (completeOpen) {
+    const completeIndex = Math.max(0, JOB_STEPS.findIndex(step => step.key === 'completed'));
+    const estimate = getDemoEstimate(diagnosisAnswers, batteryVoltage, estimateItems, estimateRemovedItems);
+    const originalTotal = estimate.optionalSubtotal > 0 ? estimate.totalIfApproved : estimate.total;
+    const approvedRequiredChanges = additionalApprovals.filter(item => item.status === 'approved');
+    const pendingRequiredChanges = additionalApprovals.filter(item => item.status === 'pending');
+    const approvedAdditionalTotal = sumAmounts(approvedRequiredChanges);
+    const finalTotal = originalTotal + approvedAdditionalTotal;
+    const hasFinalPhotos = workPhotos.length > 0;
+    const hasSummary = workSummary.trim().length > 0;
+    const canSubmitCompletion = hasFinalPhotos && hasSummary && pendingRequiredChanges.length === 0;
+    const submitCompletion = () => {
+      if (!canSubmitCompletion) return;
+      pulseTabChange();
+      onWorkflowChange?.({
+        stage: 'completed',
+        workPhotos,
+        workSummary,
+        workCustomerNote,
+        additionalApprovals,
+        completedAt: 'Completed just now',
+      });
+      onBack?.();
+    };
+    return (
+      <View style={styles.requestDetailShell}>
+        <View style={styles.requestDetailHeader}>
+          <TouchableOpacity onPress={() => { setCompleteOpen(false); setWorkOpen(true); onWorkflowChange?.({ stage: 'working' }); }} activeOpacity={0.8} style={styles.requestHeaderIconBtn}>
+            <Ionicons name="chevron-back" size={24} color="#17191D" />
+          </TouchableOpacity>
+          <View style={styles.jobPopupHeaderTextWrap}>
+            <Text style={styles.jobPopupHeaderTitle}>Job #{job.number}</Text>
+            <Text style={styles.jobPopupAcceptedText}>Final review</Text>
+          </View>
+          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={[styles.requestHeaderIconBtn, { alignItems: 'flex-end' }]}>
+            <Ionicons name="close" size={24} color="#17191D" />
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView style={[styles.container, styles.requestDetailScroll]} contentContainerStyle={styles.completeContent} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
+          <View style={styles.jobProgressCard}>
+            <JobStepper steps={JOB_STEPS} currentIndex={completeIndex} />
+          </View>
+
+          <View style={styles.completeHeroCard}>
+            <View style={styles.completeHeroIcon}>
+              <Ionicons name="clipboard-outline" size={24} color="#FFFFFF" />
+            </View>
+            <View style={styles.completeHeroInfo}>
+              <Text style={styles.completeHeroTitle}>Complete Job</Text>
+              <Text style={styles.completeHeroSubtitle}>Review final photos, work summary, approvals, and total before submitting completion.</Text>
+            </View>
+          </View>
+
+          <View style={styles.completeChecklistCard}>
+            <Text style={styles.approvalNextTitle}>Completion checklist</Text>
+            <CompletionCheckRow done={hasFinalPhotos} title="Final photos added" detail={`${workPhotos.length} photo${workPhotos.length === 1 ? '' : 's'} attached`} />
+            <CompletionCheckRow done={hasSummary} title="Work summary completed" detail={hasSummary ? 'Ready for customer review' : 'Add a summary before completing'} />
+            <CompletionCheckRow done={!pendingRequiredChanges.length} title="No pending approvals" detail={pendingRequiredChanges.length ? 'Resolve pending required changes first' : 'All change requests resolved'} />
+          </View>
+
+          <View style={styles.repairNoteCard}>
+            <Text style={styles.repairFieldLabel}>Final Work Summary</Text>
+            <Text style={styles.completeSummaryText}>{workSummary}</Text>
+            {!!workCustomerNote.trim() && (
+              <>
+                <View style={styles.customerEstimateDivider} />
+                <Text style={styles.repairFieldLabel}>Customer Note</Text>
+                <Text style={styles.completeSummaryText}>{workCustomerNote}</Text>
+              </>
+            )}
+          </View>
+
+          <View style={styles.repairNoteCard}>
+            <Text style={styles.repairFieldLabel}>Final Photos</Text>
+            <View style={styles.completePhotosGrid}>
+              {workPhotos.map((photo, index) => (
+                <View key={`${photo}-complete-${index}`} style={styles.completePhotoTile}>
+                  <Ionicons name={index === 2 ? 'speedometer-outline' : 'image-outline'} size={20} color="#F04416" />
+                  <Text style={styles.repairPhotoText} numberOfLines={2}>{photo}</Text>
+                </View>
+              ))}
+            </View>
+          </View>
+
+          <View style={styles.workSummaryCard}>
+            <EstimateLine label="Approved estimate" amount={originalTotal} strong />
+            <EstimateLine label="Approved required changes" amount={approvedAdditionalTotal} />
+            <EstimateLine label="Final total" amount={finalTotal} total />
+          </View>
+
+          {!canSubmitCompletion && (
+            <View style={styles.completeBlockedCard}>
+              <Ionicons name="alert-circle-outline" size={18} color="#F04416" />
+              <Text style={styles.completeBlockedText}>
+                {pendingRequiredChanges.length ? 'Resolve pending customer approvals before completing this job.' : 'Add final photos and work summary before completing this job.'}
+              </Text>
+            </View>
+          )}
+
+          <TouchableOpacity style={[styles.completeSubmitBtn, !canSubmitCompletion && styles.startInspectionBtnDisabled]} activeOpacity={canSubmitCompletion ? 0.86 : 1} disabled={!canSubmitCompletion} onPress={submitCompletion}>
+            <Text style={[styles.completeSubmitText, !canSubmitCompletion && styles.startInspectionTextDisabled]}>Submit Completion</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </View>
+    );
+  }
+
+  if (diagnosisOpen) {
+    const workingIndex = Math.max(0, JOB_STEPS.findIndex(step => step.key === 'inspection'));
+    const recommendedServices = getRecommendedServicesFromDiagnosis(diagnosisAnswers, batteryVoltage);
+    const setDiagnosisAnswer = (key, value) => {
+      pulseTabChange();
+      const nextAnswers = { ...diagnosisAnswers, [key]: value };
+      setDiagnosisAnswers(nextAnswers);
+      onWorkflowChange?.({ stage: 'diagnosis', diagnosisAnswers: nextAnswers });
+    };
+    const updateBatteryVoltage = (value) => {
+      setBatteryVoltage(value);
+      onWorkflowChange?.({ stage: 'diagnosis', batteryVoltage: value });
+    };
+    const updateDiagnosisNotes = (value) => {
+      setDiagnosisNotes(value);
+      onWorkflowChange?.({ stage: 'diagnosis', diagnosisNotes: value });
+    };
+    return (
+      <View style={styles.requestDetailShell}>
+        <View style={styles.requestDetailHeader}>
+          <TouchableOpacity onPress={() => { setDiagnosisOpen(false); setArrivedOpen(true); onWorkflowChange?.({ stage: 'arrived' }); }} activeOpacity={0.8} style={styles.requestHeaderIconBtn}>
+            <Ionicons name="chevron-back" size={24} color="#17191D" />
+          </TouchableOpacity>
+          <View style={styles.jobPopupHeaderTextWrap}>
+            <Text style={styles.jobPopupHeaderTitle}>Job #{job.number}</Text>
+            <Text style={styles.jobPopupAcceptedText}>{acceptedLabel}</Text>
+          </View>
+          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={[styles.requestHeaderIconBtn, { alignItems: 'flex-end' }]}>
+            <Ionicons name="close" size={24} color="#17191D" />
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView style={[styles.container, styles.requestDetailScroll]} contentContainerStyle={styles.diagnosisContent} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
+          <View style={styles.jobProgressCard}>
+            <JobStepper steps={JOB_STEPS} currentIndex={workingIndex} />
+          </View>
+
+          <View style={styles.diagnosisHeader}>
+            <Text style={styles.arrivedChecklistTitle}>Diagnosis</Text>
+            <Text style={styles.arrivedChecklistSubtitle}>Run basic tests and record your findings.</Text>
+          </View>
+
+          <View style={styles.diagnosisCard}>
+            <Text style={styles.diagnosisGroupTitle}>Battery & Electrical System</Text>
+
+            <View style={styles.diagnosisMetricRow}>
+              <View style={styles.diagnosisMetricLeft}>
+                <Ionicons name="battery-half-outline" size={18} color="#16A34A" />
+                <Text style={styles.diagnosisItemTitle}>Battery Voltage</Text>
+              </View>
+              <View style={styles.diagnosisVoltageInputWrap}>
+                <TextInput
+                  style={styles.diagnosisVoltageInput}
+                  value={batteryVoltage}
+                  onChangeText={updateBatteryVoltage}
+                  placeholder="0.0"
+                  placeholderTextColor="#8B9098"
+                  keyboardType="decimal-pad"
+                />
+                <Text style={styles.diagnosisVoltageUnit}>V</Text>
+              </View>
+            </View>
+
+            <View style={styles.diagnosisBlock}>
+              <View style={styles.diagnosisMetricLeft}>
+                <Ionicons name="flash-outline" size={18} color="#7C3AED" />
+                <Text style={styles.diagnosisItemTitle}>Jump Start Result</Text>
+              </View>
+              <View style={styles.diagnosisOptionRow}>
+                <DiagnosisOption label="Vehicle Started" selected={diagnosisAnswers.jumpStart === 'started'} onPress={() => setDiagnosisAnswer('jumpStart', 'started')} />
+                <DiagnosisOption label="Vehicle Did Not Start" selected={diagnosisAnswers.jumpStart === 'not_started'} onPress={() => setDiagnosisAnswer('jumpStart', 'not_started')} />
+              </View>
+            </View>
+
+            <View style={styles.diagnosisBlock}>
+              <View style={styles.diagnosisMetricLeft}>
+                <Ionicons name="battery-charging-outline" size={18} color="#2F80FF" />
+                <Text style={styles.diagnosisItemTitle}>Charging System (Alternator)</Text>
+              </View>
+              <View style={styles.diagnosisOptionRow}>
+                <DiagnosisOption label="Alternator OK" selected={diagnosisAnswers.alternator === 'ok'} onPress={() => setDiagnosisAnswer('alternator', 'ok')} />
+                <DiagnosisOption label="Alternator Failed" selected={diagnosisAnswers.alternator === 'failed'} onPress={() => setDiagnosisAnswer('alternator', 'failed')} />
+              </View>
+            </View>
+
+            <View style={styles.diagnosisBlock}>
+              <View style={styles.diagnosisMetricLeft}>
+                <Ionicons name="shield-checkmark-outline" size={18} color="#F04416" />
+                <Text style={styles.diagnosisItemTitle}>Battery Load Test</Text>
+              </View>
+              <View style={styles.diagnosisOptionRow}>
+                <DiagnosisOption label="Good" selected={diagnosisAnswers.loadTest === 'good'} onPress={() => setDiagnosisAnswer('loadTest', 'good')} />
+                <DiagnosisOption label="Weak" selected={diagnosisAnswers.loadTest === 'weak'} onPress={() => setDiagnosisAnswer('loadTest', 'weak')} />
+                <DiagnosisOption label="Bad" selected={diagnosisAnswers.loadTest === 'bad'} onPress={() => setDiagnosisAnswer('loadTest', 'bad')} />
+              </View>
+            </View>
+          </View>
+
+          <View style={styles.diagnosisNotesBlock}>
+            <Text style={styles.diagnosisNotesLabel}>Technician Notes (optional)</Text>
+            <TextInput
+              style={styles.diagnosisNotesInput}
+              value={diagnosisNotes}
+              onChangeText={updateDiagnosisNotes}
+              placeholder="Add diagnosis notes"
+              placeholderTextColor="#8B9098"
+              multiline
+              textAlignVertical="top"
+            />
+            <Text style={styles.diagnosisNotesCount}>{diagnosisNotes.length}/500</Text>
+          </View>
+
+          <View style={styles.recommendedBlock}>
+            <Text style={styles.recommendedTitle}>Recommended Services</Text>
+            <Text style={styles.recommendedSubtitle}>AI-ready recommendations based on your findings</Text>
+            {recommendedServices.map(service => (
+              <RecommendedService key={service} label={service} />
+            ))}
+          </View>
+
+          <TouchableOpacity style={styles.startInspectionBtn} activeOpacity={0.86} onPress={() => { setDiagnosisOpen(false); setEstimateOpen(true); onWorkflowChange?.({ stage: 'estimate' }); }}>
+            <Text style={styles.startInspectionText}>Continue to Estimate</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </View>
+    );
+  }
+
+  if (arrivedOpen) {
+    const arrivedIndex = Math.max(0, JOB_STEPS.findIndex(step => step.key === 'arrived'));
+    const checklistItems = [
+      { key: 'photos', title: 'Required Photos', subtitle: 'Add clear photos of the vehicle', icon: 'camera-outline', color: '#16A34A' },
+      { key: 'complaint', title: 'Confirm Customer Complaint', subtitle: 'Verify the issue with the customer', icon: 'chatbubbles-outline', color: '#7C3AED' },
+      { key: 'notes', title: 'Arrival Notes', optional: true, subtitle: 'Add notes from arrival', icon: 'clipboard-outline', color: '#7C3AED' },
+    ];
+    const requiredPhotoItems = [
+      { key: 'front', label: 'Front of vehicle', hint: 'License plate must be readable' },
+      { key: 'vin', label: 'VIN', hint: 'VIN label must be clear and readable' },
+      { key: 'odometer', label: 'Odometer', hint: 'Mileage reading must be visible' },
+      { key: 'problem', label: 'Problem area', hint: 'Capture the visible issue or affected area' },
+    ];
+    const canContinueDiagnosis = arrivedChecklist.photos && arrivedChecklist.complaint;
+    const activeChecklistMeta = checklistItems.find(item => item.key === activeChecklistItem);
+    const photosReady = requiredPhotoItems.every(item => !!requiredPhotos[item.key]?.uri);
+    const customerComplaintItems = getCustomerComplaintItems(job, customerNote);
+    const complaintReady = customerComplaintItems.length > 0 && customerComplaintItems.every(item => !!complaintConfirmations[item.key]);
+    const canSaveChecklistItem = activeChecklistItem === 'photos'
+      ? photosReady
+        : activeChecklistItem === 'complaint'
+        ? complaintReady
+        : true;
+    const openChecklistItem = (key) => {
+      pulseTabChange();
+      setActiveChecklistItem(key);
+      setChecklistDraft(arrivedChecklistData[key] || '');
+    };
+    const saveChecklistItem = () => {
+      if (!activeChecklistItem || !canSaveChecklistItem) return;
+      pulseTabChange();
+      const nextValue = activeChecklistItem === 'photos'
+        ? 'Required photos completed'
+        : activeChecklistItem === 'complaint'
+          ? customerComplaintItems.map(item => `${item.label}: ${complaintConfirmations[item.key]}`).join('\n')
+          : checklistDraft.trim() || 'No arrival notes added';
+      const nextData = { ...arrivedChecklistData, [activeChecklistItem]: nextValue };
+      const nextChecklist = { ...arrivedChecklist, [activeChecklistItem]: true };
+      setArrivedChecklistData(nextData);
+      setArrivedChecklist(nextChecklist);
+      onWorkflowChange?.({ stage: 'arrived', arrivedChecklistData: nextData, arrivedChecklist: nextChecklist });
+      setActiveChecklistItem(null);
+      setChecklistDraft('');
+    };
+    const setComplaintDecision = (key, decision) => {
+      pulseTabChange();
+      const nextConfirmations = { ...complaintConfirmations, [key]: decision };
+      setComplaintConfirmations(nextConfirmations);
+      onWorkflowChange?.({ stage: 'arrived', complaintConfirmations: nextConfirmations });
+    };
+    const saveRequiredPhoto = (key) => {
+      pulseTabChange();
+      const nextPhotos = { ...requiredPhotos, [key]: { uri: `demo-${key}`, demo: true } };
+      setRequiredPhotos(nextPhotos);
+      onWorkflowChange?.({ stage: 'arrived', requiredPhotos: nextPhotos });
+    };
+    const takeRequiredPhoto = (key) => saveRequiredPhoto(key);
+    return (
+      <View style={styles.requestDetailShell}>
+        <View style={styles.requestDetailHeader}>
+          <TouchableOpacity onPress={() => { setArrivedOpen(false); setRouteOpen(true); onWorkflowChange?.({ stage: 'route' }); }} activeOpacity={0.8} style={styles.requestHeaderIconBtn}>
+            <Ionicons name="chevron-back" size={24} color="#17191D" />
+          </TouchableOpacity>
+          <View style={styles.jobPopupHeaderTextWrap}>
+            <Text style={styles.jobPopupHeaderTitle}>Job #{job.number}</Text>
+            <Text style={styles.jobPopupAcceptedText}>{acceptedLabel}</Text>
+          </View>
+          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={[styles.requestHeaderIconBtn, { alignItems: 'flex-end' }]}>
+            <Ionicons name="close" size={24} color="#17191D" />
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView style={[styles.container, styles.requestDetailScroll]} contentContainerStyle={styles.arrivedContent} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
+          <View style={styles.vehicleInfoCard}>
+            <View style={styles.requestVehicleIcon}>
+              <Ionicons name={job.service?.icon || job.icon || 'car-outline'} size={22} color="#F04416" />
+            </View>
+            <View style={styles.serviceInfo}>
+              <Text style={styles.serviceType} numberOfLines={2}>{job.vehicle?.year} {job.vehicle?.make} {job.vehicle?.model}</Text>
+              <Text style={styles.serviceVehicle} numberOfLines={1}>{job.vehicle?.color || 'Color pending'}</Text>
+              <View style={[styles.trustedLine, styles.vehicleTrustedLine]}>
+                <Ionicons name="barcode-outline" size={13} color="#F04416" />
+                <Text style={styles.verifiedTrusted} numberOfLines={1}>VIN {vin}</Text>
+              </View>
+            </View>
+            <View style={styles.vehicleMetaBox}>
+              <View style={styles.requestSpecRow}>
+                <Text style={styles.requestSpecLabel}>Service Type</Text>
+                <Text style={styles.requestSpecValue} numberOfLines={1}>{job.service?.type || 'Service'}</Text>
+              </View>
+            </View>
+          </View>
+
+          <View style={styles.vehicleInfoCard}>
+            <View style={styles.requestVehicleIcon}>
+              <Ionicons name={job.service?.icon || job.icon || 'construct-outline'} size={22} color="#F04416" />
+            </View>
+            <View style={styles.serviceInfo}>
+              <Text style={styles.serviceType} numberOfLines={2}>{job.service?.type || 'Service request'}</Text>
+              <Text style={styles.serviceVehicle} numberOfLines={1}>Requested problem</Text>
+              <View style={[styles.trustedLine, styles.vehicleTrustedLine]}>
+                <Ionicons name="chatbox-outline" size={13} color="#F04416" />
+                <Text style={styles.verifiedTrusted} numberOfLines={1}>{customerNote}</Text>
+              </View>
+            </View>
+            <View style={styles.vehicleMetaBox}>
+              <View style={styles.requestSpecRow}>
+                <Text style={styles.requestSpecLabel}>Issue</Text>
+                <Text style={styles.requestSpecValue} numberOfLines={1}>{job.service?.type || 'Service'}</Text>
+              </View>
+            </View>
+          </View>
+
+          <View style={styles.arrivedStatusCard}>
+            <View style={styles.arrivedStatusLeft}>
+              <View style={styles.arrivedStatusDot} />
+              <Text style={styles.arrivedStatusText}>Arrived</Text>
+            </View>
+            <Text style={styles.arrivedStatusTime}>10:35 AM</Text>
+          </View>
+
+          <View style={styles.jobProgressCard}>
+            <JobStepper steps={JOB_STEPS} currentIndex={arrivedIndex} />
+          </View>
+
+          <View style={styles.arrivedSectionCard}>
+            <Text style={styles.arrivedChecklistTitle}>Before we continue</Text>
+            <Text style={styles.arrivedChecklistSubtitle}>Let's gather some basic information before diagnosis.</Text>
+            <View style={styles.arrivedChecklistBox}>
+              {checklistItems.map((item, index) => {
+                const checked = arrivedChecklist[item.key];
+                return (
+              <TouchableOpacity key={item.key} style={[styles.arrivedNextRow, index > 0 && styles.arrivedNextRowBorder]} activeOpacity={0.84} onPress={() => openChecklistItem(item.key)}>
+                <View style={[styles.arrivedCheckCircle, checked && styles.arrivedCheckCircleDone]}>
+                  {checked && <Ionicons name="checkmark" size={18} color="#FFFFFF" />}
+                </View>
+                <View style={styles.arrivedNextInfo}>
+                  <View style={styles.arrivedNextTitleRow}>
+                    <Text style={styles.arrivedNextTitle}>{item.title}</Text>
+                    {item.optional && <Text style={styles.arrivedNextOptional}>(optional)</Text>}
+                  </View>
+                  <Text style={styles.arrivedNextSubtitle}>{item.subtitle}</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color="#8B9098" />
+              </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+
+          <TouchableOpacity style={[styles.startInspectionBtn, !canContinueDiagnosis && styles.startInspectionBtnDisabled]} activeOpacity={canContinueDiagnosis ? 0.86 : 1} disabled={!canContinueDiagnosis} onPress={() => { setArrivedOpen(false); setDiagnosisOpen(true); onWorkflowChange?.({ stage: 'diagnosis' }); }}>
+            <Text style={[styles.startInspectionText, !canContinueDiagnosis && styles.startInspectionTextDisabled]}>Continue to Diagnosis</Text>
+          </TouchableOpacity>
+        </ScrollView>
+
+        <Modal visible={!!activeChecklistItem} transparent animationType="fade" onRequestClose={() => setActiveChecklistItem(null)}>
+          <KeyboardAvoidingView
+            style={styles.checklistKeyboardAvoider}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
+          >
+            <View style={styles.checklistModalOverlay}>
+              <TouchableOpacity style={styles.noteModalBackdrop} activeOpacity={1} onPress={() => setActiveChecklistItem(null)} />
+              <View style={styles.checklistModalCard}>
+                <View style={styles.noteModalHeader}>
+                  <Text style={styles.noteModalTitle}>{activeChecklistMeta?.title || 'Checklist'}</Text>
+                  <TouchableOpacity style={styles.noteCloseBtn} activeOpacity={0.8} onPress={() => setActiveChecklistItem(null)}>
+                    <Ionicons name="close" size={20} color="#17191D" />
+                  </TouchableOpacity>
+                </View>
+                <Text style={styles.checklistModalSubtitle}>{activeChecklistMeta?.subtitle}</Text>
+                {activeChecklistItem === 'photos' ? (
+                  <View style={styles.requiredPhotosList}>
+                    {requiredPhotoItems.map(item => {
+                      const photo = requiredPhotos[item.key];
+                      const checked = !!photo?.uri;
+                      return (
+                        <View key={item.key} style={styles.requiredPhotoRow}>
+                          <View style={styles.requiredPhotoInfo}>
+                            <View style={[styles.requiredPhotoCheck, checked && styles.requiredPhotoCheckDone]}>
+                              {checked ? <Ionicons name="checkmark" size={15} color="#FFFFFF" /> : null}
+                            </View>
+                            <View style={styles.requiredPhotoTextWrap}>
+                              <Text style={styles.requiredPhotoLabel}>{item.label}</Text>
+                              {!!item.hint && <Text style={styles.requiredPhotoHint}>{item.hint}</Text>}
+                              {checked && <Text style={styles.requiredPhotoStateDone}>Photo added</Text>}
+                            </View>
+                          </View>
+                          <View style={styles.requiredPhotoActions}>
+                            <TouchableOpacity style={[styles.addPhotoIconBtn, checked && styles.addPhotoBtnDone]} activeOpacity={0.84} onPress={() => takeRequiredPhoto(item.key)}>
+                              <Ionicons name="camera-outline" size={16} color={checked ? '#16A34A' : '#F04416'} />
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </View>
+                ) : activeChecklistItem === 'complaint' ? (
+                  <View style={styles.complaintConfirmBox}>
+                    {customerComplaintItems.map((item, index) => {
+                      const decision = complaintConfirmations[item.key];
+                      return (
+                        <View key={item.key} style={[styles.complaintConfirmRow, index > 0 && styles.complaintConfirmRowBorder]}>
+                          <View style={styles.complaintConfirmTextWrap}>
+                            <Text style={styles.complaintConfirmLabel}>{item.label}</Text>
+                            {!!item.value && <Text style={styles.complaintConfirmValue}>{item.value}</Text>}
+                          </View>
+                          <View style={styles.complaintDecisionRow}>
+                            <TouchableOpacity
+                              style={[styles.complaintDecisionBtn, decision === 'confirmed' && styles.complaintDecisionConfirmed]}
+                              activeOpacity={0.84}
+                              onPress={() => setComplaintDecision(item.key, 'confirmed')}
+                            >
+                              <Ionicons name="checkmark" size={15} color={decision === 'confirmed' ? '#FFFFFF' : '#16A34A'} />
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={[styles.complaintDecisionBtn, decision === 'not_confirmed' && styles.complaintDecisionDenied]}
+                              activeOpacity={0.84}
+                              onPress={() => setComplaintDecision(item.key, 'not_confirmed')}
+                            >
+                              <Ionicons name="close" size={15} color={decision === 'not_confirmed' ? '#FFFFFF' : '#F04416'} />
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      );
+                    })}
+                  </View>
+                ) : (
+                  <TextInput
+                    style={styles.checklistTextInput}
+                    value={checklistDraft}
+                    onChangeText={setChecklistDraft}
+                    placeholder={activeChecklistItem === 'complaint' ? 'Enter confirmed customer complaint' : 'Add optional arrival notes'}
+                    placeholderTextColor="#8B9098"
+                    multiline
+                    textAlignVertical="top"
+                  />
+                )}
+                <TouchableOpacity style={[styles.checklistSaveBtn, !canSaveChecklistItem && styles.startInspectionBtnDisabled]} activeOpacity={canSaveChecklistItem ? 0.86 : 1} disabled={!canSaveChecklistItem} onPress={saveChecklistItem}>
+                  <Text style={[styles.checklistSaveText, !canSaveChecklistItem && styles.startInspectionTextDisabled]}>Save</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
+      </View>
+    );
+  }
+
+  if (routeOpen) {
+    return (
+      <View style={styles.requestDetailShell}>
+        <View style={styles.requestDetailHeader}>
+          <TouchableOpacity onPress={() => { setRouteOpen(false); onWorkflowChange?.({ stage: 'details' }); }} activeOpacity={0.8} style={styles.requestHeaderIconBtn}>
+            <Ionicons name="chevron-back" size={24} color="#17191D" />
+          </TouchableOpacity>
+          <View style={styles.jobPopupHeaderTextWrap}>
+            <Text style={styles.jobPopupHeaderTitle}>Job #{job.number}</Text>
+            <Text style={styles.jobPopupAcceptedText}>{acceptedLabel}</Text>
+          </View>
+          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={[styles.requestHeaderIconBtn, { alignItems: 'flex-end' }]}>
+            <Ionicons name="close" size={24} color="#17191D" />
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView style={[styles.container, styles.requestDetailScroll]} contentContainerStyle={styles.jobRouteContent} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
           <View style={styles.jobRouteMap}>
             <MapView
               style={styles.mapView}
@@ -1202,7 +2993,7 @@ function JobPopupScreen({ job, onBack }) {
         </ScrollView>
 
         <View style={styles.routeBottomPanel}>
-          <TouchableOpacity style={styles.arrivedRouteBtn} activeOpacity={0.86} onPress={() => setRouteOpen(false)}>
+          <TouchableOpacity style={styles.arrivedRouteBtn} activeOpacity={0.86} onPress={() => { setRouteOpen(false); setArrivedOpen(true); onWorkflowChange?.({ stage: 'arrived' }); }}>
             <Text style={styles.arrivedRouteText}>Arrived</Text>
           </TouchableOpacity>
         </View>
@@ -1248,7 +3039,7 @@ function JobPopupScreen({ job, onBack }) {
         <View style={styles.requestHeaderIconBtn} />
       </View>
 
-      <ScrollView style={[styles.container, styles.requestDetailScroll]} contentContainerStyle={styles.jobPopupContent} showsVerticalScrollIndicator={false}>
+      <ScrollView style={[styles.container, styles.requestDetailScroll]} contentContainerStyle={styles.jobPopupContent} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
         <View style={styles.jobCustomerCard}>
           <View style={styles.customerPopupAvatar}>
             <Text style={styles.customerPopupInitials}>{job.customer?.initials || 'CU'}</Text>
@@ -1331,7 +3122,7 @@ function JobPopupScreen({ job, onBack }) {
           ))}
         </View>
 
-        <TouchableOpacity style={styles.onTheWayBtn} activeOpacity={0.86} onPress={() => setRouteOpen(true)}>
+        <TouchableOpacity style={styles.onTheWayBtn} activeOpacity={0.86} onPress={() => { setRouteOpen(true); onWorkflowChange?.({ stage: 'route' }); }}>
           <Text style={styles.onTheWayText}>On the way</Text>
           <Ionicons name="chevron-forward" size={18} color="#FFFFFF" />
         </TouchableOpacity>
@@ -1373,7 +3164,331 @@ function JobPopupScreen({ job, onBack }) {
   );
 }
 
-function JobDetailScreen({ job, onBack }) {
+function DiagnosisOption({ label, selected, onPress }) {
+  return (
+    <TouchableOpacity style={[styles.diagnosisOption, selected && styles.diagnosisOptionSelected]} activeOpacity={0.84} onPress={onPress}>
+      <View style={[styles.diagnosisRadio, selected && styles.diagnosisRadioSelected]}>
+        {selected && <Ionicons name="checkmark" size={13} color="#FFFFFF" />}
+      </View>
+      <Text style={[styles.diagnosisOptionText, selected && styles.diagnosisOptionTextSelected]} numberOfLines={1}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
+function RecommendedService({ label }) {
+  return (
+    <View style={styles.recommendedRow}>
+      <View style={styles.recommendedLeft}>
+        <Ionicons name="checkmark" size={16} color="#16A34A" />
+        <Text style={styles.recommendedRowText}>{label}</Text>
+      </View>
+      <View style={styles.recommendedCheck}>
+        <Ionicons name="checkmark" size={13} color="#FFFFFF" />
+      </View>
+    </View>
+  );
+}
+
+function EstimateSection({ title, icon, color, onAdd, optional, children }) {
+  return (
+    <View style={[styles.estimateCard, optional && styles.estimateCardOptional]}>
+      <View style={styles.estimateSectionHeader}>
+        <View style={styles.estimateSectionTitleGroup}>
+          <View style={[styles.estimateSectionIcon, { backgroundColor: color + (optional ? '18' : '14') }, optional && styles.estimateSectionIconOptional]}>
+            <Ionicons name={icon} size={17} color={color} />
+          </View>
+          <Text style={styles.estimateSectionTitle}>{title}</Text>
+          {optional && <Text style={styles.estimateOptionalBadge}>Optional</Text>}
+        </View>
+        {!!onAdd && (
+          <TouchableOpacity style={styles.estimateSectionAddBtn} activeOpacity={0.84} onPress={onAdd}>
+            <Ionicons name="add" size={18} color="#16A34A" />
+          </TouchableOpacity>
+        )}
+      </View>
+      {children}
+    </View>
+  );
+}
+
+function EstimateLine({ label, hours, amount, strong, total, mutedLabel, onRemove, priceWarning }) {
+  return (
+    <View style={styles.estimateLine}>
+      <Text style={[styles.estimateLineLabel, strong && styles.estimateLineStrong, mutedLabel && styles.estimateLineMuted]} numberOfLines={1}>{label}</Text>
+      {!!priceWarning && <Ionicons name="alert-circle-outline" size={14} color="#F04416" />}
+      {!!hours && <Text style={styles.estimateLineHours}>{hours}</Text>}
+      <Text style={[styles.estimateLineAmount, strong && styles.estimateLineStrong, total && styles.estimateTotalAmount]}>{formatCurrency(amount)}</Text>
+      {!!onRemove && (
+        <TouchableOpacity style={styles.estimateRemoveBtn} activeOpacity={0.84} onPress={onRemove}>
+          <Ionicons name="close" size={14} color="#F04416" />
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+}
+
+function CustomerEstimatePreview({ job, estimate, onClose }) {
+  const serviceMeta = getServiceMeta(job);
+  const vehicle = getVehicleLabel(job);
+  const optionalAvailable = estimate.optionalSubtotal > 0;
+
+  return (
+    <View style={styles.customerEstimateOverlay}>
+      <TouchableOpacity style={styles.navChoiceBackdrop} activeOpacity={1} onPress={onClose} />
+      <View style={styles.customerEstimateCard}>
+        <View style={styles.customerEstimateHeader}>
+          <TouchableOpacity style={styles.noteCloseBtn} activeOpacity={0.8} onPress={onClose}>
+            <Ionicons name="chevron-back" size={22} color="#17191D" />
+          </TouchableOpacity>
+          <View style={styles.customerEstimateTitleWrap}>
+            <Text style={styles.customerEstimateTitle}>Estimate</Text>
+            <Text style={styles.customerEstimateSubtitle}>Job #{job.number}</Text>
+          </View>
+          <TouchableOpacity style={styles.noteCloseBtn} activeOpacity={0.8} onPress={onClose}>
+            <Ionicons name="close" size={20} color="#17191D" />
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView style={styles.customerEstimateScroll} contentContainerStyle={styles.customerEstimateContent} showsVerticalScrollIndicator={false}>
+          <View style={styles.customerEstimateHero}>
+            <View style={styles.customerEstimateServiceIcon}>
+              <Ionicons name={serviceMeta.icon} size={24} color="#F04416" />
+            </View>
+            <View style={styles.customerEstimateHeroInfo}>
+              <Text style={styles.customerEstimateService} numberOfLines={1}>{serviceMeta.title}</Text>
+              <Text style={styles.customerEstimateVehicle} numberOfLines={2}>{vehicle}</Text>
+              <Text style={styles.customerEstimateLocation} numberOfLines={1}>{job.pickup?.address || 'Service location'}</Text>
+            </View>
+          </View>
+
+          <View style={styles.customerEstimateNotice}>
+            <Ionicons name="shield-checkmark-outline" size={16} color="#16A34A" />
+            <Text style={styles.customerEstimateNoticeText}>Required work is needed to complete this service. Recommended repairs are optional and need separate approval.</Text>
+          </View>
+
+          <CustomerPreviewSection title="Required Labor">
+            {estimate.labor.map((item, index) => <CustomerPreviewLine key={`required-labor-${item.id}-${index}`} {...item} />)}
+          </CustomerPreviewSection>
+
+          <CustomerPreviewSection title="Required Parts">
+            {estimate.parts.map((item, index) => <CustomerPreviewLine key={`required-part-${item.id}-${index}`} {...item} />)}
+          </CustomerPreviewSection>
+
+          <CustomerPreviewSection title="Fees">
+            {estimate.fees.map((item, index) => <CustomerPreviewLine key={`fee-${item.label}-${index}`} {...item} />)}
+          </CustomerPreviewSection>
+
+          {optionalAvailable && (
+            <>
+              {estimate.optionalLabor.length > 0 && (
+                <CustomerPreviewSection title="Recommended Labor" optional>
+                  {estimate.optionalLabor.map((item, index) => <CustomerPreviewLine key={`optional-labor-${item.id}-${index}`} {...item} />)}
+                </CustomerPreviewSection>
+              )}
+              {estimate.optionalParts.length > 0 && (
+                <CustomerPreviewSection title="Recommended Parts" optional>
+                  {estimate.optionalParts.map((item, index) => <CustomerPreviewLine key={`optional-part-${item.id}-${index}`} {...item} />)}
+                </CustomerPreviewSection>
+              )}
+            </>
+          )}
+
+          <View style={styles.customerEstimateTotals}>
+            <CustomerPreviewLine label="Required subtotal" amount={estimate.subtotal} strong />
+            <CustomerPreviewLine label="Tax" amount={estimate.tax} />
+            <CustomerPreviewLine label="Required total" amount={estimate.total} total />
+            {optionalAvailable && (
+              <>
+                <View style={styles.customerEstimateDivider} />
+                <CustomerPreviewLine label="Optional repairs" amount={estimate.optionalSubtotal} strong />
+                <CustomerPreviewLine label="Optional tax" amount={estimate.optionalTax} />
+                <CustomerPreviewLine label="Total with recommended repairs" amount={estimate.totalIfApproved} total />
+              </>
+            )}
+          </View>
+
+          <View style={styles.customerPreviewOnlyNote}>
+            <Ionicons name="eye-outline" size={15} color="#8B9098" />
+            <Text style={styles.customerPreviewOnlyText}>Preview only. Customer approval happens in the Auterio app.</Text>
+          </View>
+        </ScrollView>
+      </View>
+    </View>
+  );
+}
+
+function CustomerPreviewSection({ title, optional, children }) {
+  return (
+    <View style={[styles.customerPreviewSection, optional && styles.customerPreviewSectionOptional]}>
+      <View style={styles.customerPreviewSectionHeader}>
+        <Text style={styles.customerPreviewSectionTitle}>{title}</Text>
+        {optional && <Text style={styles.customerPreviewOptionalPill}>Optional</Text>}
+      </View>
+      {children}
+    </View>
+  );
+}
+
+function CustomerPreviewLine({ label, hours, amount, strong, total }) {
+  return (
+    <View style={styles.customerPreviewLine}>
+      <View style={styles.customerPreviewLineInfo}>
+        <Text style={[styles.customerPreviewLineLabel, strong && styles.customerPreviewLineStrong]} numberOfLines={1}>{label}</Text>
+        {!!hours && <Text style={styles.customerPreviewLineMeta}>{hours}</Text>}
+      </View>
+      <Text style={[styles.customerPreviewLineAmount, strong && styles.customerPreviewLineStrong, total && styles.customerPreviewTotalAmount]}>{formatCurrency(amount)}</Text>
+    </View>
+  );
+}
+
+function CompletionCheckRow({ done, title, detail }) {
+  return (
+    <View style={styles.completionCheckRow}>
+      <View style={[styles.completionCheckIcon, done && styles.completionCheckIconDone]}>
+        <Ionicons name={done ? 'checkmark' : 'alert'} size={13} color={done ? '#FFFFFF' : '#F04416'} />
+      </View>
+      <View style={styles.completionCheckInfo}>
+        <Text style={styles.completionCheckTitle}>{title}</Text>
+        <Text style={styles.completionCheckDetail}>{detail}</Text>
+      </View>
+    </View>
+  );
+}
+
+function getRecommendedServicesFromDiagnosis(answers, batteryVoltage) {
+  const recommendations = [];
+  const voltage = Number.parseFloat(String(batteryVoltage || '').replace(',', '.'));
+  if (answers.loadTest === 'weak' || answers.loadTest === 'bad' || (Number.isFinite(voltage) && voltage < 12.2)) {
+    recommendations.push('Battery Replacement');
+  }
+  if (answers.alternator === 'failed') {
+    recommendations.push('Alternator Replacement');
+  }
+  if (answers.jumpStart === 'not_started') {
+    recommendations.push('Advanced Electrical Diagnosis');
+  }
+  return recommendations.length ? recommendations : ['Electrical System Check'];
+}
+
+function getDemoEstimate(answers, batteryVoltage, extraItems = [], removedItems = []) {
+  const labor = [
+    { id: 'base-labor-battery-replacement', source: 'base', scope: 'required', label: 'Battery Replacement', hours: '1.0 hr', amount: 120 },
+  ];
+  const parts = [
+    { id: 'base-part-battery-group-35', source: 'base', scope: 'required', label: 'Battery Group 35', amount: 169 },
+    { id: 'base-part-shop-supplies', source: 'base', scope: 'required', label: 'Shop Supplies', amount: 12 },
+  ];
+  const optionalLabor = [];
+  const optionalParts = [];
+
+  if (answers.alternator === 'failed') {
+    labor.push({ id: 'ai-labor-alternator-replacement', source: 'ai', scope: 'required', label: 'Alternator Replacement', hours: '1.2 hr', amount: 144 });
+    parts.splice(1, 0, { id: 'ai-part-alternator', source: 'ai', scope: 'required', label: 'Alternator', amount: 189 });
+  }
+  if (answers.jumpStart === 'not_started') {
+    labor.push({ id: 'ai-labor-electrical-diagnosis', source: 'ai', scope: 'required', label: 'Electrical Diagnosis', hours: '0.8 hr', amount: 96 });
+  }
+  const voltage = Number.parseFloat(String(batteryVoltage || '').replace(',', '.'));
+  if (Number.isFinite(voltage) && voltage >= 12.2 && answers.loadTest === 'good') {
+    parts.splice(0, 1);
+  }
+
+  extraItems.forEach(item => {
+    const targetLabor = item.scope === 'optional' ? optionalLabor : labor;
+    const targetParts = item.scope === 'optional' ? optionalParts : parts;
+    if (item.type === 'parts') {
+      targetParts.push({ id: item.id, source: 'custom', scope: item.scope || 'required', label: item.label, amount: item.amount, priceWarning: item.priceWarning });
+    } else {
+      targetLabor.push({ id: item.id, source: 'custom', scope: item.scope || 'required', label: item.label, hours: item.hours || '1.0 hr', amount: item.amount, priceWarning: item.priceWarning });
+    }
+  });
+
+  const visibleLabor = labor.filter(item => !removedItems.includes(item.id));
+  const visibleParts = parts.filter(item => !removedItems.includes(item.id));
+  const visibleOptionalLabor = optionalLabor.filter(item => !removedItems.includes(item.id));
+  const visibleOptionalParts = optionalParts.filter(item => !removedItems.includes(item.id));
+  const fees = [{ label: 'Diagnostic Fee', amount: 49 }];
+  const laborSubtotal = sumAmounts(visibleLabor);
+  const partsSubtotal = sumAmounts(visibleParts);
+  const optionalLaborSubtotal = sumAmounts(visibleOptionalLabor);
+  const optionalPartsSubtotal = sumAmounts(visibleOptionalParts);
+  const feesSubtotal = sumAmounts(fees);
+  const subtotal = laborSubtotal + partsSubtotal + feesSubtotal;
+  const optionalSubtotal = optionalLaborSubtotal + optionalPartsSubtotal;
+  const tax = Math.round(subtotal * 0.0675 * 100) / 100;
+  const optionalTax = Math.round(optionalSubtotal * 0.0675 * 100) / 100;
+  const total = Math.round((subtotal + tax) * 100) / 100;
+  const totalIfApproved = Math.round((total + optionalSubtotal + optionalTax) * 100) / 100;
+  return {
+    labor: visibleLabor,
+    parts: visibleParts,
+    optionalLabor: visibleOptionalLabor,
+    optionalParts: visibleOptionalParts,
+    fees,
+    laborSubtotal,
+    partsSubtotal,
+    optionalLaborSubtotal,
+    optionalPartsSubtotal,
+    subtotal,
+    optionalSubtotal,
+    tax,
+    optionalTax,
+    total,
+    totalIfApproved,
+  };
+}
+
+function getEstimateCatalog(type) {
+  const labor = [
+    { type: 'labor', label: 'Battery Replacement', hours: '1.0 hr', amount: 120, category: 'Electrical' },
+    { type: 'labor', label: 'Alternator Replacement', hours: '1.2 hr', amount: 144, category: 'Electrical' },
+    { type: 'labor', label: 'Starter Replacement', hours: '1.4 hr', amount: 168, category: 'Electrical' },
+    { type: 'labor', label: 'Electrical Diagnosis', hours: '0.8 hr', amount: 96, category: 'Diagnostics' },
+    { type: 'labor', label: 'Tire Change Labor', hours: '0.6 hr', amount: 72, category: 'Roadside' },
+    { type: 'labor', label: 'Brake Inspection', hours: '0.7 hr', amount: 84, category: 'Inspection' },
+  ];
+  const parts = [
+    { type: 'parts', label: 'Battery Group 35', amount: 169, category: 'Battery' },
+    { type: 'parts', label: 'Alternator', amount: 189, category: 'Charging System' },
+    { type: 'parts', label: 'Starter Motor', amount: 215, category: 'Starting System' },
+    { type: 'parts', label: 'Battery Terminal Kit', amount: 24, category: 'Electrical' },
+    { type: 'parts', label: 'Serpentine Belt', amount: 39, category: 'Engine' },
+    { type: 'parts', label: 'Shop Supplies', amount: 12, category: 'Supplies' },
+  ];
+  return type === 'parts' ? parts : labor;
+}
+
+function getEstimatePriceCheck(type, name, amount) {
+  if (!Number.isFinite(amount) || amount <= 0) return { warning: false };
+  const normalizedName = String(name || '').toLowerCase();
+  const ranges = [
+    { type: 'labor', match: ['battery'], min: 90, max: 150 },
+    { type: 'labor', match: ['alternator'], min: 120, max: 190 },
+    { type: 'labor', match: ['starter'], min: 135, max: 210 },
+    { type: 'labor', match: ['diagnosis', 'diagnostic'], min: 70, max: 130 },
+    { type: 'labor', match: ['tire'], min: 55, max: 95 },
+    { type: 'parts', match: ['battery'], min: 120, max: 210 },
+    { type: 'parts', match: ['alternator'], min: 150, max: 260 },
+    { type: 'parts', match: ['starter'], min: 160, max: 280 },
+    { type: 'parts', match: ['terminal'], min: 15, max: 45 },
+    { type: 'parts', match: ['belt'], min: 25, max: 70 },
+  ];
+  const fallback = type === 'parts'
+    ? { min: 10, max: 250 }
+    : { min: 60, max: 180 };
+  const matched = ranges.find(range => range.type === type && range.match.some(match => normalizedName.includes(match))) || fallback;
+  return { ...matched, warning: amount > matched.max };
+}
+
+function sumAmounts(items) {
+  return items.reduce((sum, item) => sum + Number(item.amount || 0), 0);
+}
+
+function formatCurrency(value) {
+  return `$${Number(value || 0).toFixed(2)}`;
+}
+
+function JobDetailScreen({ job, onBack, refreshControl }) {
   const [currentStepIndex, setCurrentStepIndex] = useState(
     Math.max(0, JOB_STEPS.findIndex(s => s.key === 'on_the_way'))
   );
@@ -1434,7 +3549,7 @@ function JobDetailScreen({ job, onBack }) {
         </TouchableOpacity>
       </View>
 
-      <ScrollView style={styles.container} contentContainerStyle={styles.jobContent} showsVerticalScrollIndicator={false}>
+      <ScrollView style={styles.container} contentContainerStyle={styles.jobContent} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
         <View style={styles.jobStatusBar}>
           <View style={styles.jobStatusLeft}>
             <View style={styles.jobStatusDot} />
@@ -1596,15 +3711,15 @@ function Metric({ title, value, meta, icon, color, compact }) {
   );
 }
 
-function Tab({ icon, label, active, badge, onPress, onPressIn }) {
+function Tab({ icon, label, active, badge }) {
   return (
-    <TouchableOpacity style={styles.tabItem} onPress={onPress} onPressIn={onPressIn} activeOpacity={0.72}>
+    <View style={styles.tabItem} pointerEvents="none">
       <View>
         <Ionicons name={icon} size={24} color={active ? '#F04416' : '#17191D'} />
         {!!badge && <View style={styles.tabBadge}><Text style={styles.tabBadgeText}>{badge}</Text></View>}
       </View>
       <Text style={[styles.tabLabel, active && styles.tabLabelActive]}>{label}</Text>
-    </TouchableOpacity>
+    </View>
   );
 }
 
@@ -1755,6 +3870,56 @@ function getVehicleVin(job) {
   return job.vehicle?.vin || job.vin || DEMO_VIN_BY_JOB_ID[job.id] || 'VIN pending';
 }
 
+function normalizeComplaintItem(item, index) {
+  if (!item) return null;
+  if (typeof item === 'string') {
+    const trimmed = item.trim();
+    return trimmed ? { key: `complaint-${index}`, label: trimmed, value: '' } : null;
+  }
+  const label = (
+    item.label ||
+    item.title ||
+    item.name ||
+    item.question ||
+    item.symptom ||
+    item.problem ||
+    item.issue ||
+    item.text ||
+    `Complaint ${index + 1}`
+  );
+  const value = item.value || item.answer || item.description || item.detail || item.note || '';
+  return { key: item.id || item.key || `complaint-${index}`, label: String(label), value: String(value || '') };
+}
+
+function getCustomerComplaintItems(job, fallbackNote) {
+  const context = job.orderContext || {};
+  const rawItems =
+    context.customerComplaint ||
+    context.customerComplaints ||
+    context.complaintItems ||
+    context.symptoms ||
+    context.selectedSymptoms ||
+    context.answers ||
+    context.issueDetails ||
+    job.customerComplaint ||
+    job.customerComplaints ||
+    job.symptoms ||
+    job.issueDetails;
+
+  if (Array.isArray(rawItems)) {
+    return rawItems.map(normalizeComplaintItem).filter(Boolean);
+  }
+
+  if (rawItems && typeof rawItems === 'object') {
+    return Object.entries(rawItems)
+      .map(([key, value], index) => normalizeComplaintItem({ key, label: key, value }, index))
+      .filter(Boolean);
+  }
+
+  const fallbackItem = normalizeComplaintItem(fallbackNote, 0);
+  return fallbackItem ? [fallbackItem] : [];
+}
+
 function getAcceptedAtLabel(job) {
   const rawValue = job.acceptedAt || job.createdAt || job.date;
   if (!rawValue) return 'Accepted today, 10:24 AM';
@@ -1808,7 +3973,7 @@ const styles = StyleSheet.create({
   onlinePill: { height: 34, borderRadius: 17, backgroundColor: '#F5F6F7', borderWidth: 1, borderColor: '#E6E8EB', flexDirection: 'row', alignItems: 'center', paddingLeft: 11, paddingRight: 0 },
   onlinePillActive: { backgroundColor: '#F5F6F7', borderColor: '#DEE0E3' },
   onlineText: { color: '#8B9098', fontSize: 11, fontWeight: '700' },
-  onlineTextActive: { color: '#17191D' },
+  onlineTextActive: { color: '#16A34A' },
   onlineSwitch: { transform: [{ scaleX: 0.62 }, { scaleY: 0.62 }], marginLeft: -5 },
   bellBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#F5F6F7', borderWidth: 1, borderColor: '#E6E8EB', alignItems: 'center', justifyContent: 'center' },
   badge: { position: 'absolute', top: -5, right: -4, minWidth: 20, height: 20, borderRadius: 10, backgroundColor: '#EF4444', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5 },
@@ -1875,26 +4040,39 @@ const styles = StyleSheet.create({
   requestTabActive: { backgroundColor: '#17191D' },
   requestTabText: { color: '#5E646D', fontSize: 12, fontWeight: '600' },
   requestTabTextActive: { color: '#FFFFFF' },
+  swipeTabsIndicator: { position: 'absolute', left: 3, top: 3, bottom: 3, borderRadius: 18, backgroundColor: '#17191D' },
+  swipeTabLabelWrap: { alignItems: 'center', justifyContent: 'center' },
+  swipeTabLabelSizer: { opacity: 0 },
+  swipeTabLabelLayer: { position: 'absolute', left: 0, right: 0, textAlign: 'center' },
+  swipeTabMaskedText: { color: '#FFFFFF' },
+  swipePager: { overflow: 'hidden' },
+  swipePagerTrack: { flexDirection: 'row', alignItems: 'flex-start' },
+  swipePagerPage: { flexShrink: 0 },
+  requestsSwipePager: { minHeight: 520 },
+  requestsSwipePage: { minHeight: 520 },
   requestList: { gap: 11 },
-  requestCard: { borderRadius: 8, backgroundColor: '#F3F4F5', borderWidth: 1.6, borderColor: 'rgba(240,68,22,0.42)', padding: 12, shadowColor: '#F04416', shadowOpacity: 0.08, shadowRadius: 14, shadowOffset: { width: 0, height: 7 }, elevation: 4 },
+  requestCard: { minHeight: 84, borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', flexDirection: 'row', alignItems: 'center', gap: 9, padding: 10 },
   requestCardHit: { minHeight: 76, flexDirection: 'row', alignItems: 'center', gap: 9, marginBottom: 10 },
-  requestListIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
+  requestListIcon: { width: 42, height: 42, borderRadius: 21, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
   requestListInfo: { flex: 1, minWidth: 0 },
-  requestListTitle: { color: '#17191D', fontSize: 16, lineHeight: 20, fontWeight: '700', marginBottom: 1 },
-  requestListVehicle: { color: '#5E646D', fontSize: 11, lineHeight: 14, fontWeight: '600', marginBottom: 3 },
+  requestListTime: { color: '#F04416', fontSize: 10, lineHeight: 12, fontWeight: '700', marginBottom: 1 },
+  requestListTitle: { color: '#17191D', fontSize: 14, lineHeight: 17, fontWeight: '700' },
+  requestListVehicle: { color: '#5E646D', fontSize: 11, lineHeight: 14, fontWeight: '500' },
+  requestListAddress: { color: '#5E646D', fontSize: 10, lineHeight: 13, fontWeight: '500' },
   requestListMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
   requestListMeta: { color: '#5E646D', fontSize: 10, lineHeight: 14, fontWeight: '600', flex: 1 },
-  requestListAside: { width: 62, alignItems: 'flex-end' },
-  requestListPrice: { color: '#F04416', fontSize: 22, lineHeight: 26, fontWeight: '800', marginBottom: 6 },
+  requestListAside: { width: 98, alignItems: 'flex-end' },
+  requestListPrice: { color: '#F04416', fontSize: 17, lineHeight: 21, fontWeight: '800', marginBottom: 4 },
   requestListEtaPill: { minWidth: 62, height: 24, borderRadius: 12, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E1E4E8', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6 },
-  requestListEtaText: { color: '#5E646D', fontSize: 10, lineHeight: 13, fontWeight: '700' },
+  requestListEtaText: { color: '#5E646D', fontSize: 9, lineHeight: 12, fontWeight: '500', textAlign: 'right' },
   requestEmptyState: { minHeight: 260, alignItems: 'center', justifyContent: 'center', gap: 8 },
   requestEmptyText: { color: '#7A8BA8', fontSize: 13, fontWeight: '700' },
   requestModalOverlay: { flex: 1, justifyContent: 'flex-end' },
   requestModalBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(23,25,29,0.42)' },
   requestModalSheet: { height: '88%', borderTopLeftRadius: 18, borderTopRightRadius: 18, overflow: 'hidden', backgroundColor: '#FFFFFF', shadowColor: '#000', shadowOpacity: 0.22, shadowRadius: 20, shadowOffset: { width: 0, height: -8 }, elevation: 18 },
-  tabBar: { position: 'absolute', left: 22, right: 22, bottom: 14, height: 68, borderRadius: 34, backgroundColor: '#F5F6F7', borderWidth: 1, borderColor: 'rgba(255,255,255,0.86)', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: TAB_BAR_PADDING, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 12 },
-  tabIndicator: { position: 'absolute', left: TAB_BAR_PADDING, top: 4, bottom: 4, borderRadius: 30, backgroundColor: '#DEE0E3' },
+  tabBarBackdrop: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 82, zIndex: 8 },
+  tabBar: { position: 'absolute', left: 22, right: 22, bottom: 14, height: 68, borderRadius: 34, backgroundColor: '#ECEEF0', borderWidth: 1.2, borderColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: TAB_BAR_PADDING, shadowColor: '#000', shadowOpacity: 0.22, shadowRadius: 18, shadowOffset: { width: 0, height: 9 }, elevation: 16, zIndex: 9 },
+  tabIndicator: { position: 'absolute', left: TAB_BAR_PADDING, top: 4, bottom: 4, borderRadius: 30, backgroundColor: '#DADDE1' },
   tabItem: { flex: 1, height: 60, borderRadius: 30, alignItems: 'center', justifyContent: 'center', gap: 3, zIndex: 1 },
   tabLabel: { color: '#17191D', fontSize: 12, lineHeight: 15, fontWeight: '500' },
   tabLabelActive: { color: '#F04416' },
@@ -1933,6 +4111,95 @@ const styles = StyleSheet.create({
   jobsSectionTitle: { color: '#17191D', fontSize: 15, lineHeight: 19, fontWeight: '700' },
   jobsSortText: { color: '#5E646D', fontSize: 10, fontWeight: '600' },
   activeJobsList: { gap: 8 },
+  earningsContent: { paddingHorizontal: 15, paddingTop: 14, paddingBottom: 118 },
+  earningsHeader: { minHeight: 52, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 10 },
+  earningsTitle: { color: '#17191D', fontSize: 24, lineHeight: 29, fontWeight: '900' },
+  earningsChartCard: { borderRadius: 10, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', padding: 12, marginBottom: 10, position: 'relative' },
+  earningsChartTop: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 8 },
+  earningsChartLabel: { color: '#5E646D', fontSize: 13, lineHeight: 17, fontWeight: '900' },
+  earningsChartValue: { color: '#17191D', fontSize: 26, lineHeight: 31, fontWeight: '900', marginTop: 1 },
+  earningsTrendRow: { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 2 },
+  earningsTrendText: { color: '#16A34A', fontSize: 12, lineHeight: 16, fontWeight: '900' },
+  earningsPeriodBtn: { height: 36, borderRadius: 12, borderWidth: 1, borderColor: '#E1E4E8', backgroundColor: '#F3F4F5', flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12 },
+  earningsPeriodText: { color: '#17191D', fontSize: 12, lineHeight: 16, fontWeight: '900' },
+  earningsChartArea: { height: 118, justifyContent: 'space-between', marginTop: 3, paddingLeft: 1 },
+  earningsChartGridRow: { height: 23, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  earningsChartAxis: { width: 34, color: '#5E646D', fontSize: 10, lineHeight: 13, fontWeight: '900' },
+  earningsChartGridLine: { flex: 1, height: 1, backgroundColor: '#ECEEF0' },
+  earningsBarsLayer: { position: 'absolute', left: 46, right: 0, bottom: 8, height: 88, flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', paddingHorizontal: 7 },
+  earningsBarColumn: { width: 22, alignItems: 'center', justifyContent: 'flex-end' },
+  earningsBarFill: { width: 5, borderRadius: 4, backgroundColor: '#F04416' },
+  earningsChartDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#F04416', marginTop: -4 },
+  earningsDaysRow: { marginLeft: 46, flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 1, marginTop: 4 },
+  earningsDayText: { color: '#5E646D', fontSize: 10, lineHeight: 13, fontWeight: '900' },
+  earningsDayActive: { color: '#F04416' },
+  earningsPeakPill: { position: 'absolute', right: 14, top: 67, borderRadius: 5, backgroundColor: '#17191D', paddingHorizontal: 7, paddingVertical: 4 },
+  earningsPeakText: { color: '#FFFFFF', fontSize: 9, lineHeight: 12, fontWeight: '900' },
+  earningsMetricGrid: { flexDirection: 'row', gap: 10, marginBottom: 12 },
+  earningsMetricCard: { flex: 1, minHeight: 70, borderRadius: 10, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', gap: 8, padding: 9 },
+  earningsMetricIcon: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  earningsMetricText: { flex: 1, minWidth: 0 },
+  earningsMetricTitle: { color: '#5E646D', fontSize: 10, lineHeight: 13, fontWeight: '900' },
+  earningsMetricValue: { color: '#17191D', fontSize: 18, lineHeight: 23, fontWeight: '900', marginTop: 1 },
+  earningsMetricMeta: { color: '#5E646D', fontSize: 10, lineHeight: 13, fontWeight: '800', marginTop: 1 },
+  earningsKpiCard: { minHeight: 62, borderRadius: 10, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 9, marginBottom: 10 },
+  earningsKpiItem: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  earningsKpiDivider: { borderLeftWidth: 1, borderLeftColor: '#E1E4E8', paddingLeft: 13 },
+  earningsKpiIcon: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  earningsKpiText: { flex: 1, minWidth: 0 },
+  earningsKpiValue: { color: '#17191D', fontSize: 16, lineHeight: 20, fontWeight: '900' },
+  earningsKpiLabel: { color: '#5E646D', fontSize: 9, lineHeight: 12, fontWeight: '800', marginTop: 1 },
+  balanceCard: { minHeight: 88, borderRadius: 10, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: 11, marginBottom: 10 },
+  balanceTextBlock: { flex: 1, minWidth: 0 },
+  balanceTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  balanceLabel: { color: '#17191D', fontSize: 13, lineHeight: 17, fontWeight: '900' },
+  balanceAmount: { color: '#F04416', fontSize: 20, lineHeight: 25, fontWeight: '900', marginTop: 4 },
+  balanceMeta: { color: '#5E646D', fontSize: 10, lineHeight: 13, fontWeight: '700', marginTop: 2 },
+  balanceActionBlock: { width: 124, alignItems: 'stretch', gap: 7, flexShrink: 0 },
+  withdrawBtn: { height: 38, borderRadius: 8, backgroundColor: '#17191D', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  withdrawText: { color: '#FFFFFF', fontSize: 12, lineHeight: 16, fontWeight: '900' },
+  nextPayoutRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
+  nextPayoutText: { color: '#5E646D', fontSize: 12, lineHeight: 16, fontWeight: '900' },
+  earningsListCard: { borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', paddingHorizontal: 12, paddingTop: 12, marginBottom: 12 },
+  earningsListHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 5 },
+  earningsListTitle: { color: '#17191D', fontSize: 15, lineHeight: 19, fontWeight: '900' },
+  earningsViewAll: { color: '#F04416', fontSize: 11, lineHeight: 15, fontWeight: '900' },
+  earningsTransactionRow: { minHeight: 58, borderTopWidth: 1, borderTopColor: '#ECEEF0', flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 9 },
+  earningsTransactionIcon: { width: 32, height: 32, borderRadius: 16, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  earningsTransactionInfo: { flex: 1, minWidth: 0 },
+  earningsTransactionTitle: { color: '#17191D', fontSize: 12, lineHeight: 16, fontWeight: '800' },
+  earningsTransactionMeta: { color: '#5E646D', fontSize: 10, lineHeight: 13, fontWeight: '700', marginTop: 2 },
+  earningsTransactionAmount: { color: '#16A34A', fontSize: 12, lineHeight: 16, fontWeight: '900', flexShrink: 0 },
+  profileContent: { paddingHorizontal: 15, paddingTop: 14, paddingBottom: 118 },
+  profileHeader: { minHeight: 52, justifyContent: 'center', marginBottom: 10 },
+  profileTitle: { color: '#17191D', fontSize: 24, lineHeight: 29, fontWeight: '900' },
+  profileHeroCard: { borderRadius: 10, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, marginBottom: 10 },
+  profileAvatar: { width: 58, height: 58, borderRadius: 29, backgroundColor: '#17191D', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  profileAvatarText: { color: '#FFFFFF', fontSize: 18, lineHeight: 22, fontWeight: '900' },
+  profileHeroInfo: { flex: 1, minWidth: 0 },
+  profileName: { color: '#17191D', fontSize: 18, lineHeight: 23, fontWeight: '900' },
+  profileSub: { color: '#5E646D', fontSize: 12, lineHeight: 16, fontWeight: '700', marginTop: 2 },
+  profileRatingRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 7 },
+  profileRatingText: { color: '#5E646D', fontSize: 11, lineHeight: 14, fontWeight: '800' },
+  profileDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: '#C8CDD4' },
+  profileStatusCard: { minHeight: 70, borderRadius: 10, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: 12, marginBottom: 10 },
+  profileStatusTitle: { color: '#17191D', fontSize: 14, lineHeight: 18, fontWeight: '900' },
+  profileStatusMeta: { color: '#5E646D', fontSize: 11, lineHeight: 15, fontWeight: '700', marginTop: 2 },
+  profileStatusToggle: { flexDirection: 'row', alignItems: 'center', gap: 5, flexShrink: 0 },
+  profileStatusText: { color: '#F04416', fontSize: 11, lineHeight: 14, fontWeight: '900' },
+  profileStatusTextOnline: { color: '#128A3A' },
+  profileStatsRow: { flexDirection: 'row', gap: 8, marginBottom: 10 },
+  profileStatCard: { flex: 1, height: 70, borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
+  profileStatValue: { color: '#17191D', fontSize: 20, lineHeight: 24, fontWeight: '900' },
+  profileStatLabel: { color: '#5E646D', fontSize: 10, lineHeight: 13, fontWeight: '800', marginTop: 3 },
+  profileSection: { borderRadius: 10, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', paddingHorizontal: 12, paddingTop: 12, marginBottom: 10 },
+  profileSectionTitle: { color: '#17191D', fontSize: 15, lineHeight: 19, fontWeight: '900', marginBottom: 5 },
+  profileRow: { minHeight: 60, borderTopWidth: 1, borderTopColor: '#ECEEF0', flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10 },
+  profileRowIcon: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#F3F4F5', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  profileRowIconDone: { backgroundColor: 'rgba(22,163,74,0.10)' },
+  profileRowInfo: { flex: 1, minWidth: 0 },
+  profileRowTitle: { color: '#17191D', fontSize: 13, lineHeight: 17, fontWeight: '900' },
+  profileRowDetail: { color: '#5E646D', fontSize: 11, lineHeight: 15, fontWeight: '700', marginTop: 2 },
   activeJobCard: { borderRadius: 8, borderWidth: 1, backgroundColor: '#F3F4F5', padding: 10, position: 'relative' },
   activeJobTop: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 8 },
   activeJobIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
@@ -1956,6 +4223,24 @@ const styles = StyleSheet.create({
   activeJobActions: { flexDirection: 'row', gap: 7 },
   activeJobActionBtn: { flex: 1, height: 30, borderRadius: 8, borderWidth: 1, backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5 },
   activeJobActionText: { fontSize: 11, fontWeight: '700' },
+  activeListCard: { minHeight: 98, borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', flexDirection: 'row', alignItems: 'center', gap: 7, paddingVertical: 9, paddingLeft: 11, paddingRight: 9, overflow: 'hidden', position: 'relative' },
+  neutralListCard: { paddingLeft: 10 },
+  activeListAccent: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 5 },
+  activeListIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E6E8EB', alignItems: 'center', justifyContent: 'center' },
+  activeListInfo: { flex: 1, minWidth: 0 },
+  activeListStatus: { fontSize: 10, lineHeight: 13, fontWeight: '800', marginBottom: 2 },
+  activeListTitle: { color: '#17191D', fontSize: 16, lineHeight: 19, fontWeight: '800' },
+  activeListVehicle: { color: '#5E646D', fontSize: 11, lineHeight: 15, fontWeight: '600', marginTop: 1 },
+  activeListAddress: { color: '#5E646D', fontSize: 11, lineHeight: 15, fontWeight: '500', marginTop: 1 },
+  activeListAside: { width: 98, maxWidth: 98, alignItems: 'flex-end', flexShrink: 0, overflow: 'hidden' },
+  activeListPrice: { fontSize: 20, lineHeight: 24, fontWeight: '800', marginBottom: 6, maxWidth: 98, textAlign: 'right' },
+  activeListEtaRow: { maxWidth: 98, alignSelf: 'flex-end', flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 3, marginBottom: 4, overflow: 'hidden' },
+  activeListEtaIcon: { flexShrink: 0 },
+  activeListEta: { fontSize: 9, lineHeight: 12, fontWeight: '700', textAlign: 'right', flexShrink: 1, minWidth: 0, maxWidth: 82 },
+  activeListDistance: { color: '#5E646D', fontSize: 11, lineHeight: 14, fontWeight: '600', textAlign: 'right', maxWidth: 98 },
+  neutralListStatus: { color: '#F04416', fontSize: 10, lineHeight: 13, fontWeight: '800', marginBottom: 2 },
+  neutralListPrice: { color: '#F04416', fontSize: 20, lineHeight: 24, fontWeight: '800', marginBottom: 6, maxWidth: 98, textAlign: 'right' },
+  neutralListEta: { color: '#F04416', fontSize: 9, lineHeight: 12, fontWeight: '700', textAlign: 'right', flexShrink: 1, minWidth: 0, maxWidth: 82 },
   scheduledJobCard: { minHeight: 84, borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', flexDirection: 'row', alignItems: 'center', gap: 9, padding: 10 },
   scheduledIcon: { width: 42, height: 42, borderRadius: 21, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
   scheduledInfo: { flex: 1, minWidth: 0 },
@@ -2011,9 +4296,9 @@ const styles = StyleSheet.create({
   verifiedTrusted: { color: '#F04416', fontSize: 10, lineHeight: 14, fontWeight: '700' },
   lockedContact: { width: 126, minHeight: 58, borderRadius: 8, borderWidth: 1, borderColor: '#E1E4E8', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', gap: 3, paddingHorizontal: 9, paddingVertical: 7 },
   lockedContactText: { color: '#5E646D', fontSize: 10, lineHeight: 13, fontWeight: '600', flex: 1, textAlign: 'center' },
-  jobCustomerCard: { height: 94, borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', padding: 12, marginBottom: 10, flexDirection: 'row', alignItems: 'center', gap: 10 },
-  customerPopupAvatar: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E6E8EB', alignItems: 'center', justifyContent: 'center' },
-  customerPopupInitials: { color: '#17191D', fontSize: 14, fontWeight: '800' },
+  jobCustomerCard: { height: 84, borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', padding: 10, marginBottom: 9, flexDirection: 'row', alignItems: 'center', gap: 9 },
+  customerPopupAvatar: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E6E8EB', alignItems: 'center', justifyContent: 'center' },
+  customerPopupInitials: { color: '#17191D', fontSize: 13, fontWeight: '800' },
   customerPopupInfo: { flex: 1, minWidth: 0 },
   customerNameRatingRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 2 },
   customerPopupName: { color: '#17191D', fontSize: 15, lineHeight: 19, fontWeight: '700', flexShrink: 1 },
@@ -2023,10 +4308,10 @@ const styles = StyleSheet.create({
   customerTrustedText: { color: '#F04416', fontSize: 10, lineHeight: 14, fontWeight: '700' },
   customerActionsDivider: { width: 1, height: 48, backgroundColor: '#E1E4E8', marginHorizontal: 1 },
   customerPopupActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  customerPopupActionBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E1E4E8', alignItems: 'center', justifyContent: 'center' },
-  vehicleInfoCard: { height: 94, borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', padding: 12, marginBottom: 10, flexDirection: 'row', alignItems: 'center', gap: 9 },
-  requestVehicleIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E6E8EB', alignItems: 'center', justifyContent: 'center' },
-  vehicleMetaBox: { width: 104, minHeight: 48, borderLeftWidth: 1, borderLeftColor: '#E1E4E8', paddingLeft: 9, justifyContent: 'center' },
+  customerPopupActionBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E1E4E8', alignItems: 'center', justifyContent: 'center' },
+  vehicleInfoCard: { height: 84, borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', padding: 10, marginBottom: 9, flexDirection: 'row', alignItems: 'center', gap: 9 },
+  requestVehicleIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E6E8EB', alignItems: 'center', justifyContent: 'center' },
+  vehicleMetaBox: { width: 100, minHeight: 44, borderLeftWidth: 1, borderLeftColor: '#E1E4E8', paddingLeft: 8, justifyContent: 'center' },
   requestSpecRow: { alignItems: 'center', justifyContent: 'center', gap: 4 },
   requestSpecLabel: { color: '#5E646D', fontSize: 11, lineHeight: 14, fontWeight: '600', textAlign: 'center' },
   requestSpecValue: { color: '#17191D', fontSize: 11, lineHeight: 14, fontWeight: '700', textAlign: 'center', flexShrink: 1 },
@@ -2053,6 +4338,297 @@ const styles = StyleSheet.create({
   routeBottomPanel: { position: 'absolute', left: 10, right: 10, bottom: 28, borderRadius: 14, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#ECEEF0', padding: 10, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 14, shadowOffset: { width: 0, height: 6 }, elevation: 10 },
   arrivedRouteBtn: { height: 58, borderRadius: 10, backgroundColor: '#F04416', alignItems: 'center', justifyContent: 'center' },
   arrivedRouteText: { color: '#FFFFFF', fontSize: 17, lineHeight: 21, fontWeight: '800' },
+  arrivedContent: { paddingHorizontal: 15, paddingTop: 10, paddingBottom: 32 },
+  arrivedStatusCard: { height: 42, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(22,163,74,0.18)', backgroundColor: 'rgba(22,163,74,0.08)', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, marginBottom: 9 },
+  arrivedStatusLeft: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  arrivedStatusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#16A34A' },
+  arrivedStatusText: { color: '#16A34A', fontSize: 12, lineHeight: 15, fontWeight: '800' },
+  arrivedStatusTime: { color: '#5E646D', fontSize: 11, lineHeight: 14, fontWeight: '700' },
+  arrivedSectionCard: { borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', padding: 12, marginBottom: 10 },
+  arrivedSectionTitle: { color: '#17191D', fontSize: 15, lineHeight: 19, fontWeight: '800', marginBottom: 10 },
+  diagnosisContent: { paddingHorizontal: 15, paddingTop: 10, paddingBottom: 32 },
+  diagnosisHeader: { marginTop: 5, marginBottom: 2 },
+  diagnosisCard: { borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', padding: 12, marginBottom: 12 },
+  diagnosisGroupTitle: { color: '#17191D', fontSize: 13, lineHeight: 17, fontWeight: '800', marginBottom: 12 },
+  diagnosisMetricRow: { minHeight: 42, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 10 },
+  diagnosisMetricLeft: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 },
+  diagnosisItemTitle: { color: '#17191D', fontSize: 12, lineHeight: 16, fontWeight: '800', flexShrink: 1 },
+  diagnosisVoltage: { color: '#16A34A', fontSize: 14, lineHeight: 18, fontWeight: '800' },
+  diagnosisVoltageInputWrap: { width: 86, height: 36, borderRadius: 8, borderWidth: 1, borderColor: '#E1E4E8', backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', paddingHorizontal: 9 },
+  diagnosisVoltageInput: { flex: 1, minWidth: 0, color: '#16A34A', fontSize: 14, lineHeight: 18, fontWeight: '800', textAlign: 'right', padding: 0 },
+  diagnosisVoltageUnit: { color: '#16A34A', fontSize: 13, lineHeight: 17, fontWeight: '800', marginLeft: 4 },
+  diagnosisBlock: { borderTopWidth: 1, borderTopColor: '#E1E4E8', paddingTop: 12, marginTop: 2, marginBottom: 12 },
+  diagnosisOptionRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 10 },
+  diagnosisOption: { flex: 1, minHeight: 42, borderRadius: 8, borderWidth: 1, borderColor: '#E1E4E8', backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingHorizontal: 8 },
+  diagnosisOptionSelected: { borderColor: 'rgba(22,163,74,0.34)', backgroundColor: 'rgba(22,163,74,0.08)' },
+  diagnosisRadio: { width: 18, height: 18, borderRadius: 9, borderWidth: 1.4, borderColor: '#C5CBD3', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  diagnosisRadioSelected: { borderColor: '#16A34A', backgroundColor: '#16A34A' },
+  diagnosisOptionText: { color: '#5E646D', fontSize: 11, lineHeight: 14, fontWeight: '800', textAlign: 'center', flexShrink: 1 },
+  diagnosisOptionTextSelected: { color: '#16A34A' },
+  diagnosisNotesBlock: { marginBottom: 14 },
+  diagnosisNotesLabel: { color: '#17191D', fontSize: 12, lineHeight: 16, fontWeight: '800', marginBottom: 7 },
+  diagnosisNotesInput: { minHeight: 86, borderRadius: 8, borderWidth: 1, borderColor: '#E1E4E8', backgroundColor: '#F3F4F5', color: '#17191D', fontSize: 12, lineHeight: 17, fontWeight: '600', paddingHorizontal: 12, paddingVertical: 10 },
+  diagnosisNotesCount: { color: '#8B9098', fontSize: 10, lineHeight: 13, fontWeight: '700', textAlign: 'right', marginTop: 4 },
+  recommendedBlock: { marginBottom: 14 },
+  recommendedTitle: { color: '#17191D', fontSize: 15, lineHeight: 19, fontWeight: '800', marginBottom: 3 },
+  recommendedSubtitle: { color: '#5E646D', fontSize: 11, lineHeight: 15, fontWeight: '600', marginBottom: 9 },
+  recommendedRow: { minHeight: 42, borderRadius: 8, backgroundColor: 'rgba(22,163,74,0.08)', borderWidth: 1, borderColor: 'rgba(22,163,74,0.16)', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, marginBottom: 8 },
+  recommendedLeft: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 },
+  recommendedRowText: { color: '#17191D', fontSize: 12, lineHeight: 16, fontWeight: '800', flexShrink: 1 },
+  recommendedCheck: { width: 20, height: 20, borderRadius: 10, backgroundColor: '#16A34A', alignItems: 'center', justifyContent: 'center', marginLeft: 8 },
+  estimateContent: { paddingHorizontal: 15, paddingTop: 10, paddingBottom: 32 },
+  estimateHeaderRow: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, marginTop: 5, marginBottom: 10 },
+  estimateHeaderText: { flex: 1, minWidth: 0 },
+  recommendedReminderCard: { minHeight: 58, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(240,68,22,0.18)', backgroundColor: 'rgba(240,68,22,0.07)', flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 10, marginBottom: 12 },
+  recommendedReminderIcon: { width: 32, height: 32, borderRadius: 8, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: 'rgba(240,68,22,0.16)', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  recommendedReminderText: { flex: 1, minWidth: 0, color: '#17191D', fontSize: 12, lineHeight: 16, fontWeight: '700' },
+  estimateCard: { borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', padding: 12, marginBottom: 12 },
+  estimateCardOptional: { borderColor: 'rgba(240,68,22,0.28)', backgroundColor: 'rgba(240,68,22,0.07)' },
+  estimateSectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 10 },
+  estimateSectionTitleGroup: { flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 },
+  estimateSectionIcon: { width: 28, height: 28, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  estimateSectionIconOptional: { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: 'rgba(240,68,22,0.18)' },
+  estimateSectionTitle: { color: '#17191D', fontSize: 14, lineHeight: 18, fontWeight: '800', flexShrink: 1 },
+  estimateOptionalBadge: { color: '#F04416', fontSize: 9, lineHeight: 12, fontWeight: '900', borderWidth: 1, borderColor: 'rgba(240,68,22,0.22)', backgroundColor: '#FFFFFF', borderRadius: 999, paddingHorizontal: 7, paddingVertical: 2, flexShrink: 0 },
+  estimateSectionAddBtn: { width: 30, height: 30, borderRadius: 15, borderWidth: 1, borderColor: 'rgba(22,163,74,0.24)', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  estimateLine: { minHeight: 34, flexDirection: 'row', alignItems: 'center', gap: 10, borderTopWidth: 1, borderTopColor: '#E1E4E8' },
+  estimateLineLabel: { flex: 1, minWidth: 0, color: '#17191D', fontSize: 12, lineHeight: 16, fontWeight: '700' },
+  estimateLineMuted: { color: '#5E646D' },
+  estimateLineHours: { width: 52, color: '#17191D', fontSize: 11, lineHeight: 15, fontWeight: '700', textAlign: 'right' },
+  estimateLineAmount: { width: 74, color: '#17191D', fontSize: 12, lineHeight: 16, fontWeight: '800', textAlign: 'right' },
+  estimateLineStrong: { fontWeight: '900' },
+  estimateRemoveBtn: { width: 24, height: 24, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(240,68,22,0.22)', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  optionalEstimateWrap: { marginBottom: 10 },
+  optionalEstimateTitle: { color: '#17191D', fontSize: 15, lineHeight: 19, fontWeight: '900', marginBottom: 3 },
+  optionalEstimateSubtitle: { color: '#5E646D', fontSize: 11, lineHeight: 15, fontWeight: '600', marginBottom: 10 },
+  estimateTotalCard: { borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', paddingHorizontal: 12, paddingVertical: 8, marginBottom: 20 },
+  estimateTotalAmount: { color: '#16A34A', fontSize: 15, lineHeight: 19 },
+  previewEstimateBtn: { alignSelf: 'center', height: 40, borderRadius: 9, borderWidth: 1.2, borderColor: 'rgba(22,163,74,0.45)', backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingHorizontal: 16, marginBottom: 10 },
+  previewEstimateText: { color: '#16A34A', fontSize: 12, lineHeight: 16, fontWeight: '800' },
+  estimateApprovalNote: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 12 },
+  estimateApprovalText: { color: '#5E646D', fontSize: 11, lineHeight: 15, fontWeight: '700', textAlign: 'center' },
+  estimatePickerOverlay: { flex: 1, justifyContent: 'flex-end', padding: 15 },
+  estimatePickerCard: { maxHeight: '82%', borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', padding: 14, marginBottom: 18, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 12 },
+  estimateSearchBox: { height: 42, borderRadius: 8, borderWidth: 1, borderColor: '#E1E4E8', backgroundColor: '#F3F4F5', flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 11, marginBottom: 10 },
+  estimateSearchInput: { flex: 1, minWidth: 0, color: '#17191D', fontSize: 13, lineHeight: 17, fontWeight: '600', padding: 0 },
+  estimateScopeControl: { height: 40, borderRadius: 8, backgroundColor: '#F3F4F5', borderWidth: 1, borderColor: '#ECEEF0', flexDirection: 'row', padding: 3, marginBottom: 10 },
+  estimateScopeBtn: { flex: 1, borderRadius: 7, alignItems: 'center', justifyContent: 'center' },
+  estimateScopeBtnActive: { backgroundColor: '#17191D' },
+  estimateScopeText: { color: '#5E646D', fontSize: 12, lineHeight: 16, fontWeight: '800' },
+  estimateScopeTextActive: { color: '#FFFFFF' },
+  customEstimateBox: { borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', padding: 10, marginBottom: 10 },
+  customEstimateTitle: { color: '#17191D', fontSize: 13, lineHeight: 17, fontWeight: '800', marginBottom: 8 },
+  customEstimateInput: { height: 40, borderRadius: 8, borderWidth: 1, borderColor: '#E1E4E8', backgroundColor: '#FFFFFF', color: '#17191D', fontSize: 12, lineHeight: 16, fontWeight: '700', paddingHorizontal: 10, paddingVertical: 0, marginBottom: 8 },
+  customEstimateRow: { flexDirection: 'row', gap: 8 },
+  customEstimateSmallInput: { flex: 1, minWidth: 0 },
+  priceWarningBox: { minHeight: 30, borderRadius: 8, backgroundColor: 'rgba(240,68,22,0.08)', borderWidth: 1, borderColor: 'rgba(240,68,22,0.18)', flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 9, marginBottom: 8 },
+  priceWarningText: { color: '#F04416', fontSize: 10, lineHeight: 13, fontWeight: '800', flex: 1 },
+  customEstimateAddBtn: { height: 40, borderRadius: 8, backgroundColor: '#16A34A', alignItems: 'center', justifyContent: 'center' },
+  customEstimateAddText: { color: '#FFFFFF', fontSize: 12, lineHeight: 16, fontWeight: '800' },
+  estimatePickerList: { maxHeight: 360 },
+  estimatePickerRow: { minHeight: 58, borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 10, paddingVertical: 9, marginBottom: 8 },
+  estimatePickerRowInfo: { flex: 1, minWidth: 0 },
+  estimatePickerRowTitle: { color: '#17191D', fontSize: 13, lineHeight: 17, fontWeight: '800' },
+  estimatePickerRowMeta: { color: '#5E646D', fontSize: 10, lineHeight: 13, fontWeight: '700', marginTop: 2 },
+  estimatePickerPrice: { color: '#17191D', fontSize: 12, lineHeight: 16, fontWeight: '900' },
+  estimatePickerEmpty: { minHeight: 110, alignItems: 'center', justifyContent: 'center' },
+  customerEstimateOverlay: { flex: 1, justifyContent: 'flex-end', padding: 12 },
+  customerEstimateCard: { height: '92%', borderRadius: 14, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', overflow: 'hidden', marginBottom: 8, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 12 },
+  customerEstimateHeader: { height: 58, borderBottomWidth: 1, borderBottomColor: '#ECEEF0', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12 },
+  customerEstimateTitleWrap: { flex: 1, minWidth: 0, alignItems: 'center' },
+  customerEstimateTitle: { color: '#17191D', fontSize: 16, lineHeight: 20, fontWeight: '900' },
+  customerEstimateSubtitle: { color: '#5E646D', fontSize: 11, lineHeight: 14, fontWeight: '700', marginTop: 1 },
+  customerEstimateScroll: { flex: 1, backgroundColor: '#FFFFFF' },
+  customerEstimateContent: { padding: 14, paddingBottom: 22 },
+  customerEstimateHero: { borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', flexDirection: 'row', alignItems: 'center', gap: 11, padding: 12, marginBottom: 10 },
+  customerEstimateServiceIcon: { width: 48, height: 48, borderRadius: 10, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E6E8EB', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  customerEstimateHeroInfo: { flex: 1, minWidth: 0 },
+  customerEstimateService: { color: '#17191D', fontSize: 17, lineHeight: 21, fontWeight: '900' },
+  customerEstimateVehicle: { color: '#5E646D', fontSize: 13, lineHeight: 17, fontWeight: '700', marginTop: 2 },
+  customerEstimateLocation: { color: '#5E646D', fontSize: 11, lineHeight: 15, fontWeight: '600', marginTop: 3 },
+  customerEstimateNotice: { minHeight: 48, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(22,163,74,0.18)', backgroundColor: 'rgba(22,163,74,0.08)', flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 11, paddingVertical: 9, marginBottom: 10 },
+  customerEstimateNoticeText: { flex: 1, minWidth: 0, color: '#17191D', fontSize: 11, lineHeight: 15, fontWeight: '700' },
+  customerPreviewSection: { borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', paddingHorizontal: 12, paddingVertical: 10, marginBottom: 10 },
+  customerPreviewSectionOptional: { borderColor: 'rgba(240,68,22,0.28)', backgroundColor: 'rgba(240,68,22,0.07)' },
+  customerPreviewSectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 6 },
+  customerPreviewSectionTitle: { color: '#17191D', fontSize: 14, lineHeight: 18, fontWeight: '900' },
+  customerPreviewOptionalPill: { color: '#F04416', fontSize: 10, lineHeight: 13, fontWeight: '900', borderWidth: 1, borderColor: 'rgba(240,68,22,0.22)', backgroundColor: '#FFFFFF', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
+  customerPreviewLine: { minHeight: 34, borderTopWidth: 1, borderTopColor: '#E1E4E8', flexDirection: 'row', alignItems: 'center', gap: 10 },
+  customerPreviewLineInfo: { flex: 1, minWidth: 0 },
+  customerPreviewLineLabel: { color: '#17191D', fontSize: 12, lineHeight: 16, fontWeight: '700' },
+  customerPreviewLineMeta: { color: '#8B9098', fontSize: 10, lineHeight: 13, fontWeight: '700', marginTop: 1 },
+  customerPreviewLineAmount: { width: 86, color: '#17191D', fontSize: 12, lineHeight: 16, fontWeight: '800', textAlign: 'right' },
+  customerPreviewLineStrong: { fontWeight: '900' },
+  customerPreviewTotalAmount: { color: '#16A34A', fontSize: 15, lineHeight: 19 },
+  customerEstimateTotals: { borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', paddingHorizontal: 12, paddingVertical: 8, marginBottom: 12 },
+  customerEstimateDivider: { height: 1, backgroundColor: '#E1E4E8', marginVertical: 6 },
+  customerPreviewOnlyNote: { minHeight: 42, borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingHorizontal: 10 },
+  customerPreviewOnlyText: { color: '#5E646D', fontSize: 11, lineHeight: 15, fontWeight: '700', textAlign: 'center', flexShrink: 1 },
+  approvalContent: { paddingHorizontal: 15, paddingTop: 10, paddingBottom: 34 },
+  approvalHero: { alignItems: 'center', paddingTop: 8, paddingBottom: 16 },
+  approvalClock: { width: 68, height: 68, borderRadius: 34, backgroundColor: '#EAB308', borderWidth: 8, borderColor: 'rgba(234,179,8,0.22)', alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
+  approvalTitle: { color: '#17191D', fontSize: 20, lineHeight: 25, fontWeight: '900', textAlign: 'center' },
+  approvalSubtitle: { color: '#5E646D', fontSize: 13, lineHeight: 18, fontWeight: '700', textAlign: 'center', marginTop: 5 },
+  approvalEstimateCard: { borderRadius: 10, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', padding: 14, marginBottom: 16 },
+  approvalEstimateTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  approvalCardLabel: { color: '#17191D', fontSize: 13, lineHeight: 17, fontWeight: '800', marginBottom: 8 },
+  approvalAmount: { color: '#17191D', fontSize: 31, lineHeight: 36, fontWeight: '900' },
+  approvalSentTime: { color: '#5E646D', fontSize: 12, lineHeight: 16, fontWeight: '700', marginTop: 3 },
+  approvalViewRow: { borderTopWidth: 1, borderTopColor: '#E1E4E8', flexDirection: 'row', alignItems: 'center', gap: 7, paddingTop: 12, marginTop: 13 },
+  approvalViewText: { color: '#5E646D', fontSize: 13, lineHeight: 17, fontWeight: '800' },
+  approvalNextCard: { marginBottom: 20 },
+  approvalNextTitle: { color: '#17191D', fontSize: 17, lineHeight: 22, fontWeight: '900', marginBottom: 12 },
+  approvalNextRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 9, marginBottom: 10 },
+  approvalNextText: { flex: 1, minWidth: 0, color: '#5E646D', fontSize: 13, lineHeight: 18, fontWeight: '700' },
+  approvalActions: { flexDirection: 'row', gap: 10 },
+  approvalEditBtn: { flex: 1, height: 54, borderRadius: 10, borderWidth: 1.3, borderColor: 'rgba(47,128,255,0.45)', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
+  approvalEditText: { color: '#2F80FF', fontSize: 15, lineHeight: 19, fontWeight: '900' },
+  approvalCallBtn: { flex: 1, height: 54, borderRadius: 10, backgroundColor: '#16A34A', alignItems: 'center', justifyContent: 'center' },
+  approvalCallText: { color: '#FFFFFF', fontSize: 15, lineHeight: 19, fontWeight: '900' },
+  approvalDemoBtn: { height: 48, borderRadius: 10, backgroundColor: '#17191D', alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 7, marginTop: 12 },
+  approvalDemoText: { color: '#FFFFFF', fontSize: 14, lineHeight: 18, fontWeight: '900' },
+  workContent: { paddingHorizontal: 15, paddingTop: 10, paddingBottom: 34 },
+  repairProgressCard: { borderRadius: 10, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', padding: 13, marginBottom: 12 },
+  repairProgressHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, marginBottom: 14 },
+  repairProgressTitle: { color: '#17191D', fontSize: 18, lineHeight: 23, fontWeight: '900', marginBottom: 12 },
+  repairProgressMeta: { color: '#5E646D', fontSize: 11, lineHeight: 14, fontWeight: '700', marginBottom: 3 },
+  repairTimer: { color: '#17191D', fontSize: 28, lineHeight: 34, fontWeight: '700', letterSpacing: 1.5 },
+  repairLivePill: { height: 28, borderRadius: 999, borderWidth: 1, borderColor: 'rgba(22,163,74,0.24)', backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 9 },
+  repairLiveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#16A34A' },
+  repairLiveText: { color: '#16A34A', fontSize: 10, lineHeight: 13, fontWeight: '900' },
+  repairFieldBlock: { marginBottom: 13 },
+  repairFieldLabel: { color: '#17191D', fontSize: 13, lineHeight: 17, fontWeight: '900', marginBottom: 6 },
+  repairFieldText: { color: '#5E646D', fontSize: 12, lineHeight: 17, fontWeight: '700' },
+  repairPhotosRow: { gap: 8, paddingRight: 2 },
+  repairPhotoTile: { width: 84, height: 76, borderRadius: 8, borderWidth: 1, borderColor: '#E1E4E8', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', padding: 7, gap: 5 },
+  repairPhotoText: { color: '#5E646D', fontSize: 9, lineHeight: 12, fontWeight: '800', textAlign: 'center' },
+  repairAddPhotoTile: { width: 84, height: 76, borderRadius: 8, borderWidth: 1, borderColor: '#E1E4E8', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', gap: 4 },
+  repairAddPhotoText: { color: '#5E646D', fontSize: 10, lineHeight: 13, fontWeight: '900', textAlign: 'center' },
+  repairNoteCard: { borderRadius: 10, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', padding: 12, marginBottom: 12 },
+  repairSummaryInput: { minHeight: 78, borderRadius: 8, borderWidth: 1, borderColor: '#E1E4E8', backgroundColor: '#FFFFFF', color: '#17191D', fontSize: 12, lineHeight: 17, fontWeight: '700', paddingHorizontal: 10, paddingVertical: 9, textAlignVertical: 'top' },
+  repairCustomerNoteInput: { minHeight: 54, borderRadius: 8, borderWidth: 1, borderColor: '#E1E4E8', backgroundColor: '#FFFFFF', color: '#17191D', fontSize: 12, lineHeight: 17, fontWeight: '700', paddingHorizontal: 10, paddingVertical: 9, textAlignVertical: 'top' },
+  workContactCard: { minHeight: 68, borderRadius: 10, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', gap: 10, padding: 11, marginBottom: 12 },
+  workContactInfo: { flex: 1, minWidth: 0 },
+  workContactName: { color: '#17191D', fontSize: 15, lineHeight: 19, fontWeight: '800' },
+  workContactMeta: { color: '#5E646D', fontSize: 11, lineHeight: 15, fontWeight: '700', marginTop: 2 },
+  workContactActions: { flexDirection: 'row', alignItems: 'center', gap: 7, flexShrink: 0 },
+  workContactBtn: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, borderColor: '#E1E4E8', backgroundColor: '#F3F4F5', alignItems: 'center', justifyContent: 'center' },
+  workSummaryCard: { borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', paddingHorizontal: 12, paddingVertical: 8, marginBottom: 12 },
+  additionalApprovalCard: { borderRadius: 10, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', padding: 12, marginBottom: 12 },
+  additionalApprovalSubtitle: { color: '#5E646D', fontSize: 12, lineHeight: 17, fontWeight: '700', marginTop: -4, marginBottom: 11 },
+  additionalActionRow: { flexDirection: 'row', gap: 9, marginBottom: 12 },
+  additionalRequiredBtn: { flex: 1, minHeight: 48, borderRadius: 9, backgroundColor: '#F04416', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingHorizontal: 10 },
+  additionalRequiredText: { color: '#FFFFFF', fontSize: 12, lineHeight: 16, fontWeight: '900', textAlign: 'center', flexShrink: 1 },
+  additionalEmptyBox: { minHeight: 74, borderRadius: 8, borderWidth: 1, borderColor: '#E1E4E8', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', gap: 5 },
+  additionalEmptyText: { color: '#5E646D', fontSize: 12, lineHeight: 16, fontWeight: '700' },
+  additionalItem: { borderRadius: 8, borderWidth: 1, padding: 11, marginBottom: 9 },
+  additionalItemRequired: { borderColor: 'rgba(240,68,22,0.28)', backgroundColor: 'rgba(240,68,22,0.07)' },
+  additionalItemTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
+  additionalItemInfo: { flex: 1, minWidth: 0 },
+  additionalItemKind: { color: '#F04416', fontSize: 10, lineHeight: 13, fontWeight: '900', textTransform: 'uppercase', marginBottom: 3 },
+  additionalItemTitle: { color: '#17191D', fontSize: 14, lineHeight: 18, fontWeight: '900' },
+  additionalItemDescription: { color: '#5E646D', fontSize: 11, lineHeight: 15, fontWeight: '700', marginTop: 3 },
+  additionalEvidenceRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 7 },
+  additionalEvidenceText: { flex: 1, minWidth: 0, color: '#5E646D', fontSize: 10, lineHeight: 13, fontWeight: '700' },
+  additionalItemAmount: { color: '#17191D', fontSize: 15, lineHeight: 19, fontWeight: '900', flexShrink: 0 },
+  additionalItemBottom: { borderTopWidth: 1, borderTopColor: '#E1E4E8', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, paddingTop: 9, marginTop: 10 },
+  additionalStatusPill: { minHeight: 26, borderRadius: 999, borderWidth: 1, borderColor: 'rgba(234,179,8,0.26)', backgroundColor: '#FFFFFF', justifyContent: 'center', paddingHorizontal: 9, flex: 1 },
+  additionalStatusApproved: { borderColor: 'rgba(22,163,74,0.24)', backgroundColor: 'rgba(22,163,74,0.08)' },
+  additionalStatusDeclined: { borderColor: 'rgba(240,68,22,0.22)', backgroundColor: '#FFFFFF' },
+  additionalStatusText: { color: '#A16207', fontSize: 10, lineHeight: 13, fontWeight: '900' },
+  additionalStatusTextApproved: { color: '#16A34A' },
+  additionalStatusTextDeclined: { color: '#F04416' },
+  additionalDemoActions: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 0 },
+  additionalApproveMini: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#16A34A', alignItems: 'center', justifyContent: 'center' },
+  additionalDeclineMini: { width: 28, height: 28, borderRadius: 14, borderWidth: 1, borderColor: 'rgba(240,68,22,0.28)', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
+  completeWorkBtn: { height: 54, borderRadius: 10, backgroundColor: '#16A34A', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 2, marginBottom: 10 },
+  completeWorkText: { color: '#FFFFFF', fontSize: 15, lineHeight: 19, fontWeight: '900' },
+  completeContent: { paddingHorizontal: 15, paddingTop: 10, paddingBottom: 34 },
+  completeHeroCard: { borderRadius: 10, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', flexDirection: 'row', alignItems: 'center', gap: 12, padding: 13, marginBottom: 12 },
+  completeHeroIcon: { width: 48, height: 48, borderRadius: 12, backgroundColor: '#17191D', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  completeHeroInfo: { flex: 1, minWidth: 0 },
+  completeHeroTitle: { color: '#17191D', fontSize: 18, lineHeight: 23, fontWeight: '900' },
+  completeHeroSubtitle: { color: '#5E646D', fontSize: 12, lineHeight: 17, fontWeight: '700', marginTop: 3 },
+  completeChecklistCard: { borderRadius: 10, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', padding: 12, marginBottom: 12 },
+  completionCheckRow: { minHeight: 54, borderTopWidth: 1, borderTopColor: '#E1E4E8', flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 9 },
+  completionCheckIcon: { width: 24, height: 24, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(240,68,22,0.22)', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  completionCheckIconDone: { borderColor: '#16A34A', backgroundColor: '#16A34A' },
+  completionCheckInfo: { flex: 1, minWidth: 0 },
+  completionCheckTitle: { color: '#17191D', fontSize: 13, lineHeight: 17, fontWeight: '900' },
+  completionCheckDetail: { color: '#5E646D', fontSize: 11, lineHeight: 15, fontWeight: '700', marginTop: 2 },
+  completeSummaryText: { color: '#5E646D', fontSize: 12, lineHeight: 18, fontWeight: '700' },
+  completePhotosGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  completePhotoTile: { width: '31.5%', minHeight: 74, borderRadius: 8, borderWidth: 1, borderColor: '#E1E4E8', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', padding: 7, gap: 5 },
+  completeBlockedCard: { minHeight: 48, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(240,68,22,0.22)', backgroundColor: 'rgba(240,68,22,0.07)', flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 11, paddingVertical: 9, marginBottom: 12 },
+  completeBlockedText: { flex: 1, minWidth: 0, color: '#F04416', fontSize: 12, lineHeight: 16, fontWeight: '800' },
+  completeSubmitBtn: { height: 56, borderRadius: 10, backgroundColor: '#16A34A', alignItems: 'center', justifyContent: 'center' },
+  completeSubmitText: { color: '#FFFFFF', fontSize: 16, lineHeight: 20, fontWeight: '900' },
+  changeRequestOverlay: { flex: 1, justifyContent: 'flex-end', padding: 15 },
+  changeRequestCard: { borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', padding: 14, marginBottom: 18, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 12 },
+  changeRequestHeaderText: { flex: 1, minWidth: 0 },
+  changeRequestSubtitle: { color: '#5E646D', fontSize: 11, lineHeight: 15, fontWeight: '700', marginTop: 2 },
+  changeRequestLabel: { color: '#17191D', fontSize: 12, lineHeight: 16, fontWeight: '900', marginBottom: 6 },
+  changeRequestInput: { height: 42, borderRadius: 8, borderWidth: 1, borderColor: '#E1E4E8', backgroundColor: '#F3F4F5', color: '#17191D', fontSize: 13, lineHeight: 17, fontWeight: '700', paddingHorizontal: 11, paddingVertical: 0, marginBottom: 11 },
+  changeRequestTextArea: { minHeight: 92, borderRadius: 8, borderWidth: 1, borderColor: '#E1E4E8', backgroundColor: '#F3F4F5', color: '#17191D', fontSize: 13, lineHeight: 18, fontWeight: '700', paddingHorizontal: 11, paddingVertical: 9, textAlignVertical: 'top', marginBottom: 11 },
+  changeRequestEvidenceBox: { minHeight: 64, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(240,68,22,0.24)', backgroundColor: 'rgba(240,68,22,0.06)', flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 11, paddingVertical: 10, marginBottom: 13 },
+  changeRequestEvidenceTextWrap: { flex: 1, minWidth: 0 },
+  changeRequestEvidenceTitle: { color: '#17191D', fontSize: 13, lineHeight: 17, fontWeight: '900' },
+  changeRequestEvidenceHint: { color: '#5E646D', fontSize: 11, lineHeight: 15, fontWeight: '700', marginTop: 2 },
+  arrivedChecklistTitle: { color: '#17191D', fontSize: 22, lineHeight: 27, fontWeight: '800', marginBottom: 8 },
+  arrivedChecklistSubtitle: { color: '#5E646D', fontSize: 13, lineHeight: 18, fontWeight: '600', marginBottom: 14 },
+  arrivedChecklistBox: { overflow: 'hidden' },
+  arrivedNextRow: { minHeight: 70, flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 10 },
+  arrivedNextRowBorder: { borderTopWidth: 1, borderTopColor: '#ECEEF0' },
+  arrivedNextInfo: { flex: 1, minWidth: 0 },
+  arrivedNextTitleRow: { flexDirection: 'row', alignItems: 'baseline', gap: 5, flexWrap: 'wrap' },
+  arrivedNextTitle: { color: '#17191D', fontSize: 14, lineHeight: 18, fontWeight: '800' },
+  arrivedNextOptional: { color: '#5E646D', fontSize: 12, lineHeight: 16, fontWeight: '600' },
+  arrivedNextSubtitle: { color: '#5E646D', fontSize: 12, lineHeight: 16, fontWeight: '600', marginTop: 2 },
+  arrivedCheckCircle: { width: 28, height: 28, borderRadius: 14, borderWidth: 1, borderColor: '#E1E4E8', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
+  arrivedCheckCircleDone: { borderColor: '#16A34A', backgroundColor: '#16A34A' },
+  quickActionGrid: { flexDirection: 'row', gap: 8 },
+  quickActionTile: { flex: 1, minHeight: 82, borderRadius: 8, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#ECEEF0', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 5, gap: 7 },
+  quickActionIcon: { width: 34, height: 34, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  quickActionText: { color: '#17191D', fontSize: 10, lineHeight: 13, fontWeight: '800', textAlign: 'center' },
+  startInspectionBtn: { height: 58, borderRadius: 10, backgroundColor: '#16A34A', alignItems: 'center', justifyContent: 'center', marginTop: 2 },
+  startInspectionText: { color: '#FFFFFF', fontSize: 17, lineHeight: 21, fontWeight: '800' },
+  startInspectionBtnDisabled: { backgroundColor: '#E6E8EB' },
+  startInspectionTextDisabled: { color: '#8B9098' },
+  checklistKeyboardAvoider: { flex: 1 },
+  checklistModalOverlay: { flex: 1, justifyContent: 'flex-end', padding: 15 },
+  checklistModalCard: { maxHeight: '86%', borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', padding: 14, marginBottom: 18, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 12 },
+  checklistModalSubtitle: { color: '#5E646D', fontSize: 13, lineHeight: 18, fontWeight: '600', marginBottom: 12 },
+  checklistTextInput: { minHeight: 132, borderRadius: 8, borderWidth: 1, borderColor: '#E1E4E8', backgroundColor: '#F3F4F5', color: '#17191D', fontSize: 13, lineHeight: 18, fontWeight: '600', paddingHorizontal: 12, paddingVertical: 10, marginBottom: 12 },
+  photoUploadBox: { minHeight: 132, borderRadius: 8, borderWidth: 1, borderColor: '#E1E4E8', backgroundColor: '#F3F4F5', alignItems: 'center', justifyContent: 'center', gap: 6, marginBottom: 12, padding: 12 },
+  photoUploadTitle: { color: '#17191D', fontSize: 14, lineHeight: 18, fontWeight: '800', textAlign: 'center' },
+  photoUploadHint: { color: '#5E646D', fontSize: 11, lineHeight: 14, fontWeight: '600', textAlign: 'center' },
+  requiredPhotosList: { marginBottom: 12 },
+  requiredPhotoRow: { minHeight: 52, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 9, paddingVertical: 4 },
+  requiredPhotoInfo: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 9 },
+  requiredPhotoCheck: { width: 22, height: 22, borderRadius: 11, borderWidth: 1, borderColor: '#E1E4E8', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
+  requiredPhotoCheckDone: { backgroundColor: '#16A34A', borderColor: '#16A34A' },
+  requiredPhotoTextWrap: { flex: 1, minWidth: 0 },
+  requiredPhotoLabel: { color: '#17191D', fontSize: 13, lineHeight: 17, fontWeight: '700', flexShrink: 1 },
+  requiredPhotoHint: { color: '#5E646D', fontSize: 10, lineHeight: 13, fontWeight: '600', marginTop: 1 },
+  requiredPhotoStateDone: { color: '#16A34A', fontSize: 10, lineHeight: 13, fontWeight: '700', marginTop: 1 },
+  requiredPhotoActions: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 0 },
+  addPhotoBtn: { height: 30, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(240,68,22,0.28)', backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 8, flexShrink: 0 },
+  addPhotoIconBtn: { width: 32, height: 32, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(240,68,22,0.28)', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
+  addPhotoBtnDone: { borderColor: 'rgba(22,163,74,0.26)', backgroundColor: 'rgba(22,163,74,0.08)' },
+  addPhotoText: { color: '#F04416', fontSize: 10, lineHeight: 13, fontWeight: '800' },
+  addPhotoTextDone: { color: '#16A34A' },
+  complaintConfirmBox: { borderRadius: 8, borderWidth: 1, borderColor: '#E1E4E8', backgroundColor: '#F3F4F5', paddingHorizontal: 12, marginBottom: 12 },
+  complaintConfirmRow: { minHeight: 62, flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10 },
+  complaintConfirmRowBorder: { borderTopWidth: 1, borderTopColor: '#E1E4E8' },
+  complaintConfirmTextWrap: { flex: 1, minWidth: 0 },
+  complaintConfirmLabel: { color: '#17191D', fontSize: 13, lineHeight: 17, fontWeight: '800' },
+  complaintConfirmValue: { color: '#5E646D', fontSize: 11, lineHeight: 15, fontWeight: '600', marginTop: 2 },
+  complaintDecisionRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 0 },
+  complaintDecisionBtn: { width: 32, height: 32, borderRadius: 8, borderWidth: 1, borderColor: '#E1E4E8', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
+  complaintDecisionConfirmed: { backgroundColor: '#16A34A', borderColor: '#16A34A' },
+  complaintDecisionDenied: { backgroundColor: '#F04416', borderColor: '#F04416' },
+  checklistSaveBtn: { height: 50, borderRadius: 9, backgroundColor: '#16A34A', alignItems: 'center', justifyContent: 'center' },
+  checklistSaveText: { color: '#FFFFFF', fontSize: 15, lineHeight: 19, fontWeight: '800' },
   navChoiceOverlay: { flex: 1, justifyContent: 'flex-end', padding: 15 },
   navChoiceBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(23,25,29,0.32)' },
   navChoiceCard: { borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', padding: 14, marginBottom: 96, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 12 },
