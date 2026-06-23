@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, KeyboardAvoidingView, Linking, Modal, PanResponder, Platform, RefreshControl, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Animated, Easing, KeyboardAvoidingView, Linking, Modal, PanResponder, Platform, RefreshControl, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
@@ -21,6 +21,8 @@ const PROVIDER = {
 };
 const ACCEPT_BLUE = '#276EF1';
 const TAB_BAR_PADDING = 8;
+const TAB_INDICATOR_EXTRA_WIDTH = 8;
+const TAB_INDICATOR_DROP_SCALE = 1.14;
 const TABS = [
   { key: 'home', screen: 'home', icon: 'home', label: 'Home' },
   { key: 'requests', screen: 'requests', icon: 'chatbox-outline', label: 'Requests' },
@@ -46,6 +48,17 @@ const activity = [
   { icon: 'checkmark-done', color: '#2F80FF', title: 'Job completed', meta: 'Battery Replacement - Job #12341', value: '$125.00' },
 ];
 
+function useScrollToTop(scrollSignal) {
+  const scrollRef = useRef(null);
+  useEffect(() => {
+    if (!scrollSignal) return;
+    requestAnimationFrame(() => {
+      scrollRef.current?.scrollTo?.({ y: 0, animated: true });
+    });
+  }, [scrollSignal]);
+  return scrollRef;
+}
+
 const schedule = [
   { time: '10:30 AM', title: 'Battery Jump', vehicle: 'Toyota Camry', eta: 'In 15 min' },
   { time: '12:15 PM', title: 'Tire Change', vehicle: 'Honda Accord', eta: 'In 2h' },
@@ -58,7 +71,18 @@ const demoRequests = [
     demo: true,
     accent: '#42D463',
     icon: 'battery-charging-outline',
-    service: { issueName: 'Battery Jump' },
+    service: {
+      issueName: 'Battery Jump',
+      serviceType: 'jump_start',
+      diagnosticInfo: {
+        intakeAnswers: { interior_lights: 'No', engine_clicks: 'Yes', battery_age: 'No' },
+        intakeQuestions: [
+          { key: 'interior_lights', label: 'Are the interior lights working?' },
+          { key: 'engine_clicks', label: 'Does the engine click when starting?' },
+          { key: 'battery_age', label: 'Is the battery older than 3 years?' },
+        ],
+      },
+    },
     vehicle: { make: 'Toyota Highlander', year: '2018' },
     pickup: { address: '123 Main St, San Francisco, CA' },
     payment: { totalHeld: 89 },
@@ -70,7 +94,19 @@ const demoRequests = [
     demo: true,
     accent: '#FF9F1A',
     icon: 'car-sport-outline',
-    service: { issueName: 'Towing' },
+    service: {
+      issueName: 'Towing',
+      serviceType: 'towing',
+      diagnosticInfo: {
+        intakeAnswers: { vehicle_undrivable: 'Yes', road_type: 'No', injury: 'No', keys_available: 'Yes' },
+        intakeQuestions: [
+          { key: 'vehicle_undrivable', label: 'Is the vehicle completely undrivable?' },
+          { key: 'road_type', label: 'Are you on a highway?' },
+          { key: 'injury', label: 'Is anyone injured?' },
+          { key: 'keys_available', label: 'Are the keys available?' },
+        ],
+      },
+    },
     vehicle: { make: 'Honda Civic', year: '2020' },
     pickup: { address: '456 Oak Ave, San Francisco, CA' },
     dropoff: { address: '789 Pine St, San Francisco, CA 94108' },
@@ -83,7 +119,17 @@ const demoRequests = [
     demo: true,
     accent: '#A855F7',
     icon: 'construct-outline',
-    service: { issueName: 'Tire Change' },
+    service: {
+      issueName: 'Tire Change',
+      serviceType: 'tire_change',
+      diagnosticInfo: {
+        intakeAnswers: { vehicle_moves: 'No', spare_tire: 'Yes' },
+        intakeQuestions: [
+          { key: 'vehicle_moves', label: 'Can the vehicle still move?' },
+          { key: 'spare_tire', label: 'Do you have a spare tire?' },
+        ],
+      },
+    },
     vehicle: { make: 'Nissan Altima', year: '2019' },
     pickup: { address: '789 Pine St, San Francisco, CA' },
     payment: { totalHeld: 69 },
@@ -95,7 +141,18 @@ const demoRequests = [
     demo: true,
     accent: '#2F80FF',
     icon: 'speedometer-outline',
-    service: { issueName: 'Diagnostics' },
+    service: {
+      issueName: 'Diagnostics',
+      serviceType: 'mobile_mechanic',
+      diagnosticInfo: {
+        intakeAnswers: { drivable: 'Yes', safe_location: 'Yes', immediate_help: 'No' },
+        intakeQuestions: [
+          { key: 'drivable', label: 'Is the vehicle drivable?' },
+          { key: 'safe_location', label: 'Are you in a safe location?' },
+          { key: 'immediate_help', label: 'Do you need immediate help?' },
+        ],
+      },
+    },
     vehicle: { make: 'BMW X5', year: '2017' },
     pickup: { address: '321 Elm St, San Francisco, CA' },
     payment: { totalHeld: 95 },
@@ -203,14 +260,67 @@ const scheduledJobs = [
   },
 ];
 
+function normalizeOrderToJob(order) {
+  const serviceMeta = getServiceMeta(order);
+  const requestId = order.id || order._id || `local-${Date.now()}`;
+  const number = order.number || String(requestId).replace(/\D/g, '').slice(-5) || '12345';
+  const vehicleLabel = getVehicleLabel(order);
+  const [fallbackMake, fallbackYear] = vehicleLabel.split(' - ');
+  const customerName = order.customer?.name || order.contactInfo?.name || 'Customer';
+  const initials = customerName.split(' ').map(part => part[0]).join('').slice(0, 2).toUpperCase() || 'CU';
+  const total = Number(order.payment?.total || order.payment?.totalHeld || order.payment?.priceMax || order.price || order.total || 89);
+
+  return {
+    ...order,
+    id: requestId,
+    number,
+    status: order.status && order.status !== 'pending' ? order.status : 'accepted',
+    eta: order.tracking?.eta || order.eta || '20-30 min',
+    accent: order.accent || '#F04416',
+    icon: order.icon || serviceMeta.icon,
+    customer: {
+      name: customerName,
+      initials,
+      phone: order.customer?.phone || order.contactInfo?.phone || '',
+      email: order.customer?.email || order.contactInfo?.email || '',
+    },
+    service: {
+      ...(order.service || {}),
+      type: order.service?.type || serviceMeta.title,
+      icon: order.service?.icon || serviceMeta.icon,
+    },
+    vehicle: {
+      make: order.vehicle?.make || fallbackMake || 'Vehicle',
+      model: order.vehicle?.model || '',
+      year: order.vehicle?.year || fallbackYear || '',
+      color: order.vehicle?.color || 'Color pending',
+      vin: order.vehicle?.vin,
+    },
+    pickup: {
+      ...(order.pickup || {}),
+      address: order.pickup?.address || getRequestLocation(order),
+    },
+    payment: {
+      ...(order.payment || {}),
+      total,
+    },
+    customerNote: order.customerNote || order.orderContext?.customerNote || 'No note provided',
+    createdAt: order.acceptedAt || order.createdAt || order.date || new Date().toISOString(),
+  };
+}
+
 export default function App() {
   const [online, setOnline] = useState(true);
   const [activeScreen, setActiveScreen] = useState('home');
   const [activeTab, setActiveTab] = useState('home');
   const [previewTab, setPreviewTab] = useState('home');
+  const [screenResetNonce, setScreenResetNonce] = useState(0);
   const [tabBarWidth, setTabBarWidth] = useState(0);
   const [requestFilter, setRequestFilter] = useState('new');
   const [requests, setRequests] = useState([]);
+  const [requestsLoaded, setRequestsLoaded] = useState(false);
+  const [acceptedJobs, setAcceptedJobs] = useState([]);
+  const [acceptedRequestIds, setAcceptedRequestIds] = useState([]);
   const [dismissedDemoIds, setDismissedDemoIds] = useState([]);
   const [acceptingId, setAcceptingId] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -219,6 +329,7 @@ export default function App() {
   const [jobWorkflows, setJobWorkflows] = useState({});
   const requestAnim = useRef(new Animated.Value(0)).current;
   const tabIndicatorX = useRef(new Animated.Value(0)).current;
+  const tabIndicatorDrop = useRef(new Animated.Value(1)).current;
   const tabDragIndex = useRef(null);
   const tabIsDragging = useRef(false);
   const tabBarRef = useRef(null);
@@ -228,8 +339,9 @@ export default function App() {
   const tabDragFrame = useRef(null);
 
   const visibleDemoRequests = demoRequests.filter(order => !dismissedDemoIds.includes(order.id));
-  const dashboardRequests = requests.length ? requests : visibleDemoRequests;
-  const activeJobs = useMemo(() => requests.filter(order => order.status && order.status !== 'pending').length + 3, [requests]);
+  const dashboardRequests = requests.length ? requests : requestsLoaded ? [] : visibleDemoRequests;
+  const providerJobs = useMemo(() => [...acceptedJobs, ...demoJobs], [acceptedJobs]);
+  const activeJobs = useMemo(() => providerJobs.filter(job => job.status !== 'completed' && job.status !== 'scheduled').length, [providerJobs]);
   const featuredRequest = dashboardRequests[0];
   const pendingCount = dashboardRequests.length;
   const tabWidth = tabBarWidth ? (tabBarWidth - TAB_BAR_PADDING * 2) / TABS.length : 0;
@@ -246,17 +358,47 @@ export default function App() {
   const loadRequests = async () => {
     try {
       const data = await fetchJson(`${API_URL}/orders?status=pending`);
-      setRequests(Array.isArray(data) ? data.filter(o => !o.status || o.status === 'pending') : []);
+      const pendingOrders = Array.isArray(data)
+        ? data
+          .filter(o => (!o.status || o.status === 'pending') && !acceptedRequestIds.includes(String(o.id || o._id)))
+          .sort((a, b) => {
+            const aTime = new Date(a.createdAt || a.date || 0).getTime() || 0;
+            const bTime = new Date(b.createdAt || b.date || 0).getTime() || 0;
+            return bTime - aTime;
+          })
+        : [];
+      setRequests(pendingOrders);
     } catch (error) {
       console.log('Load requests error:', error.message);
+    } finally {
+      setRequestsLoaded(true);
     }
   };
 
+  useEffect(() => {
+    if (!online) return undefined;
+    const timer = setInterval(loadRequests, 7000);
+    return () => clearInterval(timer);
+  }, [online, acceptedRequestIds]);
+
+  const addAcceptedJob = (order, patch = {}) => {
+    const nextJob = normalizeOrderToJob({ ...order, ...patch });
+    const orderId = String(order.id || order._id || nextJob.id);
+    setAcceptedRequestIds(current => current.includes(orderId) ? current : [...current, orderId]);
+    setAcceptedJobs(current => [nextJob, ...current.filter(job => String(job.id) !== String(nextJob.id))]);
+    setRequests(current => current.filter(item => String(item.id || item._id) !== orderId));
+    if (order.demo) setDismissedDemoIds(current => current.includes(order.id) ? current : [...current, order.id]);
+  };
+
   const acceptOrder = async (order) => {
-    if (order.demo) { dismissRequest(order); return; }
+    if (order.demo) {
+      addAcceptedJob(order, { status: 'accepted', acceptedAt: new Date().toISOString() });
+      return;
+    }
     try {
       setAcceptingId(order.id);
-      await fetchJson(`${API_URL}/orders/${order.id}/accept`, {
+      addAcceptedJob(order, { status: 'accepted', acceptedAt: new Date().toISOString() });
+      fetchJson(`${API_URL}/orders/${order.id}/accept`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -267,8 +409,12 @@ export default function App() {
             rating: PROVIDER.rating, eta: PROVIDER.eta, color: '#FF6B00',
           },
         }),
+      }).then((acceptedOrder) => {
+        if (acceptedOrder) addAcceptedJob(acceptedOrder, { status: 'accepted' });
+        loadRequests();
+      }).catch((error) => {
+        console.log('Accept order sync error:', error.message);
       });
-      await loadRequests();
     } catch (error) {
       console.log('Accept order error:', error.message);
     } finally {
@@ -286,20 +432,51 @@ export default function App() {
       ...current,
       [jobId]: { ...(current[jobId] || {}), ...patch },
     }));
+
+    const nextStatus = getBackendStatusFromWorkflowStage(patch?.stage);
+    if (!nextStatus || String(jobId || '').startsWith('demo-')) return;
+
+    fetchJson(`${API_URL}/orders/${jobId}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        status: nextStatus,
+        estimate: patch?.estimate,
+      }),
+    }).catch((error) => {
+      console.log('Job status sync error:', error.message);
+    });
   };
 
   const snapTabIndicator = (index) => {
     if (!tabWidth) return;
     stopTabDragLoop();
     tabIndicatorX.stopAnimation();
+    tabIndicatorDrop.stopAnimation();
     const targetX = index * tabWidth;
     tabIndicatorTarget.current = targetX;
-    Animated.spring(tabIndicatorX, {
-      toValue: targetX,
-      tension: 70,
-      friction: 16,
-      useNativeDriver: true,
-    }).start(({ finished }) => {
+    Animated.parallel([
+      Animated.timing(tabIndicatorX, {
+        toValue: targetX,
+        duration: 270,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.sequence([
+        Animated.timing(tabIndicatorDrop, {
+          toValue: TAB_INDICATOR_DROP_SCALE,
+          duration: 120,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: true,
+        }),
+        Animated.timing(tabIndicatorDrop, {
+          toValue: 1,
+          duration: 170,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }),
+      ]),
+    ]).start(({ finished }) => {
       if (finished) tabIndicatorPosition.current = targetX;
     });
   };
@@ -376,6 +553,7 @@ export default function App() {
     const maxX = (TABS.length - 1) * tabWidth;
     const nextX = Math.max(0, Math.min(safeX - TAB_BAR_PADDING - tabWidth / 2, maxX));
     tabIndicatorTarget.current = nextX;
+    tabIndicatorDrop.setValue(1.06);
   };
 
   const selectTabAt = (index) => {
@@ -384,6 +562,7 @@ export default function App() {
     setActiveTab(tab.key);
     setPreviewTab(tab.key);
     if (tab.screen) setActiveScreen(tab.screen);
+    setScreenResetNonce(current => current + 1);
     snapTabIndicator(index);
   };
 
@@ -407,6 +586,12 @@ export default function App() {
     const index = Number.isFinite(locationX) ? getTabIndexFromX(locationX) : tabDragIndex.current;
     tabIsDragging.current = false;
     stopTabDragLoop();
+    Animated.timing(tabIndicatorDrop, {
+      toValue: 1,
+      duration: 140,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
     selectTabAt(index ?? Math.max(0, TABS.findIndex(tab => tab.key === activeTab)));
   };
 
@@ -459,38 +644,42 @@ export default function App() {
       <SafeAreaView style={[styles.safe, isLightVisible && styles.homeSafe]} edges={['top', 'left', 'right']}>
         <StatusBar style={isLightVisible ? 'dark' : 'light'} backgroundColor={isLightVisible ? '#FFFFFF' : '#020C1A'} />
 
-        {activeScreen === 'requests' ? (
-          <RequestsScreen
-            requests={dashboardRequests}
-            acceptingId={acceptingId}
-            filter={requestFilter}
-            onFilterChange={setRequestFilter}
-            onAccept={acceptOrder}
-            onDecline={dismissRequest}
-            onOpen={setSelectedRequest}
-            refreshControl={refreshControl}
-          />
-        ) : activeScreen === 'jobs' ? (
-          <JobsScreen jobs={demoJobs} jobWorkflows={jobWorkflows} onOpen={setSelectedJob} refreshControl={refreshControl} />
-        ) : activeScreen === 'earnings' ? (
-          <EarningsScreen refreshControl={refreshControl} />
-        ) : activeScreen === 'profile' ? (
-          <ProfileScreen online={online} setOnline={setOnline} refreshControl={refreshControl} />
-        ) : (
-          <HomeScreen
-            online={online}
-            setOnline={setOnline}
-            featuredRequest={featuredRequest}
-            requestAnim={requestAnim}
-            acceptingId={acceptingId}
-            pendingCount={pendingCount}
-            activeJobs={activeJobs}
-            onAccept={acceptOrder}
-            onDecline={dismissRequest}
-            onOpenRequest={setSelectedRequest}
-            refreshControl={refreshControl}
-          />
-        )}
+        <View style={styles.screenSlot}>
+          {activeScreen === 'requests' ? (
+            <RequestsScreen
+              requests={dashboardRequests}
+              acceptingId={acceptingId}
+              filter={requestFilter}
+              onFilterChange={setRequestFilter}
+              onAccept={acceptOrder}
+              onDecline={dismissRequest}
+              onOpen={setSelectedRequest}
+              refreshControl={refreshControl}
+              scrollSignal={screenResetNonce}
+            />
+          ) : activeScreen === 'jobs' ? (
+          <JobsScreen jobs={providerJobs} jobWorkflows={jobWorkflows} onOpen={setSelectedJob} refreshControl={refreshControl} scrollSignal={screenResetNonce} />
+          ) : activeScreen === 'earnings' ? (
+            <EarningsScreen refreshControl={refreshControl} scrollSignal={screenResetNonce} />
+          ) : activeScreen === 'profile' ? (
+            <ProfileScreen online={online} setOnline={setOnline} refreshControl={refreshControl} scrollSignal={screenResetNonce} />
+          ) : (
+            <HomeScreen
+              online={online}
+              setOnline={setOnline}
+              featuredRequest={featuredRequest}
+              requestAnim={requestAnim}
+              acceptingId={acceptingId}
+              pendingCount={pendingCount}
+              activeJobs={activeJobs}
+              onAccept={acceptOrder}
+              onDecline={dismissRequest}
+              onOpenRequest={setSelectedRequest}
+              refreshControl={refreshControl}
+              scrollSignal={screenResetNonce}
+            />
+          )}
+        </View>
 
         <View pointerEvents="none" style={[styles.tabBarBackdrop, { backgroundColor: isLightVisible ? '#FFFFFF' : '#020C1A' }]} />
 
@@ -513,7 +702,7 @@ export default function App() {
           {!!tabWidth && (
             <Animated.View
               pointerEvents="none"
-              style={[styles.tabIndicator, { width: tabWidth, transform: [{ translateX: tabIndicatorX }] }]}
+              style={[styles.tabIndicator, { width: tabWidth + TAB_INDICATOR_EXTRA_WIDTH, transform: [{ translateX: Animated.subtract(tabIndicatorX, TAB_INDICATOR_EXTRA_WIDTH / 2) }, { scaleX: tabIndicatorDrop }] }]}
             />
           )}
           {TABS.map((tab, index) => (
@@ -584,9 +773,10 @@ export default function App() {
   );
 }
 
-function HomeScreen({ online, setOnline, featuredRequest, requestAnim, acceptingId, pendingCount, activeJobs, onAccept, onDecline, onOpenRequest, refreshControl }) {
+function HomeScreen({ online, setOnline, featuredRequest, requestAnim, acceptingId, pendingCount, activeJobs, onAccept, onDecline, onOpenRequest, refreshControl, scrollSignal }) {
+  const scrollRef = useScrollToTop(scrollSignal);
   return (
-    <ScrollView style={[styles.container, styles.homeContainer]} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
+    <ScrollView ref={scrollRef} style={[styles.container, styles.homeContainer]} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
       <View style={styles.header}>
         <View><Text style={[styles.title, styles.homeTitle]}>Dashboard</Text></View>
         <View style={styles.headerActions}>
@@ -711,7 +901,8 @@ function IncomingRequest({ order, accepting, animation, onAccept, onDecline, onO
   );
 }
 
-function RequestsScreen({ requests, acceptingId, filter, onFilterChange, onAccept, onDecline, onOpen, refreshControl }) {
+function RequestsScreen({ requests, acceptingId, filter, onFilterChange, onAccept, onDecline, onOpen, refreshControl, scrollSignal }) {
+  const scrollRef = useScrollToTop(scrollSignal);
   const acceptedCount = 2;
   const tabs = [
     { key: 'new', label: `New (${requests.length})` },
@@ -721,6 +912,7 @@ function RequestsScreen({ requests, acceptingId, filter, onFilterChange, onAccep
 
   return (
     <ScrollView
+      ref={scrollRef}
       style={[styles.container, styles.homeContainer]}
       contentContainerStyle={styles.requestsContent}
       showsVerticalScrollIndicator={false}
@@ -800,7 +992,8 @@ function RequestCard({ order, accepting, onAccept, onDecline, onOpen }) {
   );
 }
 
-function JobsScreen({ jobs, jobWorkflows = {}, onOpen, refreshControl }) {
+function JobsScreen({ jobs, jobWorkflows = {}, onOpen, refreshControl, scrollSignal }) {
+  const scrollRef = useScrollToTop(scrollSignal);
   const [activeTab, setActiveTab] = useState('active');
   const jobsWithStatus = jobs.map(job => ({
     ...job,
@@ -857,6 +1050,7 @@ function JobsScreen({ jobs, jobWorkflows = {}, onOpen, refreshControl }) {
 
   return (
     <ScrollView
+      ref={scrollRef}
       style={[styles.container, styles.homeContainer]}
       contentContainerStyle={styles.jobsContent}
       showsVerticalScrollIndicator={false}
@@ -878,6 +1072,8 @@ function JobsScreen({ jobs, jobWorkflows = {}, onOpen, refreshControl }) {
           tabBarStyle={styles.jobsTabs}
           tabStyle={styles.jobsTab}
           tabTextStyle={styles.jobsTabText}
+          pagerStyle={styles.jobsSwipePager}
+          pageStyle={styles.jobsSwipePage}
         >
           {renderJobsPage('active')}
           {renderJobsPage('scheduled')}
@@ -888,7 +1084,8 @@ function JobsScreen({ jobs, jobWorkflows = {}, onOpen, refreshControl }) {
   );
 }
 
-function EarningsScreen({ refreshControl }) {
+function EarningsScreen({ refreshControl, scrollSignal }) {
+  const scrollRef = useScrollToTop(scrollSignal);
   const chartValues = [620, 1180, 760, 1120, 960, 1320, 1500];
   const chartMax = 1500;
   const chartDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -914,7 +1111,7 @@ function EarningsScreen({ refreshControl }) {
   ];
 
   return (
-    <ScrollView style={[styles.container, styles.homeContainer]} contentContainerStyle={styles.earningsContent} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
+    <ScrollView ref={scrollRef} style={[styles.container, styles.homeContainer]} contentContainerStyle={styles.earningsContent} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
       <View style={styles.earningsHeader}>
         <Text style={styles.earningsTitle}>Earnings</Text>
       </View>
@@ -943,7 +1140,7 @@ function EarningsScreen({ refreshControl }) {
           ))}
           <View style={styles.earningsBarsLayer}>
             {chartValues.map((value, index) => {
-              const height = Math.max(8, Math.round((value / chartMax) * 88));
+              const height = Math.max(8, Math.round((value / chartMax) * 61));
               return (
                 <View key={`${chartDays[index]}-${value}`} style={styles.earningsBarColumn}>
                   <View style={[styles.earningsBarFill, { height }]} />
@@ -965,7 +1162,7 @@ function EarningsScreen({ refreshControl }) {
         {kpis.map((item, index) => (
           <View key={item.label} style={[styles.earningsKpiItem, index > 0 && styles.earningsKpiDivider]}>
             <View style={[styles.earningsKpiIcon, { backgroundColor: item.bg }]}>
-              <Ionicons name={item.icon} size={20} color={item.color} />
+        <Ionicons name={item.icon} size={15} color={item.color} />
             </View>
             <View style={styles.earningsKpiText}>
               <Text style={styles.earningsKpiValue}>{item.value}</Text>
@@ -1010,7 +1207,7 @@ function EarningsMetric({ title, value, meta, icon, color, bg }) {
   return (
     <View style={styles.earningsMetricCard}>
       <View style={[styles.earningsMetricIcon, { backgroundColor: bg }]}>
-        <Ionicons name={icon} size={28} color={color} />
+        <Ionicons name={icon} size={16} color={color} />
       </View>
       <View style={styles.earningsMetricText}>
         <Text style={styles.earningsMetricTitle}>{title}</Text>
@@ -1067,7 +1264,8 @@ function PayoutRow({ date, meta, amount }) {
   );
 }
 
-function ProfileScreen({ online, setOnline, refreshControl }) {
+function ProfileScreen({ online, setOnline, refreshControl, scrollSignal }) {
+  const scrollRef = useScrollToTop(scrollSignal);
   const trustItems = [
     { title: 'Identity verified', detail: 'Government ID checked', icon: 'shield-checkmark-outline', done: true },
     { title: 'Insurance active', detail: 'Expires Sep 18, 2026', icon: 'document-text-outline', done: true },
@@ -1080,7 +1278,7 @@ function ProfileScreen({ online, setOnline, refreshControl }) {
   ];
 
   return (
-    <ScrollView style={[styles.container, styles.homeContainer]} contentContainerStyle={styles.profileContent} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
+    <ScrollView ref={scrollRef} style={[styles.container, styles.homeContainer]} contentContainerStyle={styles.profileContent} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
       <View style={styles.profileHeader}>
         <Text style={styles.profileTitle}>Profile</Text>
       </View>
@@ -1108,14 +1306,15 @@ function ProfileScreen({ online, setOnline, refreshControl }) {
         </View>
         <View style={styles.profileStatusToggle}>
           <Text style={[styles.profileStatusText, online && styles.profileStatusTextOnline]}>{online ? 'Online' : 'Offline'}</Text>
-          <Switch value={online} onValueChange={setOnline} trackColor={{ false: '#D9DDE2', true: '#D9DDE2' }} thumbColor={online ? '#128A3A' : '#F04416'} />
+          <Switch value={online} onValueChange={setOnline} trackColor={{ false: '#E6E8EB', true: '#D9DDE2' }} thumbColor={online ? '#128A3A' : '#8B9098'} style={styles.profileOnlineSwitch} />
         </View>
       </View>
 
-      <View style={styles.profileStatsRow}>
-        <ProfileStat label="Jobs" value="128" />
-        <ProfileStat label="On-time" value="96%" />
-        <ProfileStat label="Repeat" value="31%" />
+      <View style={styles.profileStatsPanel}>
+        <ProfileStat label="This Month" value="$4,280" icon="cash-outline" color="#16A34A" bg="rgba(22,163,74,0.10)" first />
+        <ProfileStat label="Jobs Completed" value="128" icon="briefcase-outline" color="#2F80FF" bg="rgba(47,128,255,0.10)" />
+        <ProfileStat label="Rating" value="4.9" icon="star-outline" color="#A855F7" bg="rgba(168,85,247,0.10)" />
+        <ProfileStat label="On-Time" value="96%" icon="time-outline" color="#F59E0B" bg="rgba(245,158,11,0.10)" />
       </View>
 
       <ProfileSection title="Trust & Compliance">
@@ -1140,11 +1339,14 @@ function ProfileScreen({ online, setOnline, refreshControl }) {
   );
 }
 
-function ProfileStat({ label, value }) {
+function ProfileStat({ label, value, icon, color, bg, first }) {
   return (
-    <View style={styles.profileStatCard}>
-      <Text style={styles.profileStatValue}>{value}</Text>
-      <Text style={styles.profileStatLabel}>{label}</Text>
+    <View style={[styles.profileStatCard, first && styles.profileStatCardFirst]}>
+      <View style={[styles.profileStatIcon, { backgroundColor: bg }]}>
+        <Ionicons name={icon} size={14} color={color} />
+      </View>
+      <Text style={styles.profileStatValue} numberOfLines={1}>{value}</Text>
+      <Text style={styles.profileStatLabel} numberOfLines={1}>{label}</Text>
     </View>
   );
 }
@@ -1464,8 +1666,18 @@ function RequestDetailScreen({ order, accepting, onBack, onAccept, onDecline, re
   ];
   const customerFiles = Array.isArray(rawCustomerFiles) ? rawCustomerFiles : [rawCustomerFiles].filter(Boolean);
   const isTowing = isTowingService(order);
+  const intakeRows = getProviderIntakeItems(order)
+    .filter(item => item.value !== undefined && item.value !== null && String(item.value).trim())
+    .map((item, index) => ({
+      key: `intake-${item.key || index}`,
+      icon: 'help-circle-outline',
+      color: '#F04416',
+      label: item.label,
+      value: String(item.value),
+    }));
   const jobDetailRows = [
     { key: 'note', icon: 'chatbox-outline', color: '#2F80FF', label: 'Customer Note', value: customerNote, chevron: true, onPress: () => setNoteOpen(true) },
+    ...intakeRows,
     { key: 'pickup', icon: 'location-outline', color: '#7C3AED', label: isTowing ? 'Pickup Location' : 'Service Location', value: address },
     ...(isTowing ? [{ key: 'dropoff', icon: 'flag-outline', color: '#EF4444', label: 'Drop-off Location', value: dropoffAddress }] : []),
     { key: 'distance', icon: 'trail-sign-outline', color: '#42D463', label: 'Distance', value: order.distance || (isTowing ? '6.8 mi away' : '3.1 mi away') },
@@ -1732,8 +1944,18 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
     { name: 'Customer attachment', type: 'file' },
   ];
   const customerFiles = Array.isArray(rawCustomerFiles) ? rawCustomerFiles : [rawCustomerFiles].filter(Boolean);
+  const intakeRows = getProviderIntakeItems(job)
+    .filter(item => item.value !== undefined && item.value !== null && String(item.value).trim())
+    .map((item, index) => ({
+      key: `intake-${item.key || index}`,
+      icon: 'help-circle-outline',
+      color: '#F04416',
+      label: item.label,
+      value: String(item.value),
+    }));
   const jobDetailsRows = [
     { key: 'note', icon: 'chatbox-outline', color: '#2F80FF', label: 'Customer Note', value: customerNote, chevron: true, onPress: () => setNoteOpen(true) },
+    ...intakeRows,
     { key: 'pickup', icon: 'location-outline', color: '#7C3AED', label: isTowing ? 'Pickup Location' : 'Service Location', value: address },
     ...(isTowing ? [{ key: 'dropoff', icon: 'flag-outline', color: '#EF4444', label: 'Drop-off Location', value: dropoffAddress }] : []),
     { key: 'distance', icon: 'trail-sign-outline', color: '#42D463', label: 'Distance', value: job.distance || '5.2 mi away' },
@@ -1763,7 +1985,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
 
   if (estimateOpen) {
     const workingIndex = Math.max(0, JOB_STEPS.findIndex(step => step.key === 'inspection'));
-    const estimate = getDemoEstimate(diagnosisAnswers, batteryVoltage, estimateItems, estimateRemovedItems);
+    const estimate = getDemoEstimate(diagnosisAnswers, batteryVoltage, estimateItems, estimateRemovedItems, job);
     const estimateCatalog = getEstimateCatalog(estimatePickerMode);
     const filteredEstimateCatalog = estimateCatalog.filter(item => {
       const query = estimateSearch.trim().toLowerCase();
@@ -1829,6 +2051,19 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
         estimateItems,
         estimateRemovedItems,
         estimateSentAt: workflow.estimateSentAt || 'Sent just now',
+        estimate: {
+          labor: estimate.labor,
+          parts: estimate.parts,
+          optionalLabor: estimate.optionalLabor,
+          optionalParts: estimate.optionalParts,
+          fees: estimate.fees,
+          laborSubtotal: estimate.laborSubtotal,
+          partsSubtotal: estimate.partsSubtotal,
+          subtotal: estimate.subtotal,
+          tax: estimate.tax,
+          total: estimate.optionalSubtotal > 0 ? estimate.totalIfApproved : estimate.total,
+          totalIfApproved: estimate.totalIfApproved,
+        },
       });
     };
     return (
@@ -2041,7 +2276,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
 
   if (approvalOpen) {
     const workingIndex = Math.max(0, JOB_STEPS.findIndex(step => step.key === 'inspection'));
-    const estimate = getDemoEstimate(diagnosisAnswers, batteryVoltage, estimateItems, estimateRemovedItems);
+    const estimate = getDemoEstimate(diagnosisAnswers, batteryVoltage, estimateItems, estimateRemovedItems, job);
     const sentTotal = estimate.optionalSubtotal > 0 ? estimate.totalIfApproved : estimate.total;
     const sentLabel = workflow.estimateSentAt || 'Sent just now';
     const approveEstimateDemo = () => {
@@ -2139,7 +2374,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
 
   if (workOpen) {
     const workingIndex = Math.max(0, JOB_STEPS.findIndex(step => step.key === 'inspection'));
-    const estimate = getDemoEstimate(diagnosisAnswers, batteryVoltage, estimateItems, estimateRemovedItems);
+    const estimate = getDemoEstimate(diagnosisAnswers, batteryVoltage, estimateItems, estimateRemovedItems, job);
     const originalTotal = estimate.optionalSubtotal > 0 ? estimate.totalIfApproved : estimate.total;
     const approvedAdditionalTotal = sumAmounts(additionalApprovals.filter(item => item.status === 'approved'));
     const pendingAdditionalTotal = sumAmounts(additionalApprovals.filter(item => item.status === 'pending'));
@@ -2427,7 +2662,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
 
   if (completeOpen) {
     const completeIndex = Math.max(0, JOB_STEPS.findIndex(step => step.key === 'completed'));
-    const estimate = getDemoEstimate(diagnosisAnswers, batteryVoltage, estimateItems, estimateRemovedItems);
+    const estimate = getDemoEstimate(diagnosisAnswers, batteryVoltage, estimateItems, estimateRemovedItems, job);
     const originalTotal = estimate.optionalSubtotal > 0 ? estimate.totalIfApproved : estimate.total;
     const approvedRequiredChanges = additionalApprovals.filter(item => item.status === 'approved');
     const pendingRequiredChanges = additionalApprovals.filter(item => item.status === 'pending');
@@ -2535,7 +2770,8 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
 
   if (diagnosisOpen) {
     const workingIndex = Math.max(0, JOB_STEPS.findIndex(step => step.key === 'inspection'));
-    const recommendedServices = getRecommendedServicesFromDiagnosis(diagnosisAnswers, batteryVoltage);
+    const diagnosisSchema = getDiagnosisSchema(job);
+    const recommendedServices = getRecommendedServicesFromDiagnosis(diagnosisAnswers, batteryVoltage, job);
     const setDiagnosisAnswer = (key, value) => {
       pulseTabChange();
       const nextAnswers = { ...diagnosisAnswers, [key]: value };
@@ -2576,59 +2812,46 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
           </View>
 
           <View style={styles.diagnosisCard}>
-            <Text style={styles.diagnosisGroupTitle}>Battery & Electrical System</Text>
+            <Text style={styles.diagnosisGroupTitle}>{diagnosisSchema.title}</Text>
 
-            <View style={styles.diagnosisMetricRow}>
-              <View style={styles.diagnosisMetricLeft}>
-                <Ionicons name="battery-half-outline" size={18} color="#16A34A" />
-                <Text style={styles.diagnosisItemTitle}>Battery Voltage</Text>
+            {!!diagnosisSchema.metric && (
+              <View style={styles.diagnosisMetricRow}>
+                <View style={styles.diagnosisMetricLeft}>
+                  <Ionicons name={diagnosisSchema.metric.icon || 'speedometer-outline'} size={18} color="#16A34A" />
+                  <Text style={styles.diagnosisItemTitle}>{diagnosisSchema.metric.label}</Text>
+                </View>
+                <View style={styles.diagnosisVoltageInputWrap}>
+                  <TextInput
+                    style={styles.diagnosisVoltageInput}
+                    value={batteryVoltage}
+                    onChangeText={updateBatteryVoltage}
+                    placeholder="0.0"
+                    placeholderTextColor="#8B9098"
+                    keyboardType={diagnosisSchema.metric.keyboardType || 'default'}
+                  />
+                  {!!diagnosisSchema.metric.unit && <Text style={styles.diagnosisVoltageUnit}>{diagnosisSchema.metric.unit}</Text>}
+                </View>
               </View>
-              <View style={styles.diagnosisVoltageInputWrap}>
-                <TextInput
-                  style={styles.diagnosisVoltageInput}
-                  value={batteryVoltage}
-                  onChangeText={updateBatteryVoltage}
-                  placeholder="0.0"
-                  placeholderTextColor="#8B9098"
-                  keyboardType="decimal-pad"
-                />
-                <Text style={styles.diagnosisVoltageUnit}>V</Text>
-              </View>
-            </View>
+            )}
 
-            <View style={styles.diagnosisBlock}>
-              <View style={styles.diagnosisMetricLeft}>
-                <Ionicons name="flash-outline" size={18} color="#7C3AED" />
-                <Text style={styles.diagnosisItemTitle}>Jump Start Result</Text>
+            {diagnosisSchema.checks.map((check) => (
+              <View key={check.key} style={styles.diagnosisBlock}>
+                <View style={styles.diagnosisMetricLeft}>
+                  <Ionicons name={check.icon || 'checkmark-circle-outline'} size={18} color={check.color || '#F04416'} />
+                  <Text style={styles.diagnosisItemTitle}>{check.label}</Text>
+                </View>
+                <View style={styles.diagnosisOptionRow}>
+                  {check.options.map(option => (
+                    <DiagnosisOption
+                      key={option.value}
+                      label={option.label}
+                      selected={diagnosisAnswers[check.key] === option.value}
+                      onPress={() => setDiagnosisAnswer(check.key, option.value)}
+                    />
+                  ))}
+                </View>
               </View>
-              <View style={styles.diagnosisOptionRow}>
-                <DiagnosisOption label="Vehicle Started" selected={diagnosisAnswers.jumpStart === 'started'} onPress={() => setDiagnosisAnswer('jumpStart', 'started')} />
-                <DiagnosisOption label="Vehicle Did Not Start" selected={diagnosisAnswers.jumpStart === 'not_started'} onPress={() => setDiagnosisAnswer('jumpStart', 'not_started')} />
-              </View>
-            </View>
-
-            <View style={styles.diagnosisBlock}>
-              <View style={styles.diagnosisMetricLeft}>
-                <Ionicons name="battery-charging-outline" size={18} color="#2F80FF" />
-                <Text style={styles.diagnosisItemTitle}>Charging System (Alternator)</Text>
-              </View>
-              <View style={styles.diagnosisOptionRow}>
-                <DiagnosisOption label="Alternator OK" selected={diagnosisAnswers.alternator === 'ok'} onPress={() => setDiagnosisAnswer('alternator', 'ok')} />
-                <DiagnosisOption label="Alternator Failed" selected={diagnosisAnswers.alternator === 'failed'} onPress={() => setDiagnosisAnswer('alternator', 'failed')} />
-              </View>
-            </View>
-
-            <View style={styles.diagnosisBlock}>
-              <View style={styles.diagnosisMetricLeft}>
-                <Ionicons name="shield-checkmark-outline" size={18} color="#F04416" />
-                <Text style={styles.diagnosisItemTitle}>Battery Load Test</Text>
-              </View>
-              <View style={styles.diagnosisOptionRow}>
-                <DiagnosisOption label="Good" selected={diagnosisAnswers.loadTest === 'good'} onPress={() => setDiagnosisAnswer('loadTest', 'good')} />
-                <DiagnosisOption label="Weak" selected={diagnosisAnswers.loadTest === 'weak'} onPress={() => setDiagnosisAnswer('loadTest', 'weak')} />
-                <DiagnosisOption label="Bad" selected={diagnosisAnswers.loadTest === 'bad'} onPress={() => setDiagnosisAnswer('loadTest', 'bad')} />
-              </View>
-            </View>
+            ))}
           </View>
 
           <View style={styles.diagnosisNotesBlock}>
@@ -2663,17 +2886,13 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
 
   if (arrivedOpen) {
     const arrivedIndex = Math.max(0, JOB_STEPS.findIndex(step => step.key === 'arrived'));
+    const serviceFlow = getServiceFlowSchema(job);
     const checklistItems = [
       { key: 'photos', title: 'Required Photos', subtitle: 'Add clear photos of the vehicle', icon: 'camera-outline', color: '#16A34A' },
       { key: 'complaint', title: 'Confirm Customer Complaint', subtitle: 'Verify the issue with the customer', icon: 'chatbubbles-outline', color: '#7C3AED' },
       { key: 'notes', title: 'Arrival Notes', optional: true, subtitle: 'Add notes from arrival', icon: 'clipboard-outline', color: '#7C3AED' },
     ];
-    const requiredPhotoItems = [
-      { key: 'front', label: 'Front of vehicle', hint: 'License plate must be readable' },
-      { key: 'vin', label: 'VIN', hint: 'VIN label must be clear and readable' },
-      { key: 'odometer', label: 'Odometer', hint: 'Mileage reading must be visible' },
-      { key: 'problem', label: 'Problem area', hint: 'Capture the visible issue or affected area' },
-    ];
+    const requiredPhotoItems = serviceFlow.requiredPhotos || getServiceFlowSchema({ service: { serviceType: 'mobile_mechanic' } }).requiredPhotos;
     const canContinueDiagnosis = arrivedChecklist.photos && arrivedChecklist.complaint;
     const activeChecklistMeta = checklistItems.find(item => item.key === activeChecklistItem);
     const photosReady = requiredPhotoItems.every(item => !!requiredPhotos[item.key]?.uri);
@@ -3355,7 +3574,32 @@ function CompletionCheckRow({ done, title, detail }) {
   );
 }
 
-function getRecommendedServicesFromDiagnosis(answers, batteryVoltage) {
+function getRecommendedServicesFromDiagnosis(answers, batteryVoltage, order) {
+  const serviceType = getOrderServiceType(order);
+  if (serviceType === 'tire_change') {
+    const recommendations = [];
+    if (answers.tireDamage === 'not_repairable') recommendations.push('Tire Replacement');
+    if (answers.spareTire === 'not_available') recommendations.push('Tow to Tire Shop');
+    if (answers.wheelCondition === 'damaged') recommendations.push('Wheel Inspection');
+    return recommendations.length ? recommendations : ['Tire Change Labor'];
+  }
+  if (serviceType === 'towing') {
+    const recommendations = [];
+    if (answers.towMethod === 'flatbed') recommendations.push('Flatbed Towing');
+    if (answers.vehicleRolls === 'locked' || answers.steering === 'locked') recommendations.push('Special Recovery Setup');
+    return recommendations.length ? recommendations : ['Tow Service'];
+  }
+  if (serviceType === 'lockout') {
+    if (answers.ownershipVerified === 'not_verified') return ['Customer Verification Required'];
+    return ['Lockout Service'];
+  }
+  if (serviceType === 'mobile_mechanic') {
+    const recommendations = [];
+    if (answers.scanResult === 'codes_present') recommendations.push('Advanced Diagnostics');
+    if (answers.safeToDrive === 'no') recommendations.push('Safety Inspection');
+    return recommendations.length ? recommendations : ['General Diagnostics'];
+  }
+
   const recommendations = [];
   const voltage = Number.parseFloat(String(batteryVoltage || '').replace(',', '.'));
   if (answers.loadTest === 'weak' || answers.loadTest === 'bad' || (Number.isFinite(voltage) && voltage < 12.2)) {
@@ -3370,26 +3614,65 @@ function getRecommendedServicesFromDiagnosis(answers, batteryVoltage) {
   return recommendations.length ? recommendations : ['Electrical System Check'];
 }
 
-function getDemoEstimate(answers, batteryVoltage, extraItems = [], removedItems = []) {
-  const labor = [
-    { id: 'base-labor-battery-replacement', source: 'base', scope: 'required', label: 'Battery Replacement', hours: '1.0 hr', amount: 120 },
-  ];
-  const parts = [
-    { id: 'base-part-battery-group-35', source: 'base', scope: 'required', label: 'Battery Group 35', amount: 169 },
-    { id: 'base-part-shop-supplies', source: 'base', scope: 'required', label: 'Shop Supplies', amount: 12 },
-  ];
+function getDemoEstimate(answers, batteryVoltage, extraItems = [], removedItems = [], order) {
+  const serviceType = getOrderServiceType(order);
+  let labor = [];
+  let parts = [];
+
+  if (serviceType === 'tire_change') {
+    labor = [
+      { id: 'base-labor-tire-change', source: 'base', scope: 'required', label: 'Tire Change Labor', hours: '0.6 hr', amount: 72 },
+    ];
+    parts = [
+      { id: 'base-part-shop-supplies', source: 'base', scope: 'required', label: 'Shop Supplies', amount: 12 },
+    ];
+    if (answers.tireDamage === 'not_repairable') {
+      parts.splice(0, 0, { id: 'ai-part-replacement-tire', source: 'ai', scope: 'required', label: 'Replacement Tire', amount: 149 });
+    }
+  } else if (serviceType === 'towing') {
+    labor = [
+      { id: 'base-labor-tow-service', source: 'base', scope: 'required', label: answers.towMethod === 'flatbed' ? 'Flatbed Towing' : 'Tow Service', hours: '1.0 hr', amount: answers.towMethod === 'flatbed' ? 145 : 120 },
+    ];
+    parts = [
+      { id: 'base-part-tow-supplies', source: 'base', scope: 'required', label: 'Tow Supplies', amount: 15 },
+    ];
+  } else if (serviceType === 'lockout') {
+    labor = [
+      { id: 'base-labor-lockout-service', source: 'base', scope: 'required', label: 'Lockout Service', hours: '0.7 hr', amount: 89 },
+    ];
+    parts = [];
+  } else if (serviceType === 'mobile_mechanic') {
+    labor = [
+      { id: 'base-labor-diagnostics', source: 'base', scope: 'required', label: 'Mobile Diagnostics', hours: '0.8 hr', amount: 96 },
+    ];
+    parts = [
+      { id: 'base-part-shop-supplies', source: 'base', scope: 'required', label: 'Shop Supplies', amount: 12 },
+    ];
+  } else {
+    labor = [
+      { id: 'base-labor-battery-replacement', source: 'base', scope: 'required', label: 'Battery Replacement', hours: '1.0 hr', amount: 120 },
+    ];
+    parts = [
+      { id: 'base-part-battery-group-35', source: 'base', scope: 'required', label: 'Battery Group 35', amount: 169 },
+      { id: 'base-part-shop-supplies', source: 'base', scope: 'required', label: 'Shop Supplies', amount: 12 },
+    ];
+  }
   const optionalLabor = [];
   const optionalParts = [];
 
-  if (answers.alternator === 'failed') {
+  if (serviceType === 'tire_change' && answers.wheelCondition === 'damaged') {
+    optionalLabor.push({ id: 'ai-labor-wheel-inspection', source: 'ai', scope: 'optional', label: 'Wheel Inspection', hours: '0.4 hr', amount: 48 });
+  }
+
+  if ((serviceType === 'jump_start' || serviceType === 'battery_replacement') && answers.alternator === 'failed') {
     labor.push({ id: 'ai-labor-alternator-replacement', source: 'ai', scope: 'required', label: 'Alternator Replacement', hours: '1.2 hr', amount: 144 });
     parts.splice(1, 0, { id: 'ai-part-alternator', source: 'ai', scope: 'required', label: 'Alternator', amount: 189 });
   }
-  if (answers.jumpStart === 'not_started') {
+  if ((serviceType === 'jump_start' || serviceType === 'battery_replacement') && answers.jumpStart === 'not_started') {
     labor.push({ id: 'ai-labor-electrical-diagnosis', source: 'ai', scope: 'required', label: 'Electrical Diagnosis', hours: '0.8 hr', amount: 96 });
   }
   const voltage = Number.parseFloat(String(batteryVoltage || '').replace(',', '.'));
-  if (Number.isFinite(voltage) && voltage >= 12.2 && answers.loadTest === 'good') {
+  if ((serviceType === 'jump_start' || serviceType === 'battery_replacement') && Number.isFinite(voltage) && voltage >= 12.2 && answers.loadTest === 'good') {
     parts.splice(0, 1);
   }
 
@@ -3741,6 +4024,156 @@ const SERVICE_TYPES = [
   { title: 'Fuel Delivery', icon: 'water-outline', matches: ['fuel', 'gas', 'petrol'] },
 ];
 
+const SERVICE_FLOW_SCHEMAS = {
+  towing: {
+    title: 'Towing',
+    icon: 'car-sport-outline',
+    requiredPhotos: [
+      { key: 'front', label: 'Front of vehicle', hint: 'License plate must be readable' },
+      { key: 'vin', label: 'VIN', hint: 'VIN label must be clear and readable' },
+      { key: 'odometer', label: 'Odometer', hint: 'Mileage reading must be visible' },
+      { key: 'tow_access', label: 'Tow access', hint: 'Show access path and vehicle position for towing' },
+    ],
+    intakeQuestions: [
+      { key: 'vehicle_undrivable', label: 'Is the vehicle completely undrivable?' },
+      { key: 'road_type', label: 'Are you on a highway?' },
+      { key: 'injury', label: 'Is anyone injured?' },
+      { key: 'keys_available', label: 'Are the keys available?' },
+    ],
+    diagnosis: {
+      title: 'Towing Readiness',
+      metric: { key: 'towAccess', label: 'Tow Access Clearance', icon: 'resize-outline', unit: '' },
+      checks: [
+        { key: 'vehicleRolls', icon: 'car-sport-outline', label: 'Vehicle Rolls', options: [{ label: 'Rolls', value: 'rolls' }, { label: 'Does Not Roll', value: 'locked' }] },
+        { key: 'steering', icon: 'git-branch-outline', label: 'Steering Condition', options: [{ label: 'Steers', value: 'steers' }, { label: 'Locked', value: 'locked' }] },
+        { key: 'towMethod', icon: 'trail-sign-outline', label: 'Tow Method', options: [{ label: 'Wheel Lift', value: 'wheel_lift' }, { label: 'Flatbed', value: 'flatbed' }] },
+      ],
+      fallbackRecommendations: ['Tow Service'],
+    },
+  },
+  jump_start: {
+    title: 'Jump Start',
+    icon: 'battery-charging-outline',
+    requiredPhotos: [
+      { key: 'front', label: 'Front of vehicle', hint: 'License plate must be readable' },
+      { key: 'vin', label: 'VIN', hint: 'VIN label must be clear and readable' },
+      { key: 'odometer', label: 'Odometer', hint: 'Mileage reading must be visible' },
+      { key: 'battery_area', label: 'Battery area', hint: 'Show battery terminals or jump points if accessible' },
+    ],
+    intakeQuestions: [
+      { key: 'interior_lights', label: 'Are the interior lights working?' },
+      { key: 'engine_clicks', label: 'Does the engine click when starting?' },
+      { key: 'battery_age', label: 'Is the battery older than 3 years?' },
+    ],
+    diagnosis: {
+      title: 'Battery & Electrical System',
+      metric: { key: 'batteryVoltage', label: 'Battery Voltage', icon: 'battery-half-outline', unit: 'V', keyboardType: 'decimal-pad' },
+      checks: [
+        { key: 'jumpStart', icon: 'flash-outline', label: 'Jump Start Result', options: [{ label: 'Vehicle Started', value: 'started' }, { label: 'Vehicle Did Not Start', value: 'not_started' }] },
+        { key: 'alternator', icon: 'battery-charging-outline', label: 'Charging System (Alternator)', options: [{ label: 'Alternator OK', value: 'ok' }, { label: 'Alternator Failed', value: 'failed' }] },
+        { key: 'loadTest', icon: 'shield-checkmark-outline', label: 'Battery Load Test', options: [{ label: 'Good', value: 'good' }, { label: 'Weak', value: 'weak' }, { label: 'Bad', value: 'bad' }] },
+      ],
+      fallbackRecommendations: ['Electrical System Check'],
+    },
+  },
+  battery_replacement: {
+    title: 'Battery Replacement',
+    icon: 'battery-full-outline',
+    requiredPhotos: [
+      { key: 'front', label: 'Front of vehicle', hint: 'License plate must be readable' },
+      { key: 'vin', label: 'VIN', hint: 'VIN label must be clear and readable' },
+      { key: 'odometer', label: 'Odometer', hint: 'Mileage reading must be visible' },
+      { key: 'battery_area', label: 'Battery area', hint: 'Show current battery label and terminals' },
+    ],
+    intakeQuestions: [
+      { key: 'interior_lights', label: 'Are the interior lights working?' },
+      { key: 'engine_clicks', label: 'Does the engine click when starting?' },
+      { key: 'battery_age', label: 'Is the battery older than 3 years?' },
+    ],
+    diagnosis: {
+      title: 'Battery Replacement Check',
+      metric: { key: 'batteryVoltage', label: 'Battery Voltage', icon: 'battery-half-outline', unit: 'V', keyboardType: 'decimal-pad' },
+      checks: [
+        { key: 'batteryFitment', icon: 'barcode-outline', label: 'Battery Fitment', options: [{ label: 'Matched', value: 'matched' }, { label: 'Mismatch', value: 'mismatch' }] },
+        { key: 'terminalCondition', icon: 'hardware-chip-outline', label: 'Terminal Condition', options: [{ label: 'Clean', value: 'clean' }, { label: 'Corroded', value: 'corroded' }] },
+        { key: 'systemTest', icon: 'checkmark-circle-outline', label: 'Post-install Test', options: [{ label: 'Passed', value: 'passed' }, { label: 'Failed', value: 'failed' }] },
+      ],
+      fallbackRecommendations: ['Battery Replacement'],
+    },
+  },
+  lockout: {
+    title: 'Lockout',
+    icon: 'lock-open-outline',
+    requiredPhotos: [
+      { key: 'front', label: 'Front of vehicle', hint: 'License plate must be readable' },
+      { key: 'vin', label: 'VIN', hint: 'VIN label must be clear and readable if accessible' },
+      { key: 'door_area', label: 'Door area', hint: 'Show the affected door/lock area' },
+    ],
+    intakeQuestions: [
+      { key: 'keys_inside', label: 'Are keys inside the vehicle?' },
+      { key: 'engine_running', label: 'Is the engine running?' },
+      { key: 'child_or_pet_inside', label: 'Is there a child or pet inside?' },
+    ],
+    diagnosis: {
+      title: 'Lockout Verification',
+      checks: [
+        { key: 'ownershipVerified', icon: 'shield-checkmark-outline', label: 'Ownership / Permission', options: [{ label: 'Verified', value: 'verified' }, { label: 'Not Verified', value: 'not_verified' }] },
+        { key: 'entryMethod', icon: 'lock-open-outline', label: 'Entry Method', options: [{ label: 'Standard Entry', value: 'standard' }, { label: 'Key Service', value: 'key_service' }] },
+        { key: 'damageCheck', icon: 'car-outline', label: 'Damage Check', options: [{ label: 'No Damage', value: 'no_damage' }, { label: 'Damage Present', value: 'damage' }] },
+      ],
+      fallbackRecommendations: ['Lockout Service'],
+    },
+  },
+  tire_change: {
+    title: 'Tire Change',
+    icon: 'disc-outline',
+    requiredPhotos: [
+      { key: 'front', label: 'Front of vehicle', hint: 'License plate must be readable' },
+      { key: 'vin', label: 'VIN', hint: 'VIN label must be clear and readable' },
+      { key: 'odometer', label: 'Odometer', hint: 'Mileage reading must be visible' },
+      { key: 'problem', label: 'Problem tire', hint: 'Show the flat/damaged tire and wheel position' },
+    ],
+    intakeQuestions: [
+      { key: 'vehicle_moves', label: 'Can the vehicle still move?' },
+      { key: 'spare_tire', label: 'Do you have a spare tire?' },
+    ],
+    diagnosis: {
+      title: 'Tire & Wheel System',
+      metric: { key: 'tirePressure', label: 'Tire Pressure', icon: 'speedometer-outline', unit: 'PSI', keyboardType: 'decimal-pad' },
+      checks: [
+        { key: 'tireDamage', icon: 'disc-outline', label: 'Tire Damage', options: [{ label: 'Repairable', value: 'repairable' }, { label: 'Not Repairable', value: 'not_repairable' }] },
+        { key: 'spareTire', icon: 'ellipse-outline', label: 'Spare Tire', options: [{ label: 'Available', value: 'available' }, { label: 'Not Available', value: 'not_available' }] },
+        { key: 'wheelCondition', icon: 'radio-button-on-outline', label: 'Wheel / Rim Condition', options: [{ label: 'OK', value: 'ok' }, { label: 'Damaged', value: 'damaged' }] },
+      ],
+      fallbackRecommendations: ['Tire Change Labor'],
+    },
+  },
+  mobile_mechanic: {
+    title: 'Mobile Mechanic',
+    icon: 'construct-outline',
+    requiredPhotos: [
+      { key: 'front', label: 'Front of vehicle', hint: 'License plate must be readable' },
+      { key: 'vin', label: 'VIN', hint: 'VIN label must be clear and readable' },
+      { key: 'odometer', label: 'Odometer', hint: 'Mileage reading must be visible' },
+      { key: 'problem', label: 'Problem area', hint: 'Capture warning lights, leak, smoke, or affected part' },
+    ],
+    intakeQuestions: [
+      { key: 'drivable', label: 'Is the vehicle drivable?' },
+      { key: 'safe_location', label: 'Are you in a safe location?' },
+      { key: 'immediate_help', label: 'Do you need immediate help?' },
+    ],
+    diagnosis: {
+      title: 'General Mechanical Diagnosis',
+      checks: [
+        { key: 'visualInspection', icon: 'eye-outline', label: 'Visual Inspection', options: [{ label: 'Normal', value: 'normal' }, { label: 'Issue Found', value: 'issue_found' }] },
+        { key: 'scanResult', icon: 'speedometer-outline', label: 'Scan / Warning Lights', options: [{ label: 'No Codes', value: 'no_codes' }, { label: 'Codes Present', value: 'codes_present' }] },
+        { key: 'safeToDrive', icon: 'shield-checkmark-outline', label: 'Safe To Drive', options: [{ label: 'Yes', value: 'yes' }, { label: 'No', value: 'no' }] },
+      ],
+      fallbackRecommendations: ['General Diagnostics'],
+    },
+  },
+};
+
 const DEMO_SERVICE_BY_ID = {
   9025: { title: 'Towing', icon: 'car-sport-outline' },
   4427: { title: 'Jump Start', icon: 'battery-charging-outline' },
@@ -3776,9 +4209,8 @@ function getServiceMeta(order) {
   const demoService = DEMO_SERVICE_BY_ID[String(order.id || order.number || '')];
   if (demoService) return demoService;
 
-  const requestNumber = order.number || order.id;
   return {
-    title: requestNumber ? `Request #${requestNumber}` : 'New Request',
+    title: 'Service Request',
     icon: order.icon || order.service?.icon || 'receipt-outline',
   };
 }
@@ -3819,6 +4251,69 @@ function getServiceTypeText(order) {
     order.orderContext?.recommendedService,
   ].filter(Boolean).join(' ');
   return String(rawService).trim().toLowerCase();
+}
+
+function getOrderServiceType(order) {
+  const explicitType = order.serviceType || order.service?.serviceType || order.service?.typeKey || order.orderContext?.serviceType;
+  const schemas = SERVICE_FLOW_SCHEMAS || {};
+  if (explicitType && schemas[explicitType]) return explicitType;
+  const serviceText = getServiceTypeText(order);
+  if (serviceText.includes('tow')) return 'towing';
+  if (serviceText.includes('jump') || serviceText.includes('dead battery') || serviceText.includes('boost')) return 'jump_start';
+  if (serviceText.includes('lock') || serviceText.includes('key')) return 'lockout';
+  if (serviceText.includes('tire') || serviceText.includes('tyre') || serviceText.includes('flat') || serviceText.includes('wheel')) return 'tire_change';
+  if (serviceText.includes('battery replacement') || serviceText.includes('replace battery')) return 'battery_replacement';
+  return 'mobile_mechanic';
+}
+
+function getServiceFlowSchema(order) {
+  const schemas = SERVICE_FLOW_SCHEMAS || {};
+  return schemas[getOrderServiceType(order)] || schemas.mobile_mechanic || {
+    title: 'Mobile Mechanic',
+    icon: 'construct-outline',
+    requiredPhotos: [
+      { key: 'front', label: 'Front of vehicle', hint: 'License plate must be readable' },
+      { key: 'vin', label: 'VIN', hint: 'VIN label must be clear and readable' },
+      { key: 'odometer', label: 'Odometer', hint: 'Mileage reading must be visible' },
+      { key: 'problem', label: 'Problem area', hint: 'Capture the visible issue or affected area' },
+    ],
+    intakeQuestions: [],
+  };
+}
+
+function getDiagnosisSchema(order) {
+  const schema = getServiceFlowSchema(order);
+  return schema.diagnosis || SERVICE_FLOW_SCHEMAS.mobile_mechanic.diagnosis || {
+    title: `${schema.title || 'Service'} Diagnosis`,
+    checks: [
+      { key: 'visualInspection', icon: 'eye-outline', label: 'Visual Inspection', options: [{ label: 'Normal', value: 'normal' }, { label: 'Issue Found', value: 'issue_found' }] },
+      { key: 'safeToProceed', icon: 'shield-checkmark-outline', label: 'Safe To Proceed', options: [{ label: 'Yes', value: 'yes' }, { label: 'No', value: 'no' }] },
+    ],
+    fallbackRecommendations: ['General Diagnostics'],
+  };
+}
+
+function getProviderIntakeItems(order) {
+  const schema = getServiceFlowSchema(order);
+  const serviceType = getOrderServiceType(order);
+  const diagnosticInfo = order.service?.diagnosticInfo || order.diagnosticInfo || {};
+  const explicitQuestions = order.service?.intakeQuestions || diagnosticInfo.intakeQuestions || order.orderContext?.intakeQuestions;
+  const explicitServiceType = diagnosticInfo.serviceType || order.orderContext?.diagnosticServiceType;
+  const answers = order.service?.intakeAnswers || diagnosticInfo.intakeAnswers || diagnosticInfo.answers || order.orderContext?.intakeAnswers || {};
+
+  if (Array.isArray(explicitQuestions) && explicitQuestions.length && (!explicitServiceType || explicitServiceType === serviceType)) {
+    return explicitQuestions.map((item, index) => ({
+      key: item.key || item.id || `intake-${index}`,
+      label: item.label || item.question || item.title || `Question ${index + 1}`,
+      value: item.answer ?? answers[item.key] ?? answers[item.id] ?? '',
+    })).filter(item => item.label);
+  }
+
+  return schema.intakeQuestions.map((item, index) => ({
+    ...item,
+    key: item.key || `intake-${index}`,
+    value: answers[item.key] ?? answers[index + 1] ?? answers[String(index + 1)] ?? '',
+  }));
 }
 
 function isTowingService(order) {
@@ -3892,6 +4387,12 @@ function normalizeComplaintItem(item, index) {
 }
 
 function getCustomerComplaintItems(job, fallbackNote) {
+  const intakeItems = getProviderIntakeItems(job)
+    .filter(item => item.value !== undefined && item.value !== null && String(item.value).trim())
+    .map((item, index) => normalizeComplaintItem({ key: item.key || `intake-${index}`, label: item.label, value: item.value }, index))
+    .filter(Boolean);
+  if (intakeItems.length) return intakeItems;
+
   const context = job.orderContext || {};
   const rawItems =
     context.customerComplaint ||
@@ -3960,9 +4461,19 @@ async function fetchJson(url, options) {
   return JSON.parse(text);
 }
 
+function getBackendStatusFromWorkflowStage(stage) {
+  if (stage === 'route') return 'en_route';
+  if (stage === 'arrived' || stage === 'diagnosis' || stage === 'estimate') return 'arrived';
+  if (stage === 'approval') return 'estimate_sent';
+  if (stage === 'working' || stage === 'complete_review') return 'in_progress';
+  if (stage === 'completed') return 'completed';
+  return null;
+}
+
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#020C1A' },
   homeSafe: { backgroundColor: '#FFFFFF' },
+  screenSlot: { flex: 1 },
   container: { flex: 1, backgroundColor: '#020C1A' },
   homeContainer: { backgroundColor: '#FFFFFF' },
   homeTitle: { color: '#17191D' },
@@ -4098,6 +4609,8 @@ const styles = StyleSheet.create({
   jobsTabActive: { backgroundColor: '#17191D' },
   jobsTabText: { color: '#5E646D', fontSize: 11, fontWeight: '600' },
   jobsTabActiveText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
+  jobsSwipePager: { minHeight: 640 },
+  jobsSwipePage: { minHeight: 640 },
   jobsStatsRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
   jobsStatCard: { flex: 1, height: 82, borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', padding: 9, justifyContent: 'space-between' },
   jobsStatTop: { minHeight: 24, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 5 },
@@ -4111,95 +4624,98 @@ const styles = StyleSheet.create({
   jobsSectionTitle: { color: '#17191D', fontSize: 15, lineHeight: 19, fontWeight: '700' },
   jobsSortText: { color: '#5E646D', fontSize: 10, fontWeight: '600' },
   activeJobsList: { gap: 8 },
-  earningsContent: { paddingHorizontal: 15, paddingTop: 14, paddingBottom: 118 },
-  earningsHeader: { minHeight: 52, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 10 },
-  earningsTitle: { color: '#17191D', fontSize: 24, lineHeight: 29, fontWeight: '900' },
-  earningsChartCard: { borderRadius: 10, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', padding: 12, marginBottom: 10, position: 'relative' },
-  earningsChartTop: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 8 },
-  earningsChartLabel: { color: '#5E646D', fontSize: 13, lineHeight: 17, fontWeight: '900' },
-  earningsChartValue: { color: '#17191D', fontSize: 26, lineHeight: 31, fontWeight: '900', marginTop: 1 },
+  earningsContent: { paddingHorizontal: 15, paddingTop: 18, paddingBottom: 112, backgroundColor: '#FFFFFF' },
+  earningsHeader: { minHeight: 42, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 14 },
+  earningsTitle: { color: '#17191D', fontSize: 27, lineHeight: 32, fontWeight: '700' },
+  earningsChartCard: { borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', padding: 10, marginBottom: 8, position: 'relative' },
+  earningsChartTop: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, marginBottom: 3 },
+  earningsChartLabel: { color: '#5E646D', fontSize: 12, lineHeight: 15, fontWeight: '700' },
+  earningsChartValue: { color: '#17191D', fontSize: 21, lineHeight: 25, fontWeight: '800', marginTop: 0 },
   earningsTrendRow: { flexDirection: 'row', alignItems: 'center', gap: 3, marginTop: 2 },
-  earningsTrendText: { color: '#16A34A', fontSize: 12, lineHeight: 16, fontWeight: '900' },
-  earningsPeriodBtn: { height: 36, borderRadius: 12, borderWidth: 1, borderColor: '#E1E4E8', backgroundColor: '#F3F4F5', flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12 },
-  earningsPeriodText: { color: '#17191D', fontSize: 12, lineHeight: 16, fontWeight: '900' },
-  earningsChartArea: { height: 118, justifyContent: 'space-between', marginTop: 3, paddingLeft: 1 },
-  earningsChartGridRow: { height: 23, flexDirection: 'row', alignItems: 'center', gap: 8 },
-  earningsChartAxis: { width: 34, color: '#5E646D', fontSize: 10, lineHeight: 13, fontWeight: '900' },
+  earningsTrendText: { color: '#16A34A', fontSize: 11, lineHeight: 14, fontWeight: '700' },
+  earningsPeriodBtn: { height: 29, borderRadius: 15, borderWidth: 1, borderColor: '#E1E4E8', backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 9 },
+  earningsPeriodText: { color: '#17191D', fontSize: 11, lineHeight: 14, fontWeight: '700' },
+  earningsChartArea: { height: 82, justifyContent: 'space-between', marginTop: 1, paddingLeft: 1 },
+  earningsChartGridRow: { height: 16, flexDirection: 'row', alignItems: 'center', gap: 7 },
+  earningsChartAxis: { width: 31, color: '#5E646D', fontSize: 9, lineHeight: 12, fontWeight: '600' },
   earningsChartGridLine: { flex: 1, height: 1, backgroundColor: '#ECEEF0' },
-  earningsBarsLayer: { position: 'absolute', left: 46, right: 0, bottom: 8, height: 88, flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', paddingHorizontal: 7 },
-  earningsBarColumn: { width: 22, alignItems: 'center', justifyContent: 'flex-end' },
+  earningsBarsLayer: { position: 'absolute', left: 42, right: 0, bottom: 7, height: 61, flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'space-between', paddingHorizontal: 7 },
+  earningsBarColumn: { width: 20, alignItems: 'center', justifyContent: 'flex-end' },
   earningsBarFill: { width: 5, borderRadius: 4, backgroundColor: '#F04416' },
   earningsChartDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#F04416', marginTop: -4 },
-  earningsDaysRow: { marginLeft: 46, flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 1, marginTop: 4 },
-  earningsDayText: { color: '#5E646D', fontSize: 10, lineHeight: 13, fontWeight: '900' },
+  earningsDaysRow: { marginLeft: 42, flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 1, marginTop: 3 },
+  earningsDayText: { color: '#5E646D', fontSize: 9, lineHeight: 12, fontWeight: '700' },
   earningsDayActive: { color: '#F04416' },
   earningsPeakPill: { position: 'absolute', right: 14, top: 67, borderRadius: 5, backgroundColor: '#17191D', paddingHorizontal: 7, paddingVertical: 4 },
   earningsPeakText: { color: '#FFFFFF', fontSize: 9, lineHeight: 12, fontWeight: '900' },
-  earningsMetricGrid: { flexDirection: 'row', gap: 10, marginBottom: 12 },
-  earningsMetricCard: { flex: 1, minHeight: 70, borderRadius: 10, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', gap: 8, padding: 9 },
-  earningsMetricIcon: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  earningsMetricGrid: { flexDirection: 'row', gap: 8, marginBottom: 7 },
+  earningsMetricCard: { flex: 1, minHeight: 54, borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', flexDirection: 'row', alignItems: 'center', gap: 7, padding: 8 },
+  earningsMetricIcon: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   earningsMetricText: { flex: 1, minWidth: 0 },
-  earningsMetricTitle: { color: '#5E646D', fontSize: 10, lineHeight: 13, fontWeight: '900' },
-  earningsMetricValue: { color: '#17191D', fontSize: 18, lineHeight: 23, fontWeight: '900', marginTop: 1 },
-  earningsMetricMeta: { color: '#5E646D', fontSize: 10, lineHeight: 13, fontWeight: '800', marginTop: 1 },
-  earningsKpiCard: { minHeight: 62, borderRadius: 10, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 9, marginBottom: 10 },
-  earningsKpiItem: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 10 },
-  earningsKpiDivider: { borderLeftWidth: 1, borderLeftColor: '#E1E4E8', paddingLeft: 13 },
-  earningsKpiIcon: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  earningsMetricTitle: { color: '#5E646D', fontSize: 9, lineHeight: 12, fontWeight: '600' },
+  earningsMetricValue: { color: '#17191D', fontSize: 14, lineHeight: 18, fontWeight: '800', marginTop: 0 },
+  earningsMetricMeta: { color: '#5E646D', fontSize: 9, lineHeight: 12, fontWeight: '600', marginTop: 0 },
+  earningsKpiCard: { minHeight: 50, borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 8, marginBottom: 8 },
+  earningsKpiItem: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 7 },
+  earningsKpiDivider: { borderLeftWidth: 1, borderLeftColor: '#E1E4E8', paddingLeft: 9 },
+  earningsKpiIcon: { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   earningsKpiText: { flex: 1, minWidth: 0 },
-  earningsKpiValue: { color: '#17191D', fontSize: 16, lineHeight: 20, fontWeight: '900' },
-  earningsKpiLabel: { color: '#5E646D', fontSize: 9, lineHeight: 12, fontWeight: '800', marginTop: 1 },
-  balanceCard: { minHeight: 88, borderRadius: 10, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: 11, marginBottom: 10 },
+  earningsKpiValue: { color: '#17191D', fontSize: 13, lineHeight: 16, fontWeight: '800' },
+  earningsKpiLabel: { color: '#5E646D', fontSize: 8, lineHeight: 11, fontWeight: '600', marginTop: 1 },
+  balanceCard: { minHeight: 68, borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: 10, marginBottom: 8 },
   balanceTextBlock: { flex: 1, minWidth: 0 },
   balanceTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  balanceLabel: { color: '#17191D', fontSize: 13, lineHeight: 17, fontWeight: '900' },
-  balanceAmount: { color: '#F04416', fontSize: 20, lineHeight: 25, fontWeight: '900', marginTop: 4 },
-  balanceMeta: { color: '#5E646D', fontSize: 10, lineHeight: 13, fontWeight: '700', marginTop: 2 },
-  balanceActionBlock: { width: 124, alignItems: 'stretch', gap: 7, flexShrink: 0 },
-  withdrawBtn: { height: 38, borderRadius: 8, backgroundColor: '#17191D', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  withdrawText: { color: '#FFFFFF', fontSize: 12, lineHeight: 16, fontWeight: '900' },
+  balanceLabel: { color: '#17191D', fontSize: 11, lineHeight: 14, fontWeight: '700' },
+  balanceAmount: { color: '#F04416', fontSize: 16, lineHeight: 20, fontWeight: '800', marginTop: 1 },
+  balanceMeta: { color: '#5E646D', fontSize: 9, lineHeight: 12, fontWeight: '600', marginTop: 1 },
+  balanceActionBlock: { width: 106, alignItems: 'stretch', gap: 4, flexShrink: 0 },
+  withdrawBtn: { height: 30, borderRadius: 8, backgroundColor: '#17191D', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  withdrawText: { color: '#FFFFFF', fontSize: 11, lineHeight: 14, fontWeight: '700' },
   nextPayoutRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
-  nextPayoutText: { color: '#5E646D', fontSize: 12, lineHeight: 16, fontWeight: '900' },
-  earningsListCard: { borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', paddingHorizontal: 12, paddingTop: 12, marginBottom: 12 },
+  nextPayoutText: { color: '#5E646D', fontSize: 10, lineHeight: 13, fontWeight: '600' },
+  earningsListCard: { borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', paddingHorizontal: 12, paddingTop: 12, marginBottom: 10 },
   earningsListHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 5 },
-  earningsListTitle: { color: '#17191D', fontSize: 15, lineHeight: 19, fontWeight: '900' },
-  earningsViewAll: { color: '#F04416', fontSize: 11, lineHeight: 15, fontWeight: '900' },
+  earningsListTitle: { color: '#17191D', fontSize: 15, lineHeight: 19, fontWeight: '700' },
+  earningsViewAll: { color: '#F04416', fontSize: 11, lineHeight: 15, fontWeight: '700' },
   earningsTransactionRow: { minHeight: 58, borderTopWidth: 1, borderTopColor: '#ECEEF0', flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 9 },
   earningsTransactionIcon: { width: 32, height: 32, borderRadius: 16, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   earningsTransactionInfo: { flex: 1, minWidth: 0 },
-  earningsTransactionTitle: { color: '#17191D', fontSize: 12, lineHeight: 16, fontWeight: '800' },
-  earningsTransactionMeta: { color: '#5E646D', fontSize: 10, lineHeight: 13, fontWeight: '700', marginTop: 2 },
-  earningsTransactionAmount: { color: '#16A34A', fontSize: 12, lineHeight: 16, fontWeight: '900', flexShrink: 0 },
-  profileContent: { paddingHorizontal: 15, paddingTop: 14, paddingBottom: 118 },
-  profileHeader: { minHeight: 52, justifyContent: 'center', marginBottom: 10 },
-  profileTitle: { color: '#17191D', fontSize: 24, lineHeight: 29, fontWeight: '900' },
-  profileHeroCard: { borderRadius: 10, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, marginBottom: 10 },
+  earningsTransactionTitle: { color: '#17191D', fontSize: 12, lineHeight: 16, fontWeight: '700' },
+  earningsTransactionMeta: { color: '#5E646D', fontSize: 10, lineHeight: 13, fontWeight: '600', marginTop: 2 },
+  earningsTransactionAmount: { color: '#16A34A', fontSize: 12, lineHeight: 16, fontWeight: '800', flexShrink: 0 },
+  profileContent: { paddingHorizontal: 15, paddingTop: 18, paddingBottom: 112, backgroundColor: '#FFFFFF' },
+  profileHeader: { minHeight: 42, justifyContent: 'center', marginBottom: 14 },
+  profileTitle: { color: '#17191D', fontSize: 27, lineHeight: 32, fontWeight: '700' },
+  profileHeroCard: { borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, marginBottom: 10 },
   profileAvatar: { width: 58, height: 58, borderRadius: 29, backgroundColor: '#17191D', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   profileAvatarText: { color: '#FFFFFF', fontSize: 18, lineHeight: 22, fontWeight: '900' },
   profileHeroInfo: { flex: 1, minWidth: 0 },
-  profileName: { color: '#17191D', fontSize: 18, lineHeight: 23, fontWeight: '900' },
-  profileSub: { color: '#5E646D', fontSize: 12, lineHeight: 16, fontWeight: '700', marginTop: 2 },
+  profileName: { color: '#17191D', fontSize: 18, lineHeight: 23, fontWeight: '700' },
+  profileSub: { color: '#5E646D', fontSize: 12, lineHeight: 16, fontWeight: '600', marginTop: 2 },
   profileRatingRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 7 },
-  profileRatingText: { color: '#5E646D', fontSize: 11, lineHeight: 14, fontWeight: '800' },
+  profileRatingText: { color: '#5E646D', fontSize: 11, lineHeight: 14, fontWeight: '600' },
   profileDot: { width: 4, height: 4, borderRadius: 2, backgroundColor: '#C8CDD4' },
-  profileStatusCard: { minHeight: 70, borderRadius: 10, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: 12, marginBottom: 10 },
-  profileStatusTitle: { color: '#17191D', fontSize: 14, lineHeight: 18, fontWeight: '900' },
-  profileStatusMeta: { color: '#5E646D', fontSize: 11, lineHeight: 15, fontWeight: '700', marginTop: 2 },
+  profileStatusCard: { minHeight: 70, borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: 12, marginBottom: 10 },
+  profileStatusTitle: { color: '#17191D', fontSize: 14, lineHeight: 18, fontWeight: '700' },
+  profileStatusMeta: { color: '#5E646D', fontSize: 11, lineHeight: 15, fontWeight: '600', marginTop: 2 },
   profileStatusToggle: { flexDirection: 'row', alignItems: 'center', gap: 5, flexShrink: 0 },
-  profileStatusText: { color: '#F04416', fontSize: 11, lineHeight: 14, fontWeight: '900' },
+  profileStatusText: { color: '#8B9098', fontSize: 13, lineHeight: 16, fontWeight: '700' },
   profileStatusTextOnline: { color: '#128A3A' },
-  profileStatsRow: { flexDirection: 'row', gap: 8, marginBottom: 10 },
-  profileStatCard: { flex: 1, height: 70, borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
-  profileStatValue: { color: '#17191D', fontSize: 20, lineHeight: 24, fontWeight: '900' },
-  profileStatLabel: { color: '#5E646D', fontSize: 10, lineHeight: 13, fontWeight: '800', marginTop: 3 },
-  profileSection: { borderRadius: 10, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', paddingHorizontal: 12, paddingTop: 12, marginBottom: 10 },
-  profileSectionTitle: { color: '#17191D', fontSize: 15, lineHeight: 19, fontWeight: '900', marginBottom: 5 },
+  profileOnlineSwitch: { transform: [{ scaleX: 0.72 }, { scaleY: 0.72 }], marginLeft: -3 },
+  profileStatsPanel: { minHeight: 76, borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 6, marginBottom: 10 },
+  profileStatCard: { flex: 1, minHeight: 56, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 2, borderLeftWidth: 1, borderLeftColor: '#E1E4E8' },
+  profileStatCardFirst: { borderLeftWidth: 0 },
+  profileStatIcon: { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center', marginBottom: 3 },
+  profileStatValue: { color: '#17191D', fontSize: 13, lineHeight: 16, fontWeight: '800', textAlign: 'center' },
+  profileStatLabel: { color: '#5E646D', fontSize: 8, lineHeight: 10, fontWeight: '600', marginTop: 1, textAlign: 'center' },
+  profileSection: { borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', paddingHorizontal: 12, paddingTop: 12, marginBottom: 10 },
+  profileSectionTitle: { color: '#17191D', fontSize: 15, lineHeight: 19, fontWeight: '700', marginBottom: 5 },
   profileRow: { minHeight: 60, borderTopWidth: 1, borderTopColor: '#ECEEF0', flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10 },
-  profileRowIcon: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#F3F4F5', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  profileRowIcon: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   profileRowIconDone: { backgroundColor: 'rgba(22,163,74,0.10)' },
   profileRowInfo: { flex: 1, minWidth: 0 },
-  profileRowTitle: { color: '#17191D', fontSize: 13, lineHeight: 17, fontWeight: '900' },
-  profileRowDetail: { color: '#5E646D', fontSize: 11, lineHeight: 15, fontWeight: '700', marginTop: 2 },
+  profileRowTitle: { color: '#17191D', fontSize: 13, lineHeight: 17, fontWeight: '700' },
+  profileRowDetail: { color: '#5E646D', fontSize: 11, lineHeight: 15, fontWeight: '600', marginTop: 2 },
   activeJobCard: { borderRadius: 8, borderWidth: 1, backgroundColor: '#F3F4F5', padding: 10, position: 'relative' },
   activeJobTop: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 8 },
   activeJobIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
@@ -4469,13 +4985,13 @@ const styles = StyleSheet.create({
   approvalClock: { width: 68, height: 68, borderRadius: 34, backgroundColor: '#EAB308', borderWidth: 8, borderColor: 'rgba(234,179,8,0.22)', alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
   approvalTitle: { color: '#17191D', fontSize: 20, lineHeight: 25, fontWeight: '900', textAlign: 'center' },
   approvalSubtitle: { color: '#5E646D', fontSize: 13, lineHeight: 18, fontWeight: '700', textAlign: 'center', marginTop: 5 },
-  approvalEstimateCard: { borderRadius: 10, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', padding: 14, marginBottom: 16 },
+  approvalEstimateCard: { borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', padding: 10, marginBottom: 12 },
   approvalEstimateTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
-  approvalCardLabel: { color: '#17191D', fontSize: 13, lineHeight: 17, fontWeight: '800', marginBottom: 8 },
-  approvalAmount: { color: '#17191D', fontSize: 31, lineHeight: 36, fontWeight: '900' },
-  approvalSentTime: { color: '#5E646D', fontSize: 12, lineHeight: 16, fontWeight: '700', marginTop: 3 },
-  approvalViewRow: { borderTopWidth: 1, borderTopColor: '#E1E4E8', flexDirection: 'row', alignItems: 'center', gap: 7, paddingTop: 12, marginTop: 13 },
-  approvalViewText: { color: '#5E646D', fontSize: 13, lineHeight: 17, fontWeight: '800' },
+  approvalCardLabel: { color: '#17191D', fontSize: 12, lineHeight: 15, fontWeight: '700', marginBottom: 5 },
+  approvalAmount: { color: '#17191D', fontSize: 24, lineHeight: 29, fontWeight: '800' },
+  approvalSentTime: { color: '#5E646D', fontSize: 11, lineHeight: 14, fontWeight: '600', marginTop: 1 },
+  approvalViewRow: { borderTopWidth: 1, borderTopColor: '#E1E4E8', flexDirection: 'row', alignItems: 'center', gap: 6, paddingTop: 8, marginTop: 9 },
+  approvalViewText: { color: '#5E646D', fontSize: 12, lineHeight: 15, fontWeight: '700' },
   approvalNextCard: { marginBottom: 20 },
   approvalNextTitle: { color: '#17191D', fontSize: 17, lineHeight: 22, fontWeight: '900', marginBottom: 12 },
   approvalNextRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 9, marginBottom: 10 },
