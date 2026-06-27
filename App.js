@@ -14,7 +14,6 @@ import JobsScreen from './screens/JobsScreen';
 import JobDetailScreen, { JobStepper } from './screens/JobDetailScreen';
 import { getJobProgressIndex } from './utils/jobUtils';
 import { API_URL, PROVIDER, ACCEPT_BLUE, TAB_BAR_PADDING, TAB_INDICATOR_EXTRA_WIDTH, TAB_INDICATOR_DROP_SCALE, TABS, REQUEST_ROUTE, REQUEST_MAP_REGION, JOB_STEPS } from './constants';
-import { demoRequests, demoJobs } from './data';
 
 import { formatMoney, getServiceMeta, getServiceTitle, getOrderServiceType, getServiceFlowSchema, getDiagnosisSchema, getProviderIntakeItems, isTowingService, getDropoffAddress, getRequestLocation, getRequestDistance, getVehicleVin, normalizeComplaintItem, getCustomerComplaintItems, getAcceptedAtLabel, getVehicleLabel, getBackendStatusFromWorkflowStage } from './utils/serviceUtils';
 import { getRecommendedServicesFromDiagnosis, getDemoEstimate, getEstimateCatalog, getEstimatePriceCheck, sumAmounts, formatCurrency } from './utils/estimateUtils';
@@ -84,7 +83,6 @@ export default function App() {
   const [requestsLoaded, setRequestsLoaded] = useState(false);
   const [acceptedJobs, setAcceptedJobs] = useState([]);
   const [acceptedRequestIds, setAcceptedRequestIds] = useState([]);
-  const [dismissedDemoIds, setDismissedDemoIds] = useState([]);
   const dismissedRealIdsRef = useRef([]);
   const [acceptingId, setAcceptingId] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -102,9 +100,8 @@ export default function App() {
   const tabIndicatorTarget = useRef(0);
   const tabDragFrame = useRef(null);
 
-  const visibleDemoRequests = demoRequests.filter(order => !dismissedDemoIds.includes(order.id));
-  const dashboardRequests = requests.length ? requests : visibleDemoRequests;
-  const providerJobs = useMemo(() => [...acceptedJobs, ...demoJobs], [acceptedJobs]);
+  const dashboardRequests = requests;
+  const providerJobs = useMemo(() => acceptedJobs, [acceptedJobs]);
   const activeJobs = useMemo(() => providerJobs.filter(job => job.status !== 'completed' && job.status !== 'scheduled').length, [providerJobs]);
   const featuredRequest = dashboardRequests[0];
   const pendingCount = dashboardRequests.length;
@@ -151,14 +148,10 @@ export default function App() {
     setAcceptedRequestIds(current => current.includes(orderId) ? current : [...current, orderId]);
     setAcceptedJobs(current => [nextJob, ...current.filter(job => String(job.id) !== String(nextJob.id))]);
     setRequests(current => current.filter(item => String(item.id || item._id) !== orderId));
-    if (order.demo) setDismissedDemoIds(current => current.includes(order.id) ? current : [...current, order.id]);
     return nextJob;
   };
 
   const acceptOrder = async (order) => {
-    if (order.demo) {
-      return addAcceptedJob(order, { status: 'accepted', acceptedAt: new Date().toISOString() });
-    }
     try {
       setAcceptingId(order.id);
       const nextJob = addAcceptedJob(order, { status: 'accepted', acceptedAt: new Date().toISOString() });
@@ -188,7 +181,6 @@ export default function App() {
   };
 
   const dismissRequest = (order) => {
-    if (order.demo) { setDismissedDemoIds(c => [...c, order.id]); return; }
     const realId = String(order.id || order._id || '');
     if (realId) dismissedRealIdsRef.current = [...dismissedRealIdsRef.current, realId];
     setRequests(c => c.filter(item => String(item.id || item._id) !== realId));
@@ -208,7 +200,7 @@ export default function App() {
     }));
 
     const nextStatus = getBackendStatusFromWorkflowStage(patch?.stage);
-    if (!nextStatus || String(jobId || '').startsWith('demo-')) return;
+    if (!nextStatus) return;
 
     fetchJson(`${API_URL}/orders/${jobId}/status`, {
       method: 'PATCH',
@@ -561,6 +553,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
   const [estimateDeclinedOpen, setEstimateDeclinedOpen] = useState(workflow.stage === 'estimate_declined');
   const [workOpen, setWorkOpen] = useState(workflow.stage === 'working');
   const [completeOpen, setCompleteOpen] = useState(workflow.stage === 'complete_review');
+  const [invoiceOpen, setInvoiceOpen] = useState(workflow.stage === 'invoice');
   const [estimateItems, setEstimateItems] = useState(workflow.estimateItems || []);
   const [estimateRemovedItems, setEstimateRemovedItems] = useState(workflow.estimateRemovedItems || []);
   const [estimatePickerOpen, setEstimatePickerOpen] = useState(false);
@@ -607,7 +600,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
     return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
   };
   useEffect(() => {
-    if (!workOpen || !job.id || String(job.id || '').startsWith('demo-')) return;
+    if (!workOpen || !job.id) return;
     const interval = setInterval(async () => {
       try {
         const order = await fetchJson(`${API_URL}/orders/${job.id}`);
@@ -626,7 +619,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
   }, [workOpen, job.id]);
 
   useEffect(() => {
-    if (!approvalOpen || !job.id || String(job.id || '').startsWith('demo-')) return;
+    if (!approvalOpen || !job.id) return;
     const interval = setInterval(async () => {
       try {
         const order = await fetchJson(`${API_URL}/orders/${job.id}`);
@@ -1099,13 +1092,11 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
             style={styles.declinedCloseBtn}
             activeOpacity={0.86}
             onPress={() => {
-              if (!String(job.id || '').startsWith('demo-')) {
-                fetchJson(`${API_URL}/orders/${job.id}/cancel`, {
-                  method: 'PATCH',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ cancelledBy: 'provider', reason: 'Customer declined estimate' }),
-                }).catch(() => {});
-              }
+              fetchJson(`${API_URL}/orders/${job.id}/cancel`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ cancelledBy: 'provider', reason: 'Customer declined estimate' }),
+              }).catch(() => {});
               onBack?.();
             }}
           >
@@ -1122,18 +1113,6 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
     const estimate = getDemoEstimate(diagnosisAnswers, batteryVoltage, estimateItems, estimateRemovedItems, job);
     const sentTotal = estimate.optionalSubtotal > 0 ? estimate.totalIfApproved : estimate.total;
     const sentLabel = workflow.estimateSentAt || 'Sent just now';
-    const approveEstimateDemo = () => {
-      pulseTabChange();
-      setApprovalOpen(false);
-      setWorkOpen(true);
-      onWorkflowChange?.({
-        stage: 'working',
-        estimateItems,
-        estimateRemovedItems,
-        estimateApprovedAt: 'Approved just now',
-        additionalApprovals,
-      });
-    };
     return (
       <View style={styles.requestDetailShell}>
         <View style={styles.requestDetailHeader}>
@@ -1202,9 +1181,6 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
             </TouchableOpacity>
           </View>
 
-          <TouchableOpacity style={styles.approvalDemoBtn} activeOpacity={0.6} onPress={approveEstimateDemo}>
-            <Text style={styles.approvalDemoText}>Simulate approval (demo only)</Text>
-          </TouchableOpacity>
         </ScrollView>
 
         <Modal visible={estimatePreviewOpen} transparent animationType="fade" onRequestClose={() => setEstimatePreviewOpen(false)}>
@@ -1252,13 +1228,11 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
         amount: Math.round(changeRequestParsedAmount * 100) / 100,
       };
       saveAdditionalApprovals([...additionalApprovals, nextItem]);
-      if (!String(job.id || '').startsWith('demo-')) {
-        fetchJson(`${API_URL}/orders/${job.id}/change-request`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'add', changeRequest: nextItem }),
-        }).catch(e => console.log('Change request sync error:', e.message));
-      }
+      fetchJson(`${API_URL}/orders/${job.id}/change-request`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'add', changeRequest: nextItem }),
+      }).catch(e => console.log('Change request sync error:', e.message));
       setChangeRequestOpen(false);
     };
     const updateAdditionalApproval = (id, status) => {
@@ -1534,7 +1508,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
                   <Ionicons name={changeRequestEvidence ? 'checkmark-circle' : 'camera-outline'} size={20} color={changeRequestEvidence ? '#16A34A' : '#F04416'} />
                   <View style={styles.changeRequestEvidenceTextWrap}>
                     <Text style={styles.changeRequestEvidenceTitle}>{changeRequestEvidence ? 'Evidence attached' : 'Add required photo'}</Text>
-                    <Text style={styles.changeRequestEvidenceHint}>{changeRequestEvidence || 'Demo: tap to attach a photo/note for the customer.'}</Text>
+                    <Text style={styles.changeRequestEvidenceHint}>{changeRequestEvidence || 'Tap to attach a photo or note for the customer.'}</Text>
                   </View>
                 </TouchableOpacity>
 
@@ -1545,6 +1519,177 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
             </View>
           </KeyboardAvoidingView>
         </Modal>
+      </View>
+    );
+  }
+
+  if (invoiceOpen) {
+    const completedIndex = Math.max(0, JOB_STEPS.findIndex(step => step.key === 'completed'));
+    const estimate = getDemoEstimate(diagnosisAnswers, batteryVoltage, estimateItems, estimateRemovedItems, job, { includeServiceCallFee: includeCallFee });
+    const approvedRequiredChanges = additionalApprovals.filter(item => item.status === 'approved');
+    const approvedAdditionalTotal = sumAmounts(approvedRequiredChanges);
+    const invoiceTotal = estimate.total + approvedAdditionalTotal;
+    const invoiceTax = Math.round((estimate.tax + approvedAdditionalTotal * 0.0675) * 100) / 100;
+    const invoiceSubtotal = estimate.subtotal + approvedAdditionalTotal - estimate.tax;
+    const invoiceNumber = `INV-${job.number || '00000'}`;
+    const invoiceDate = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const paymentMethod = job.payment?.method ? `${job.payment.method} ••••${job.payment.last4 || '****'}` : 'Card on file';
+
+    const collectPayment = () => {
+      pulseTabChange();
+      onWorkflowChange?.({
+        stage: 'completed',
+        workPhotos,
+        workSummary,
+        workCustomerNote,
+        additionalApprovals,
+        completedAt: 'Completed just now',
+        invoiceNumber,
+      });
+      onBack?.();
+    };
+
+    return (
+      <View style={styles.requestDetailShell}>
+        <View style={styles.requestDetailHeader}>
+          <TouchableOpacity onPress={() => { setInvoiceOpen(false); setCompleteOpen(true); onWorkflowChange?.({ stage: 'complete_review' }); }} activeOpacity={0.8} style={styles.requestHeaderIconBtn}>
+            <Ionicons name="chevron-back" size={24} color="#17191D" />
+          </TouchableOpacity>
+          <View style={styles.jobPopupHeaderTextWrap}>
+            <Text style={styles.jobPopupHeaderTitle}>Job #{job.number}</Text>
+            <Text style={styles.jobPopupAcceptedText}>{invoiceNumber}</Text>
+          </View>
+          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={[styles.requestHeaderIconBtn, { alignItems: 'flex-end' }]}>
+            <Ionicons name="close" size={24} color="#17191D" />
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView style={[styles.container, styles.requestDetailScroll]} contentContainerStyle={styles.completeContent} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
+          <View style={styles.jobProgressCard}>
+            <JobStepper steps={JOB_STEPS} currentIndex={completedIndex} />
+          </View>
+
+          {/* Invoice header */}
+          <View style={styles.invoiceHeaderCard}>
+            <View style={styles.invoiceHeaderTop}>
+              <View style={styles.invoiceIconWrap}>
+                <Ionicons name="document-text-outline" size={20} color="#7C3AED" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.invoiceTitle}>Invoice</Text>
+                <Text style={styles.invoiceMeta}>{invoiceNumber} · {invoiceDate}</Text>
+              </View>
+              <View style={styles.invoiceStatusBadge}>
+                <Text style={styles.invoiceStatusText}>Ready</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* From / To */}
+          <View style={styles.invoicePartyCard}>
+            <View style={styles.invoicePartyRow}>
+              <Text style={styles.invoicePartyLabel}>FROM</Text>
+              <Text style={styles.invoicePartyName}>Auterio Provider</Text>
+              <Text style={styles.invoicePartySub}>+1 (555) 123-4567</Text>
+            </View>
+            <View style={styles.invoiceDivider} />
+            <View style={styles.invoicePartyRow}>
+              <Text style={styles.invoicePartyLabel}>TO</Text>
+              <Text style={styles.invoicePartyName}>{job.customer?.name || 'Customer'}</Text>
+              <Text style={styles.invoicePartySub}>{job.vehicle?.make} {job.vehicle?.model} {job.vehicle?.year}</Text>
+              {!!vin && <Text style={styles.invoicePartySub}>VIN: {vin}</Text>}
+            </View>
+          </View>
+
+          {/* Labor */}
+          {estimate.labor.length > 0 && (
+            <View style={styles.invoiceSection}>
+              <Text style={styles.invoiceSectionLabel}>LABOR</Text>
+              {estimate.labor.map((item, i) => (
+                <View key={item.id || i} style={[styles.invoiceLineRow, i > 0 && styles.invoiceLineRowBorder]}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.invoiceLineName}>{item.label}</Text>
+                    {!!item.hours && <Text style={styles.invoiceLineSub}>{item.hours}</Text>}
+                  </View>
+                  <Text style={styles.invoiceLineAmount}>{formatCurrency(item.amount)}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+
+          {/* Parts */}
+          {estimate.parts.length > 0 && (
+            <View style={styles.invoiceSection}>
+              <Text style={styles.invoiceSectionLabel}>PARTS & MATERIALS</Text>
+              {estimate.parts.map((item, i) => (
+                <View key={item.id || i} style={[styles.invoiceLineRow, i > 0 && styles.invoiceLineRowBorder]}>
+                  <Text style={[styles.invoiceLineName, { flex: 1 }]}>{item.label}</Text>
+                  <Text style={styles.invoiceLineAmount}>{formatCurrency(item.amount)}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+
+          {/* Fees */}
+          {estimate.fees.length > 0 && (
+            <View style={styles.invoiceSection}>
+              <Text style={styles.invoiceSectionLabel}>FEES</Text>
+              {estimate.fees.map((item, i) => (
+                <View key={i} style={[styles.invoiceLineRow, i > 0 && styles.invoiceLineRowBorder]}>
+                  <Text style={[styles.invoiceLineName, { flex: 1 }]}>{item.label}</Text>
+                  <Text style={styles.invoiceLineAmount}>{formatCurrency(item.amount)}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+
+          {/* Change requests */}
+          {approvedRequiredChanges.length > 0 && (
+            <View style={styles.invoiceSection}>
+              <Text style={styles.invoiceSectionLabel}>ADDITIONAL WORK</Text>
+              {approvedRequiredChanges.map((item, i) => (
+                <View key={i} style={[styles.invoiceLineRow, i > 0 && styles.invoiceLineRowBorder]}>
+                  <Text style={[styles.invoiceLineName, { flex: 1 }]}>{item.name || item.label}</Text>
+                  <Text style={styles.invoiceLineAmount}>{formatCurrency(item.amount)}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+
+          {/* Totals */}
+          <View style={styles.invoiceTotalsCard}>
+            <View style={styles.invoiceTotalRow}>
+              <Text style={styles.invoiceTotalLabel}>Subtotal</Text>
+              <Text style={styles.invoiceTotalValue}>{formatCurrency(invoiceSubtotal)}</Text>
+            </View>
+            <View style={[styles.invoiceTotalRow, styles.invoiceLineRowBorder]}>
+              <Text style={styles.invoiceTotalLabel}>Tax (6.75%)</Text>
+              <Text style={styles.invoiceTotalValue}>{formatCurrency(invoiceTax)}</Text>
+            </View>
+            <View style={[styles.invoiceTotalRow, styles.invoiceLineRowBorder]}>
+              <Text style={styles.invoiceTotalLabelBold}>Total</Text>
+              <Text style={styles.invoiceTotalValueBold}>{formatCurrency(invoiceTotal)}</Text>
+            </View>
+          </View>
+
+          {/* Payment method */}
+          <View style={styles.invoicePaymentRow}>
+            <Ionicons name="card-outline" size={16} color="#6B7280" />
+            <Text style={styles.invoicePaymentText}>Payment method: <Text style={{ color: '#17191D', fontWeight: '700' }}>{paymentMethod}</Text></Text>
+          </View>
+
+          {/* Collect Payment button */}
+          <TouchableOpacity style={styles.collectPaymentBtn} activeOpacity={0.86} onPress={collectPayment}>
+            <Ionicons name="checkmark-circle-outline" size={20} color="#FFFFFF" />
+            <Text style={styles.collectPaymentText}>Collect Payment · {formatCurrency(invoiceTotal)}</Text>
+          </TouchableOpacity>
+
+          {/* Warranty note */}
+          <View style={styles.invoiceWarrantyRow}>
+            <Ionicons name="shield-checkmark-outline" size={14} color="#16A34A" />
+            <Text style={styles.invoiceWarrantyText}>90-day / 4,000-mile warranty on parts and labor</Text>
+          </View>
+        </ScrollView>
       </View>
     );
   }
@@ -1564,14 +1709,14 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
       if (!canSubmitCompletion) return;
       pulseTabChange();
       onWorkflowChange?.({
-        stage: 'completed',
+        stage: 'invoice',
         workPhotos,
         workSummary,
         workCustomerNote,
         additionalApprovals,
-        completedAt: 'Completed just now',
       });
-      onBack?.();
+      setCompleteOpen(false);
+      setInvoiceOpen(true);
     };
     return (
       <View style={styles.requestDetailShell}>
@@ -2972,6 +3117,38 @@ const styles = StyleSheet.create({
   estimateApprovalNote: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 12 },
   estimateApprovalText: { color: '#5E646D', fontSize: 11, lineHeight: 15, fontWeight: '700', textAlign: 'center' },
   callFeeToggleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10, paddingHorizontal: 2, marginBottom: 6, backgroundColor: '#F9FAFB', borderRadius: 10, paddingHorizontal: 10 },
+  invoiceHeaderCard: { backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 1, borderColor: '#ECEEF0', padding: 14, marginBottom: 10 },
+  invoiceHeaderTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  invoiceIconWrap: { width: 38, height: 38, borderRadius: 10, backgroundColor: '#F3EEFF', alignItems: 'center', justifyContent: 'center' },
+  invoiceTitle: { color: '#17191D', fontSize: 16, fontWeight: '800' },
+  invoiceMeta: { color: '#6B7280', fontSize: 12, marginTop: 2, fontWeight: '500' },
+  invoiceStatusBadge: { backgroundColor: '#FFF7ED', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1, borderColor: '#FED7AA' },
+  invoiceStatusText: { color: '#C2410C', fontSize: 11, fontWeight: '700' },
+  invoicePartyCard: { backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 1, borderColor: '#ECEEF0', paddingHorizontal: 14, marginBottom: 10 },
+  invoicePartyRow: { paddingVertical: 12 },
+  invoicePartyLabel: { color: '#9CA3AF', fontSize: 10, fontWeight: '800', letterSpacing: 0.8, marginBottom: 4 },
+  invoicePartyName: { color: '#17191D', fontSize: 14, fontWeight: '700' },
+  invoicePartySub: { color: '#6B7280', fontSize: 12, marginTop: 2, fontWeight: '500' },
+  invoiceDivider: { height: 1, backgroundColor: '#F0F1F3' },
+  invoiceSection: { backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 1, borderColor: '#ECEEF0', paddingHorizontal: 14, marginBottom: 10 },
+  invoiceSectionLabel: { color: '#9CA3AF', fontSize: 10, fontWeight: '800', letterSpacing: 0.8, paddingTop: 12, paddingBottom: 6 },
+  invoiceLineRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10 },
+  invoiceLineRowBorder: { borderTopWidth: 1, borderTopColor: '#F0F1F3' },
+  invoiceLineName: { color: '#17191D', fontSize: 13, fontWeight: '600' },
+  invoiceLineSub: { color: '#9CA3AF', fontSize: 11, marginTop: 2 },
+  invoiceLineAmount: { color: '#17191D', fontSize: 13, fontWeight: '700', marginLeft: 12 },
+  invoiceTotalsCard: { backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 1, borderColor: '#ECEEF0', paddingHorizontal: 14, marginBottom: 10 },
+  invoiceTotalRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12 },
+  invoiceTotalLabel: { color: '#6B7280', fontSize: 14, fontWeight: '500' },
+  invoiceTotalValue: { color: '#17191D', fontSize: 14, fontWeight: '600' },
+  invoiceTotalLabelBold: { color: '#17191D', fontSize: 15, fontWeight: '800' },
+  invoiceTotalValueBold: { color: '#17191D', fontSize: 17, fontWeight: '800' },
+  invoicePaymentRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 16, paddingHorizontal: 2 },
+  invoicePaymentText: { color: '#6B7280', fontSize: 13, fontWeight: '500' },
+  collectPaymentBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#16A34A', borderRadius: 16, paddingVertical: 17, marginBottom: 12 },
+  collectPaymentText: { color: '#FFFFFF', fontSize: 16, fontWeight: '800' },
+  invoiceWarrantyRow: { flexDirection: 'row', alignItems: 'center', gap: 6, justifyContent: 'center', marginBottom: 8 },
+  invoiceWarrantyText: { color: '#6B7280', fontSize: 12, fontWeight: '500' },
   callFeeToggleInfo: { flex: 1, marginRight: 10 },
   callFeeToggleLabel: { color: '#17191D', fontSize: 13, fontWeight: '700' },
   callFeeToggleSub: { color: '#6B7280', fontSize: 11, marginTop: 2 },

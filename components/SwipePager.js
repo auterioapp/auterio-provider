@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { Animated, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 
 function pulseTabChange() {
   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
 }
 
-export default function SwipePager({ tabs, activeKey, onChange, children, tabBarStyle, tabStyle, tabTextStyle, pagerStyle, pageStyle }) {
+export default function SwipePager({ tabs, activeKey, onChange, children, tabBarStyle, tabStyle, tabTextStyle, activeTextStyle, indicatorStyle, pagerStyle, pageStyle }) {
   const pages = Array.isArray(children) ? children : [children];
   const [pagerWidth, setPagerWidth] = useState(0);
   const [tabBarWidth, setTabBarWidth] = useState(0);
@@ -53,6 +54,7 @@ export default function SwipePager({ tabs, activeKey, onChange, children, tabBar
             pointerEvents="none"
             style={[
               styles.swipeTabsIndicator,
+              indicatorStyle,
               {
                 width: tabWidth,
                 transform: [{
@@ -88,10 +90,11 @@ export default function SwipePager({ tabs, activeKey, onChange, children, tabBar
           });
           return (
             <TouchableOpacity key={tab.key} style={tabStyle} onPress={() => selectTab(tab.key)} activeOpacity={0.84}>
+              {!!tab.icon && <Ionicons name={tab.icon} size={13} color={tab.iconColor || tab.color || '#5E646D'} />}
               <View style={styles.swipeTabLabelWrap}>
                 <Animated.Text style={[tabTextStyle, styles.swipeTabLabelSizer]}>{tab.label}</Animated.Text>
                 <Animated.Text pointerEvents="none" style={[tabTextStyle, styles.swipeTabLabelLayer, { opacity: inactiveOpacity }]}>{tab.label}</Animated.Text>
-                <Animated.Text pointerEvents="none" style={[tabTextStyle, styles.swipeTabMaskedText, styles.swipeTabLabelLayer, { opacity: activeOpacity }]}>{tab.label}</Animated.Text>
+                <Animated.Text pointerEvents="none" style={[tabTextStyle, styles.swipeTabMaskedText, activeTextStyle, styles.swipeTabLabelLayer, { opacity: activeOpacity }]}>{tab.label}</Animated.Text>
               </View>
             </TouchableOpacity>
           );

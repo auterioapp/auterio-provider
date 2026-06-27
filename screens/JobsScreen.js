@@ -1,29 +1,35 @@
 import { useState } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import useScrollToTop from '../hooks/useScrollToTop';
 import SwipePager from '../components/SwipePager';
 import { getJobStatusMeta, getJobStatusNote, getJobProgressIndex, getWorkflowJobStatus } from '../utils/jobUtils';
 import { JOB_STEPS } from '../constants';
-import { scheduledJobs } from '../data';
-
 export default function JobsScreen({ jobs, jobWorkflows = {}, onOpen, refreshControl, scrollSignal }) {
   const scrollRef = useScrollToTop(scrollSignal);
   const [activeTab, setActiveTab] = useState('active');
+  const [searchQuery, setSearchQuery] = useState('');
   const jobsWithStatus = jobs.map(job => ({
     ...job,
     displayStatus: getWorkflowJobStatus(job.status, jobWorkflows[job.id]),
   }));
-  const activeJobsList = jobsWithStatus.filter(job => job.displayStatus !== 'completed' && job.displayStatus !== 'scheduled');
-  const completedJobs = jobsWithStatus.filter(job => job.displayStatus === 'completed');
+  const q = searchQuery.toLowerCase().trim();
+  const matchesSearch = (job) => !q
+    || (job.service?.type || job.issue?.name || '').toLowerCase().includes(q)
+    || (job.customer?.name || '').toLowerCase().includes(q)
+    || (job.pickup?.address || '').toLowerCase().includes(q)
+    || String(job.number || '').includes(q);
+  const activeJobsList = jobsWithStatus.filter(job => job.displayStatus !== 'completed' && job.displayStatus !== 'scheduled' && matchesSearch(job));
+  const scheduledJobsList = jobsWithStatus.filter(job => job.displayStatus === 'scheduled' && matchesSearch(job));
+  const completedJobs = jobsWithStatus.filter(job => job.displayStatus === 'completed' && matchesSearch(job));
   const tabs = [
-    { key: 'active', label: `Active (${activeJobsList.length})` },
-    { key: 'scheduled', label: `Scheduled (${scheduledJobs.length})` },
-    { key: 'completed', label: `Completed (${Math.max(128, completedJobs.length)})` },
+    { key: 'active', label: 'Active', icon: 'time-outline', color: '#2F80FF' },
+    { key: 'scheduled', label: 'Scheduled', icon: 'calendar-outline', color: '#2563EB' },
+    { key: 'completed', label: 'Completed', icon: 'checkmark-circle', color: '#16A34A' },
   ];
 
   const renderJobsPage = (tabKey) => {
-    const pageJobs = tabKey === 'scheduled' ? scheduledJobs : tabKey === 'completed' ? completedJobs : activeJobsList;
+    const pageJobs = tabKey === 'scheduled' ? scheduledJobsList : tabKey === 'completed' ? completedJobs : activeJobsList;
     return (
       <View>
         <View style={styles.jobsStatsRow}>
@@ -49,17 +55,6 @@ export default function JobsScreen({ jobs, jobWorkflows = {}, onOpen, refreshCon
             </View>
           )}
         </View>
-
-        {tabKey === 'active' && (
-          <>
-            <View style={styles.jobsSectionHeaderAlt}>
-              <Text style={styles.jobsSectionTitle}>Scheduled Jobs</Text>
-            </View>
-            <View style={styles.activeJobsList}>
-              {scheduledJobs.slice(0, 1).map(job => <ScheduledJobCard key={job.id} job={job} onOpen={onOpen} />)}
-            </View>
-          </>
-        )}
       </View>
     );
   };
@@ -80,6 +75,28 @@ export default function JobsScreen({ jobs, jobWorkflows = {}, onOpen, refreshCon
         </TouchableOpacity>
       </View>
 
+      <View style={styles.searchRow}>
+        <View style={styles.searchBox}>
+          <Ionicons name="search-outline" size={18} color="#5E646D" />
+          <TextInput
+            style={styles.searchInput}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            placeholder="Search jobs, customers, services..."
+            placeholderTextColor="#8B9098"
+          />
+          {!!searchQuery && (
+            <TouchableOpacity onPress={() => setSearchQuery('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Ionicons name="close-circle" size={16} color="#8B9098" />
+            </TouchableOpacity>
+          )}
+        </View>
+        <TouchableOpacity style={styles.filterButton} activeOpacity={0.86}>
+          <Ionicons name="filter-outline" size={17} color="#17191D" />
+          <Text style={styles.filterText}>Filter</Text>
+        </TouchableOpacity>
+      </View>
+
       <View>
         <SwipePager
           tabs={tabs}
@@ -88,6 +105,8 @@ export default function JobsScreen({ jobs, jobWorkflows = {}, onOpen, refreshCon
           tabBarStyle={styles.jobsTabs}
           tabStyle={styles.jobsTab}
           tabTextStyle={styles.jobsTabText}
+          activeTextStyle={styles.jobsTabTextActive}
+          indicatorStyle={styles.jobsTabIndicator}
           pagerStyle={styles.jobsSwipePager}
           pageStyle={styles.jobsSwipePage}
         >
@@ -216,9 +235,16 @@ const styles = StyleSheet.create({
   jobsTitle: { color: '#17191D', fontSize: 27, lineHeight: 32, fontWeight: '700' },
   calendarBtn: { height: 36, borderRadius: 18, borderWidth: 1, borderColor: '#E6E8EB', backgroundColor: '#F5F6F7', flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12 },
   calendarText: { color: '#17191D', fontSize: 13, fontWeight: '700' },
-  jobsTabs: { height: 42, borderRadius: 21, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F5F6F7', flexDirection: 'row', padding: 3, marginBottom: 12 },
-  jobsTab: { flex: 1, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
-  jobsTabText: { color: '#5E646D', fontSize: 11, fontWeight: '600' },
+  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 11 },
+  searchBox: { flex: 1, height: 34, borderRadius: 8, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#ECEEF0', flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 10 },
+  searchInput: { flex: 1, color: '#17191D', fontSize: 12, lineHeight: 15, fontWeight: '500', paddingVertical: 0 },
+  filterButton: { height: 34, borderRadius: 8, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#ECEEF0', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: 11 },
+  filterText: { color: '#17191D', fontSize: 12, lineHeight: 15, fontWeight: '700' },
+  jobsTabs: { height: 32, borderRadius: 8, backgroundColor: '#F3F4F5', borderWidth: 1, borderColor: '#ECEEF0', flexDirection: 'row', alignItems: 'center', padding: 2, marginBottom: 12, position: 'relative', overflow: 'hidden' },
+  jobsTab: { flex: 1, height: 26, borderRadius: 7, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingHorizontal: 4, zIndex: 1 },
+  jobsTabText: { color: '#17191D', fontSize: 11, lineHeight: 14, fontWeight: '700' },
+  jobsTabTextActive: { color: '#17191D' },
+  jobsTabIndicator: { borderRadius: 7, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#ECEEF0' },
   jobsSwipePager: { minHeight: 640 },
   jobsSwipePage: { minHeight: 640 },
   jobsStatsRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
