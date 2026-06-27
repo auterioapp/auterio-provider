@@ -1,0 +1,45 @@
+export const API_URL = 'https://auterio-backend-production.up.railway.app/api';
+
+export const PROVIDER = {
+  id: 'provider-demo-001',
+  name: 'Alex',
+  company: 'Auterio Provider',
+  initials: 'AP',
+  phone: '+15551234567',
+  rating: 4.9,
+  eta: '18-25 min',
+};
+
+export const ACCEPT_BLUE = '#276EF1';
+export const TAB_BAR_PADDING = 8;
+export const TAB_INDICATOR_EXTRA_WIDTH = 8;
+export const TAB_INDICATOR_DROP_SCALE = 1.14;
+
+export const TABS = [
+  { key: 'home', screen: 'home', icon: 'home', label: 'Home' },
+  { key: 'requests', screen: 'requests', icon: 'chatbox-outline', label: 'Requests' },
+  { key: 'jobs', screen: 'jobs', icon: 'briefcase-outline', label: 'Jobs' },
+  { key: 'earnings', screen: 'earnings', icon: 'cash-outline', label: 'Earnings' },
+  { key: 'profile', screen: 'profile', icon: 'person-outline', label: 'Profile' },
+];
+
+export const REQUEST_ROUTE = [
+  { latitude: 37.7694, longitude: -122.4862 },
+  { latitude: 37.7608, longitude: -122.4350 },
+  { latitude: 37.7912, longitude: -122.4098 },
+];
+
+export const REQUEST_MAP_REGION = {
+  latitude: 37.7756,
+  longitude: -122.4475,
+  latitudeDelta: 0.075,
+  longitudeDelta: 0.085,
+};
+
+export const JOB_STEPS = [
+  { key: 'accepted', label: 'Accepted', icon: 'checkmark-circle-outline' },
+  { key: 'on_the_way', label: 'On the way', icon: 'car-sport-outline' },
+  { key: 'arrived', label: 'Arrived', icon: 'car-outline' },
+  { key: 'inspection', label: 'Working', icon: 'construct-outline' },
+  { key: 'completed', label: 'Complete', icon: 'checkmark-done-outline' },
+];

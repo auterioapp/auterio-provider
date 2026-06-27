@@ -1,264 +1,27 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+﻿import { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Easing, KeyboardAvoidingView, Linking, Modal, PanResponder, Platform, RefreshControl, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import MapView, { Marker, Polyline } from 'react-native-maps';
+import HomeScreen from './screens/HomeScreen';
+import EarningsScreen from './screens/EarningsScreen';
+import ProfileScreen from './screens/ProfileScreen';
+import RequestsScreen from './screens/RequestsScreen';
+import RequestDetailScreen, { RequestInfoRow } from './screens/RequestDetailScreen';
+import JobsScreen from './screens/JobsScreen';
+import JobDetailScreen, { JobStepper } from './screens/JobDetailScreen';
+import { getJobProgressIndex } from './utils/jobUtils';
+import { API_URL, PROVIDER, ACCEPT_BLUE, TAB_BAR_PADDING, TAB_INDICATOR_EXTRA_WIDTH, TAB_INDICATOR_DROP_SCALE, TABS, REQUEST_ROUTE, REQUEST_MAP_REGION, JOB_STEPS } from './constants';
+import { demoRequests, demoJobs } from './data';
 
+import { formatMoney, getServiceMeta, getServiceTitle, getOrderServiceType, getServiceFlowSchema, getDiagnosisSchema, getProviderIntakeItems, isTowingService, getDropoffAddress, getRequestLocation, getRequestDistance, getVehicleVin, normalizeComplaintItem, getCustomerComplaintItems, getAcceptedAtLabel, getVehicleLabel, getBackendStatusFromWorkflowStage } from './utils/serviceUtils';
+import { getRecommendedServicesFromDiagnosis, getDemoEstimate, getEstimateCatalog, getEstimatePriceCheck, sumAmounts, formatCurrency } from './utils/estimateUtils';
+import { loadPricing } from './utils/pricingStore';
 Text.defaultProps = Text.defaultProps || {};
 Text.defaultProps.allowFontScaling = false;
 
-const API_URL = 'https://auterio-backend-production.up.railway.app/api';
-const PROVIDER = {
-  id: 'provider-demo-001',
-  name: 'Alex',
-  company: 'Auterio Provider',
-  initials: 'AP',
-  phone: '+15551234567',
-  rating: 4.9,
-  eta: '18-25 min',
-};
-const ACCEPT_BLUE = '#276EF1';
-const TAB_BAR_PADDING = 8;
-const TAB_INDICATOR_EXTRA_WIDTH = 8;
-const TAB_INDICATOR_DROP_SCALE = 1.14;
-const TABS = [
-  { key: 'home', screen: 'home', icon: 'home', label: 'Home' },
-  { key: 'requests', screen: 'requests', icon: 'chatbox-outline', label: 'Requests' },
-  { key: 'jobs', screen: 'jobs', icon: 'briefcase-outline', label: 'Jobs' },
-  { key: 'earnings', screen: 'earnings', icon: 'cash-outline', label: 'Earnings' },
-  { key: 'profile', screen: 'profile', icon: 'person-outline', label: 'Profile' },
-];
-const REQUEST_ROUTE = [
-  { latitude: 37.7694, longitude: -122.4862 },
-  { latitude: 37.7608, longitude: -122.4350 },
-  { latitude: 37.7912, longitude: -122.4098 },
-];
-const REQUEST_MAP_REGION = {
-  latitude: 37.7756,
-  longitude: -122.4475,
-  latitudeDelta: 0.075,
-  longitudeDelta: 0.085,
-};
-
-const activity = [
-  { icon: 'wallet-outline', color: '#22C55E', title: 'Payment received', meta: 'Today, 8:45 AM', value: '$89.00' },
-  { icon: 'star', color: '#FFC107', title: 'New 5-star review', meta: 'Great service! Very professional.', value: '5.0' },
-  { icon: 'checkmark-done', color: '#2F80FF', title: 'Job completed', meta: 'Battery Replacement - Job #12341', value: '$125.00' },
-];
-
-function useScrollToTop(scrollSignal) {
-  const scrollRef = useRef(null);
-  useEffect(() => {
-    if (!scrollSignal) return;
-    requestAnimationFrame(() => {
-      scrollRef.current?.scrollTo?.({ y: 0, animated: true });
-    });
-  }, [scrollSignal]);
-  return scrollRef;
-}
-
-const schedule = [
-  { time: '10:30 AM', title: 'Battery Jump', vehicle: 'Toyota Camry', eta: 'In 15 min' },
-  { time: '12:15 PM', title: 'Tire Change', vehicle: 'Honda Accord', eta: 'In 2h' },
-  { time: '2:00 PM', title: 'Diagnostics', vehicle: 'BMW X5', eta: 'In 3h 45m' },
-];
-
-const demoRequests = [
-  {
-    id: 'demo-request-1',
-    demo: true,
-    accent: '#42D463',
-    icon: 'battery-charging-outline',
-    service: {
-      issueName: 'Battery Jump',
-      serviceType: 'jump_start',
-      diagnosticInfo: {
-        intakeAnswers: { interior_lights: 'No', engine_clicks: 'Yes', battery_age: 'No' },
-        intakeQuestions: [
-          { key: 'interior_lights', label: 'Are the interior lights working?' },
-          { key: 'engine_clicks', label: 'Does the engine click when starting?' },
-          { key: 'battery_age', label: 'Is the battery older than 3 years?' },
-        ],
-      },
-    },
-    vehicle: { make: 'Toyota Highlander', year: '2018' },
-    pickup: { address: '123 Main St, San Francisco, CA' },
-    payment: { totalHeld: 89 },
-    eta: 'ETA 15 min',
-    distance: '5.2 mi away',
-  },
-  {
-    id: 'demo-request-2',
-    demo: true,
-    accent: '#FF9F1A',
-    icon: 'car-sport-outline',
-    service: {
-      issueName: 'Towing',
-      serviceType: 'towing',
-      diagnosticInfo: {
-        intakeAnswers: { vehicle_undrivable: 'Yes', road_type: 'No', injury: 'No', keys_available: 'Yes' },
-        intakeQuestions: [
-          { key: 'vehicle_undrivable', label: 'Is the vehicle completely undrivable?' },
-          { key: 'road_type', label: 'Are you on a highway?' },
-          { key: 'injury', label: 'Is anyone injured?' },
-          { key: 'keys_available', label: 'Are the keys available?' },
-        ],
-      },
-    },
-    vehicle: { make: 'Honda Civic', year: '2020' },
-    pickup: { address: '456 Oak Ave, San Francisco, CA' },
-    dropoff: { address: '789 Pine St, San Francisco, CA 94108' },
-    payment: { totalHeld: 120 },
-    eta: 'ETA 20 min',
-    distance: '6.8 mi away',
-  },
-  {
-    id: 'demo-request-3',
-    demo: true,
-    accent: '#A855F7',
-    icon: 'construct-outline',
-    service: {
-      issueName: 'Tire Change',
-      serviceType: 'tire_change',
-      diagnosticInfo: {
-        intakeAnswers: { vehicle_moves: 'No', spare_tire: 'Yes' },
-        intakeQuestions: [
-          { key: 'vehicle_moves', label: 'Can the vehicle still move?' },
-          { key: 'spare_tire', label: 'Do you have a spare tire?' },
-        ],
-      },
-    },
-    vehicle: { make: 'Nissan Altima', year: '2019' },
-    pickup: { address: '789 Pine St, San Francisco, CA' },
-    payment: { totalHeld: 69 },
-    eta: 'ETA 12 min',
-    distance: '3.1 mi away',
-  },
-  {
-    id: 'demo-request-4',
-    demo: true,
-    accent: '#2F80FF',
-    icon: 'speedometer-outline',
-    service: {
-      issueName: 'Diagnostics',
-      serviceType: 'mobile_mechanic',
-      diagnosticInfo: {
-        intakeAnswers: { drivable: 'Yes', safe_location: 'Yes', immediate_help: 'No' },
-        intakeQuestions: [
-          { key: 'drivable', label: 'Is the vehicle drivable?' },
-          { key: 'safe_location', label: 'Are you in a safe location?' },
-          { key: 'immediate_help', label: 'Do you need immediate help?' },
-        ],
-      },
-    },
-    vehicle: { make: 'BMW X5', year: '2017' },
-    pickup: { address: '321 Elm St, San Francisco, CA' },
-    payment: { totalHeld: 95 },
-    eta: 'ETA 18 min',
-    distance: '4.5 mi away',
-  },
-];
-
-const demoJobs = [
-  {
-    id: 'job-12345',
-    number: '12345',
-    status: 'on_the_way',
-    eta: '10:24 AM',
-    accent: '#42D463',
-    icon: 'battery-charging-outline',
-    customer: { name: 'John Smith', initials: 'JS', phone: '(415) 555-0198' },
-    service: { type: 'Battery Jump', icon: 'battery-charging-outline' },
-    vehicle: { make: 'Toyota Highlander', year: '2018', color: 'White' },
-    pickup: { address: '123 Main St, San Francisco, CA' },
-    payment: { method: 'VISA', last4: '4242', total: 89 },
-    customerNote: "Car won't start, lights are dim.",
-    orderContext: {
-      customerComplaints: [
-        { id: 'no-start', label: "Vehicle won't start", value: 'Customer says the engine does not crank.' },
-        { id: 'dim-lights', label: 'Dim dashboard lights', value: 'Lights became weak after several attempts.' },
-        { id: 'battery-warning', label: 'Battery warning', value: 'Battery icon appeared before the vehicle stopped.' },
-      ],
-    },
-    createdAt: 'Today, 9:15 AM',
-  },
-  {
-    id: 'job-12346',
-    number: '12346',
-    status: 'arrived',
-    eta: '12:30 PM',
-    accent: '#FF9F1A',
-    icon: 'car-sport-outline',
-    customer: { name: 'Maria Garcia', initials: 'MG', phone: '(415) 555-0234' },
-    service: { type: 'Towing', icon: 'car-sport-outline' },
-    vehicle: { make: 'Honda Civic', year: '2020', color: 'Blue' },
-    pickup: { address: '456 Oak Ave, San Francisco, CA' },
-    dropoff: { address: '789 Pine St, San Francisco, CA 94108' },
-    payment: { method: 'VISA', last4: '1234', total: 120 },
-    customerNote: 'Car broke down on the highway.',
-    createdAt: 'Today, 11:50 AM',
-  },
-  {
-    id: 'job-12347',
-    number: '12347',
-    status: 'waiting_approval',
-    eta: '12 min',
-    accent: '#EAB308',
-    icon: 'battery-charging-outline',
-    customer: { name: 'David Lee', initials: 'DL', phone: '(415) 555-0312' },
-    service: { type: 'Battery Replacement', icon: 'battery-charging-outline' },
-    vehicle: { make: 'BMW X5', year: '2017', color: 'Black' },
-    pickup: { address: '789 Pine St, San Francisco, CA' },
-    payment: { method: 'Mastercard', last4: '5678', total: 180 },
-    customerNote: 'Customer reviewing your estimate.',
-    createdAt: 'Today, 1:30 PM',
-  },
-];
-
-const JOB_STEPS = [
-  { key: 'accepted', label: 'Accepted', icon: 'checkmark-circle-outline' },
-  { key: 'on_the_way', label: 'On the way', icon: 'car-sport-outline' },
-  { key: 'arrived', label: 'Arrived', icon: 'car-outline' },
-  { key: 'inspection', label: 'Working', icon: 'construct-outline' },
-  { key: 'completed', label: 'Complete', icon: 'checkmark-done-outline' },
-];
-
-const scheduledJobs = [
-  {
-    id: 'scheduled-1',
-    number: '23001',
-    status: 'scheduled',
-    eta: 'In 2h 15m',
-    time: '2:30 PM',
-    accent: '#2F80FF',
-    icon: 'calendar-outline',
-    customer: { name: 'Rosa Carter', initials: 'RC', phone: '(415) 555-0147' },
-    service: { type: 'Tire Change', icon: 'calendar-outline' },
-    vehicle: { make: 'Nissan Altima', year: '2019', color: 'Gray' },
-    pickup: { address: '321 Market St, San Francisco, CA' },
-    payment: { method: 'VISA', last4: '8842', total: 69 },
-    customerNote: 'Scheduled roadside tire change.',
-    createdAt: 'Today, 2:30 PM',
-  },
-  {
-    id: 'scheduled-2',
-    number: '23002',
-    status: 'scheduled',
-    eta: 'Tomorrow',
-    time: '9:00 AM',
-    accent: '#2F80FF',
-    icon: 'calendar-outline',
-    customer: { name: 'Evan Brooks', initials: 'EB', phone: '(415) 555-0183' },
-    service: { type: 'Diagnostics', icon: 'calendar-outline' },
-    vehicle: { make: 'Ford Escape', year: '2021', color: 'Blue' },
-    pickup: { address: '88 Mission St, San Francisco, CA' },
-    payment: { method: 'VISA', last4: '3920', total: 95 },
-    customerNote: 'Scheduled diagnostic appointment.',
-    createdAt: 'Tomorrow, 9:00 AM',
-  },
-];
 
 function normalizeOrderToJob(order) {
   const serviceMeta = getServiceMeta(order);
@@ -322,6 +85,7 @@ export default function App() {
   const [acceptedJobs, setAcceptedJobs] = useState([]);
   const [acceptedRequestIds, setAcceptedRequestIds] = useState([]);
   const [dismissedDemoIds, setDismissedDemoIds] = useState([]);
+  const dismissedRealIdsRef = useRef([]);
   const [acceptingId, setAcceptingId] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState(null);
@@ -339,7 +103,7 @@ export default function App() {
   const tabDragFrame = useRef(null);
 
   const visibleDemoRequests = demoRequests.filter(order => !dismissedDemoIds.includes(order.id));
-  const dashboardRequests = requests.length ? requests : requestsLoaded ? [] : visibleDemoRequests;
+  const dashboardRequests = requests.length ? requests : visibleDemoRequests;
   const providerJobs = useMemo(() => [...acceptedJobs, ...demoJobs], [acceptedJobs]);
   const activeJobs = useMemo(() => providerJobs.filter(job => job.status !== 'completed' && job.status !== 'scheduled').length, [providerJobs]);
   const featuredRequest = dashboardRequests[0];
@@ -347,7 +111,7 @@ export default function App() {
   const tabWidth = tabBarWidth ? (tabBarWidth - TAB_BAR_PADDING * 2) / TABS.length : 0;
   const isLightVisible = !!selectedRequest || (!selectedRequest && (activeScreen === 'home' || activeScreen === 'requests' || activeScreen === 'jobs' || activeScreen === 'earnings' || activeScreen === 'profile'));
 
-  useEffect(() => { loadRequests(); }, []);
+  useEffect(() => { loadRequests(); loadPricing(); }, []);
 
   useEffect(() => {
     if (!featuredRequest) { requestAnim.setValue(0); return; }
@@ -360,7 +124,7 @@ export default function App() {
       const data = await fetchJson(`${API_URL}/orders?status=pending`);
       const pendingOrders = Array.isArray(data)
         ? data
-          .filter(o => (!o.status || o.status === 'pending') && !acceptedRequestIds.includes(String(o.id || o._id)))
+          .filter(o => (!o.status || o.status === 'pending') && !acceptedRequestIds.includes(String(o.id || o._id)) && !dismissedRealIdsRef.current.includes(String(o.id || o._id)))
           .sort((a, b) => {
             const aTime = new Date(a.createdAt || a.date || 0).getTime() || 0;
             const bTime = new Date(b.createdAt || b.date || 0).getTime() || 0;
@@ -388,16 +152,16 @@ export default function App() {
     setAcceptedJobs(current => [nextJob, ...current.filter(job => String(job.id) !== String(nextJob.id))]);
     setRequests(current => current.filter(item => String(item.id || item._id) !== orderId));
     if (order.demo) setDismissedDemoIds(current => current.includes(order.id) ? current : [...current, order.id]);
+    return nextJob;
   };
 
   const acceptOrder = async (order) => {
     if (order.demo) {
-      addAcceptedJob(order, { status: 'accepted', acceptedAt: new Date().toISOString() });
-      return;
+      return addAcceptedJob(order, { status: 'accepted', acceptedAt: new Date().toISOString() });
     }
     try {
       setAcceptingId(order.id);
-      addAcceptedJob(order, { status: 'accepted', acceptedAt: new Date().toISOString() });
+      const nextJob = addAcceptedJob(order, { status: 'accepted', acceptedAt: new Date().toISOString() });
       fetchJson(`${API_URL}/orders/${order.id}/accept`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -415,6 +179,7 @@ export default function App() {
       }).catch((error) => {
         console.log('Accept order sync error:', error.message);
       });
+      return nextJob;
     } catch (error) {
       console.log('Accept order error:', error.message);
     } finally {
@@ -424,7 +189,16 @@ export default function App() {
 
   const dismissRequest = (order) => {
     if (order.demo) { setDismissedDemoIds(c => [...c, order.id]); return; }
-    setRequests(c => c.filter(item => item.id !== order.id));
+    const realId = String(order.id || order._id || '');
+    if (realId) dismissedRealIdsRef.current = [...dismissedRealIdsRef.current, realId];
+    setRequests(c => c.filter(item => String(item.id || item._id) !== realId));
+    if (realId) {
+      fetchJson(`${API_URL}/orders/${realId}/decline`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ providerId: PROVIDER.id }),
+      }).catch(() => {});
+    }
   };
 
   const updateJobWorkflow = (jobId, patch) => {
@@ -672,7 +446,7 @@ export default function App() {
               acceptingId={acceptingId}
               pendingCount={pendingCount}
               activeJobs={activeJobs}
-              onAccept={acceptOrder}
+              onAccept={async (order) => { const job = await acceptOrder(order); if (job) setSelectedJob(job); }}
               onDecline={dismissRequest}
               onOpenRequest={setSelectedRequest}
               refreshControl={refreshControl}
@@ -773,1106 +547,8 @@ export default function App() {
   );
 }
 
-function HomeScreen({ online, setOnline, featuredRequest, requestAnim, acceptingId, pendingCount, activeJobs, onAccept, onDecline, onOpenRequest, refreshControl, scrollSignal }) {
-  const scrollRef = useScrollToTop(scrollSignal);
-  return (
-    <ScrollView ref={scrollRef} style={[styles.container, styles.homeContainer]} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
-      <View style={styles.header}>
-        <View><Text style={[styles.title, styles.homeTitle]}>Dashboard</Text></View>
-        <View style={styles.headerActions}>
-          <View style={[styles.onlinePill, online && styles.onlinePillActive]}>
-            <Text style={[styles.onlineText, online && styles.onlineTextActive]}>{online ? 'Online' : 'Offline'}</Text>
-            <Switch value={online} onValueChange={setOnline} trackColor={{ false: '#E6E8EB', true: '#DEE0E3' }} thumbColor={online ? '#17191D' : '#8B9098'} style={styles.onlineSwitch} />
-          </View>
-          <TouchableOpacity style={styles.bellBtn} activeOpacity={0.84}>
-            <Ionicons name="notifications-outline" size={22} color="#17191D" />
-            {!!pendingCount && <View style={styles.badge}><Text style={styles.badgeText}>{pendingCount}</Text></View>}
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      <Text style={[styles.greeting, styles.homeTitle]}>Good morning, {PROVIDER.name}</Text>
-      <Text style={styles.subGreeting}>Here's what's happening with your business today.</Text>
-
-      <View style={styles.metricsGrid}>
-        <Metric title="Today's Revenue" value="$1,240.00" meta="12% vs yesterday" icon="cash-outline" color="#17191D" />
-        <Metric title="Active Jobs" value={String(activeJobs)} meta="View ongoing jobs" icon="briefcase-outline" color="#F04416" />
-        <Metric title="Pending Requests" value={String(pendingCount)} meta="View new requests" icon="receipt-outline" color="#17191D" />
-        <Metric title="Jobs Completed" value="8" meta="2 vs yesterday" icon="checkmark-done" color="#F04416" />
-      </View>
-
-      {!!featuredRequest && (
-        <IncomingRequest
-          order={featuredRequest}
-          accepting={acceptingId === featuredRequest.id}
-          animation={requestAnim}
-          onAccept={onAccept}
-          onDecline={onDecline}
-          onOpen={onOpenRequest}
-        />
-      )}
-
-      <View style={styles.sectionCard}>
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Today's Schedule</Text>
-          <Text style={styles.linkText}>View all</Text>
-        </View>
-        {schedule.map((item, index) => (
-          <View key={item.time} style={[styles.scheduleRow, index < schedule.length - 1 && styles.rowBorder]}>
-            <Text style={styles.timeText}>{item.time}</Text>
-            <View style={styles.timelineDot} />
-            <View style={styles.scheduleInfo}>
-              <Text style={styles.scheduleTitle}>{item.title}</Text>
-              <Text style={styles.scheduleVehicle}>{item.vehicle}</Text>
-            </View>
-            <Text style={styles.etaText}>{item.eta}</Text>
-          </View>
-        ))}
-      </View>
-
-      <View style={styles.sectionCard}>
-        <Text style={[styles.sectionTitle, { marginBottom: 12 }]}>Recent Activity</Text>
-        {activity.map(item => (
-          <View key={item.title} style={styles.activityRow}>
-            <View style={[styles.activityIcon, { backgroundColor: item.color + '20' }]}>
-              <Ionicons name={item.icon} size={18} color={item.color} />
-            </View>
-            <View style={styles.activityInfo}>
-              <Text style={styles.activityTitle}>{item.title}</Text>
-              <Text style={styles.activityMeta}>{item.meta}</Text>
-            </View>
-            <Text style={[styles.activityValue, item.valueColor && { color: item.valueColor }]}>{item.value}</Text>
-          </View>
-        ))}
-      </View>
-    </ScrollView>
-  );
-}
-
-function IncomingRequest({ order, accepting, animation, onAccept, onDecline, onOpen }) {
-  const translateY = animation.interpolate({ inputRange: [0, 1], outputRange: [-18, 0] });
-  const serviceMeta = getServiceMeta(order);
-  const title = serviceMeta.title;
-  const address = order.pickup?.address || 'Location pending';
-  const vehicle = [order.vehicle?.make, order.vehicle?.model].filter(Boolean).join(' ');
-
-  return (
-    <Animated.View style={[styles.incomingCard, { opacity: animation, transform: [{ translateY }] }]}>
-      <TouchableOpacity onPress={() => onOpen && onOpen(order)} activeOpacity={0.88} style={{ marginBottom: 10 }}>
-        <View style={styles.incomingTop}>
-          <View style={styles.incomingLabelWrap}>
-            <View style={styles.newBadge}><Text style={styles.newBadgeText}>NEW</Text></View>
-            <Text style={styles.incomingLabel}>New Request</Text>
-          </View>
-          <View style={styles.liveWrap}>
-            <Text style={styles.justNow}>Just now</Text>
-            <Ionicons name="radio-outline" size={18} color="#F04416" />
-          </View>
-          </View>
-          <View style={styles.incomingBody}>
-            <View style={styles.incomingIcon}>
-            <Ionicons name={serviceMeta.icon} size={25} color="#17191D" />
-          </View>
-          <View style={styles.incomingInfo}>
-            <Text style={styles.incomingTitle} numberOfLines={1}>{title}</Text>
-            {!!vehicle && <Text style={styles.incomingVehicle} numberOfLines={1}>{vehicle}</Text>}
-            <View style={styles.incomingMetaRow}>
-              <Ionicons name="location-outline" size={15} color="#B7C1D7" />
-              <Text style={styles.incomingMeta} numberOfLines={1}>{address}</Text>
-            </View>
-            <View style={styles.incomingMetaRow}>
-              <Ionicons name="navigate-outline" size={15} color="#B7C1D7" />
-              <Text style={styles.incomingMeta}>{order.distance || '5.2 mi away'}</Text>
-            </View>
-          </View>
-          <View style={styles.incomingPriceBox}>
-            <Text style={styles.incomingPrice}>{formatMoney(order)}</Text>
-            <Text style={styles.incomingEta}>{order.eta || 'Est. 25 min'}</Text>
-          </View>
-        </View>
-      </TouchableOpacity>
-      <View style={styles.incomingActions}>
-        <TouchableOpacity style={styles.reviewRequestBtn} onPress={() => onOpen && onOpen(order)} activeOpacity={0.84}>
-          <Text style={styles.reviewRequestText}>Review request</Text>
-          <Ionicons name="chevron-forward" size={16} color="#FFFFFF" />
-        </TouchableOpacity>
-      </View>
-    </Animated.View>
-  );
-}
-
-function RequestsScreen({ requests, acceptingId, filter, onFilterChange, onAccept, onDecline, onOpen, refreshControl, scrollSignal }) {
-  const scrollRef = useScrollToTop(scrollSignal);
-  const acceptedCount = 2;
-  const tabs = [
-    { key: 'new', label: `New (${requests.length})` },
-    { key: 'accepted', label: `Accepted (${acceptedCount})` },
-    { key: 'declined', label: 'Declined' },
-  ];
-
-  return (
-    <ScrollView
-      ref={scrollRef}
-      style={[styles.container, styles.homeContainer]}
-      contentContainerStyle={styles.requestsContent}
-      showsVerticalScrollIndicator={false}
-      refreshControl={refreshControl}
-    >
-      <View style={styles.requestsHeader}>
-        <Text style={styles.requestsTitle}>Requests</Text>
-        <TouchableOpacity style={styles.filterButton} activeOpacity={0.8}>
-          <Text style={styles.filterText}>Filter</Text>
-            <Ionicons name="filter-outline" size={20} color="#17191D" />
-        </TouchableOpacity>
-      </View>
-
-      <View>
-        <SwipePager
-          tabs={tabs}
-          activeKey={filter}
-          onChange={onFilterChange}
-          tabBarStyle={styles.requestTabs}
-          tabStyle={styles.requestTab}
-          tabTextStyle={styles.requestTabText}
-          pagerStyle={styles.requestsSwipePager}
-          pageStyle={styles.requestsSwipePage}
-        >
-          <View style={styles.requestList}>
-            {requests.map(order => (
-              <RequestCard
-                key={order.id}
-                order={order}
-                accepting={acceptingId === order.id}
-                onAccept={onAccept}
-                onDecline={onDecline}
-                onOpen={onOpen}
-              />
-            ))}
-          </View>
-          <View style={styles.requestEmptyState}>
-            <Ionicons name="checkmark-circle-outline" size={28} color="#7A8BA8" />
-            <Text style={styles.requestEmptyText}>No accepted requests yet</Text>
-          </View>
-          <View style={styles.requestEmptyState}>
-            <Ionicons name="close-circle-outline" size={28} color="#7A8BA8" />
-            <Text style={styles.requestEmptyText}>No declined requests yet</Text>
-          </View>
-        </SwipePager>
-      </View>
-    </ScrollView>
-  );
-}
-
-function RequestCard({ order, accepting, onAccept, onDecline, onOpen }) {
-  const serviceMeta = getServiceMeta(order);
-  const icon = serviceMeta.icon;
-  const title = serviceMeta.title;
-  const vehicle = getVehicleLabel(order);
-  const location = getRequestLocation(order);
-
-  return (
-    <TouchableOpacity style={[styles.activeListCard, styles.neutralListCard]} onPress={() => onOpen && onOpen(order)} activeOpacity={0.86}>
-        <View style={styles.activeListIcon}>
-          <Ionicons name={icon} size={20} color="#F04416" />
-        </View>
-        <View style={styles.activeListInfo}>
-          <Text style={styles.neutralListStatus}>NEW REQUEST</Text>
-          <Text style={styles.activeListTitle} numberOfLines={1}>{title}</Text>
-          {!!vehicle && <Text style={styles.activeListVehicle} numberOfLines={1}>{vehicle}</Text>}
-          <Text style={styles.activeListAddress} numberOfLines={1}>{location}</Text>
-        </View>
-        <View style={styles.activeListAside}>
-          <Text style={styles.neutralListPrice}>{formatMoney(order)}</Text>
-          <View style={styles.activeListEtaRow}>
-            <Ionicons name="time-outline" size={10} color="#F04416" style={styles.activeListEtaIcon} />
-            <Text style={styles.neutralListEta} numberOfLines={1}>{order.eta || 'ETA 15 min'}</Text>
-          </View>
-        </View>
-    </TouchableOpacity>
-  );
-}
-
-function JobsScreen({ jobs, jobWorkflows = {}, onOpen, refreshControl, scrollSignal }) {
-  const scrollRef = useScrollToTop(scrollSignal);
-  const [activeTab, setActiveTab] = useState('active');
-  const jobsWithStatus = jobs.map(job => ({
-    ...job,
-    displayStatus: getWorkflowJobStatus(job.status, jobWorkflows[job.id]),
-  }));
-  const activeJobsList = jobsWithStatus.filter(job => job.displayStatus !== 'completed' && job.displayStatus !== 'scheduled');
-  const completedJobs = jobsWithStatus.filter(job => job.displayStatus === 'completed');
-  const tabs = [
-    { key: 'active', label: `Active (${activeJobsList.length})` },
-    { key: 'scheduled', label: `Scheduled (${scheduledJobs.length})` },
-    { key: 'completed', label: `Completed (${Math.max(128, completedJobs.length)})` },
-  ];
-  const renderJobsPage = (tabKey) => {
-    const pageJobs = tabKey === 'scheduled' ? scheduledJobs : tabKey === 'completed' ? completedJobs : activeJobsList;
-    return (
-      <View>
-        <View style={styles.jobsStatsRow}>
-          <JobMetric title="Today's Earnings" value="$423" meta="4 completed jobs" icon="wallet-outline" color="#F04416" />
-          <JobMetric title="This Week" value="$1,247" meta="12 completed jobs" icon="stats-chart-outline" color="#17191D" />
-          <JobMetric title="Rating" value="4.9" meta="Based on 128 reviews" icon="star" color="#FFC107" star />
-        </View>
-
-        <View style={styles.jobsSectionHeader}>
-          <Text style={styles.jobsSectionTitle}>{tabKey === 'scheduled' ? 'Scheduled Jobs' : tabKey === 'completed' ? 'Completed Jobs' : 'Active Jobs'}</Text>
-          {tabKey === 'active' && <Text style={styles.jobsSortText}>Sort by: Status</Text>}
-        </View>
-
-        <View style={styles.activeJobsList}>
-          {pageJobs.length ? pageJobs.map(job => (
-            tabKey === 'scheduled'
-              ? <ScheduledJobCard key={job.id} job={job} onOpen={onOpen} />
-              : <ActiveJobCard key={job.id} job={job} onOpen={onOpen} completed={tabKey === 'completed'} />
-          )) : (
-            <View style={styles.requestEmptyState}>
-              <Ionicons name="briefcase-outline" size={28} color="#7A8BA8" />
-              <Text style={styles.requestEmptyText}>No jobs in this view</Text>
-            </View>
-          )}
-        </View>
-
-        {tabKey === 'active' && (
-          <>
-            <View style={styles.jobsSectionHeaderAlt}>
-              <Text style={styles.jobsSectionTitle}>Scheduled Jobs</Text>
-            </View>
-            <View style={styles.activeJobsList}>
-              {scheduledJobs.slice(0, 1).map(job => <ScheduledJobCard key={job.id} job={job} onOpen={onOpen} />)}
-            </View>
-          </>
-        )}
-      </View>
-    );
-  };
-
-  return (
-    <ScrollView
-      ref={scrollRef}
-      style={[styles.container, styles.homeContainer]}
-      contentContainerStyle={styles.jobsContent}
-      showsVerticalScrollIndicator={false}
-      refreshControl={refreshControl}
-    >
-      <View style={styles.jobsHeader}>
-        <Text style={styles.jobsTitle}>Jobs</Text>
-        <TouchableOpacity style={styles.calendarBtn} activeOpacity={0.84}>
-          <Ionicons name="calendar-outline" size={14} color="#17191D" />
-          <Text style={styles.calendarText}>Calendar</Text>
-        </TouchableOpacity>
-      </View>
-
-      <View>
-        <SwipePager
-          tabs={tabs}
-          activeKey={activeTab}
-          onChange={setActiveTab}
-          tabBarStyle={styles.jobsTabs}
-          tabStyle={styles.jobsTab}
-          tabTextStyle={styles.jobsTabText}
-          pagerStyle={styles.jobsSwipePager}
-          pageStyle={styles.jobsSwipePage}
-        >
-          {renderJobsPage('active')}
-          {renderJobsPage('scheduled')}
-          {renderJobsPage('completed')}
-        </SwipePager>
-      </View>
-    </ScrollView>
-  );
-}
-
-function EarningsScreen({ refreshControl, scrollSignal }) {
-  const scrollRef = useScrollToTop(scrollSignal);
-  const chartValues = [620, 1180, 760, 1120, 960, 1320, 1500];
-  const chartMax = 1500;
-  const chartDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  const revenueCards = [
-    { title: 'Labor Revenue', value: '$1,480.00', meta: '35 Jobs', icon: 'construct-outline', color: '#16A34A', bg: 'rgba(22,163,74,0.10)' },
-    { title: 'Parts Revenue', value: '$540.00', meta: '12 Jobs', icon: 'settings-outline', color: '#2F80FF', bg: 'rgba(47,128,255,0.10)' },
-  ];
-  const kpis = [
-    { label: 'Completed Jobs', value: '42', icon: 'briefcase-outline', color: '#F04416', bg: 'rgba(240,68,22,0.10)' },
-    { label: 'Avg Ticket', value: '$102', icon: 'ticket-outline', color: '#2F80FF', bg: 'rgba(47,128,255,0.10)' },
-    { label: 'Online Hours', value: '34h', icon: 'time-outline', color: '#16A34A', bg: 'rgba(22,163,74,0.10)' },
-  ];
-  const transactions = [
-    { icon: 'car-outline', title: 'Toyota Camry - Jump Start', meta: 'Today, 10:30 AM', amount: '+$85.00' },
-    { icon: 'disc-outline', title: 'Honda Accord - Tire Change', meta: 'Today, 12:15 PM', amount: '+$140.00' },
-    { icon: 'settings-outline', title: 'BMW X5 - Diagnostics', meta: 'Today, 2:00 PM', amount: '+$220.00' },
-    { icon: 'car-sport-outline', title: 'Ford F-150 - Towing', meta: 'Yesterday, 4:45 PM', amount: '+$310.00' },
-  ];
-  const payouts = [
-    { date: 'Jun 18, 2024', meta: 'Bank Deposit', amount: '$1,750.00' },
-    { date: 'Jun 11, 2024', meta: 'Bank Deposit', amount: '$2,040.00' },
-    { date: 'Jun 4, 2024', meta: 'Bank Deposit', amount: '$1,890.00' },
-  ];
-
-  return (
-    <ScrollView ref={scrollRef} style={[styles.container, styles.homeContainer]} contentContainerStyle={styles.earningsContent} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
-      <View style={styles.earningsHeader}>
-        <Text style={styles.earningsTitle}>Earnings</Text>
-      </View>
-
-      <View style={styles.earningsChartCard}>
-        <View style={styles.earningsChartTop}>
-          <View>
-            <Text style={styles.earningsChartLabel}>This Week</Text>
-            <Text style={styles.earningsChartValue}>$4,285.00</Text>
-            <View style={styles.earningsTrendRow}>
-              <Ionicons name="caret-up" size={10} color="#16A34A" />
-              <Text style={styles.earningsTrendText}>18% vs last week</Text>
-            </View>
-          </View>
-          <TouchableOpacity style={styles.earningsPeriodBtn} activeOpacity={0.84}>
-            <Text style={styles.earningsPeriodText}>This Week</Text>
-            <Ionicons name="chevron-down" size={13} color="#17191D" />
-          </TouchableOpacity>
-        </View>
-        <View style={styles.earningsChartArea}>
-          {[1500, 1000, 500, 0].map(value => (
-            <View key={value} style={styles.earningsChartGridRow}>
-              <Text style={styles.earningsChartAxis}>{value === 1500 ? '$1.5K' : value === 1000 ? '$1K' : value === 500 ? '$500' : '$0'}</Text>
-              <View style={styles.earningsChartGridLine} />
-            </View>
-          ))}
-          <View style={styles.earningsBarsLayer}>
-            {chartValues.map((value, index) => {
-              const height = Math.max(8, Math.round((value / chartMax) * 61));
-              return (
-                <View key={`${chartDays[index]}-${value}`} style={styles.earningsBarColumn}>
-                  <View style={[styles.earningsBarFill, { height }]} />
-                </View>
-              );
-            })}
-          </View>
-        </View>
-        <View style={styles.earningsDaysRow}>
-          {chartDays.map(day => <Text key={day} style={[styles.earningsDayText, day === 'Sun' && styles.earningsDayActive]}>{day}</Text>)}
-        </View>
-      </View>
-
-      <View style={styles.earningsMetricGrid}>
-        {revenueCards.map(card => <EarningsMetric key={card.title} {...card} />)}
-      </View>
-
-      <View style={styles.earningsKpiCard}>
-        {kpis.map((item, index) => (
-          <View key={item.label} style={[styles.earningsKpiItem, index > 0 && styles.earningsKpiDivider]}>
-            <View style={[styles.earningsKpiIcon, { backgroundColor: item.bg }]}>
-        <Ionicons name={item.icon} size={15} color={item.color} />
-            </View>
-            <View style={styles.earningsKpiText}>
-              <Text style={styles.earningsKpiValue}>{item.value}</Text>
-              <Text style={styles.earningsKpiLabel}>{item.label}</Text>
-            </View>
-          </View>
-        ))}
-      </View>
-
-      <View style={styles.balanceCard}>
-        <View style={styles.balanceTextBlock}>
-          <View style={styles.balanceTitleRow}>
-            <Text style={styles.balanceLabel}>Available Balance</Text>
-            <Ionicons name="information-circle-outline" size={14} color="#8B9098" />
-          </View>
-          <Text style={styles.balanceAmount}>$2,180.00</Text>
-          <Text style={styles.balanceMeta}>Will be paid out on Jun 25</Text>
-        </View>
-        <View style={styles.balanceActionBlock}>
-          <TouchableOpacity style={styles.withdrawBtn} activeOpacity={0.86}>
-            <Text style={styles.withdrawText}>Withdraw</Text>
-          </TouchableOpacity>
-          <View style={styles.nextPayoutRow}>
-            <Ionicons name="calendar-outline" size={15} color="#16A34A" />
-            <Text style={styles.nextPayoutText}>Next payout: Jun 25</Text>
-          </View>
-        </View>
-      </View>
-
-      <EarningsListSection title="Recent Transactions">
-        {transactions.map(item => <EarningsTransaction key={item.title} {...item} />)}
-      </EarningsListSection>
-
-      <EarningsListSection title="Payout History">
-        {payouts.map(item => <PayoutRow key={item.date} {...item} />)}
-      </EarningsListSection>
-    </ScrollView>
-  );
-}
-
-function EarningsMetric({ title, value, meta, icon, color, bg }) {
-  return (
-    <View style={styles.earningsMetricCard}>
-      <View style={[styles.earningsMetricIcon, { backgroundColor: bg }]}>
-        <Ionicons name={icon} size={16} color={color} />
-      </View>
-      <View style={styles.earningsMetricText}>
-        <Text style={styles.earningsMetricTitle}>{title}</Text>
-        <Text style={styles.earningsMetricValue}>{value}</Text>
-        <Text style={styles.earningsMetricMeta}>{meta}</Text>
-      </View>
-    </View>
-  );
-}
-
-function EarningsListSection({ title, children }) {
-  return (
-    <View style={styles.earningsListCard}>
-      <View style={styles.earningsListHeader}>
-        <Text style={styles.earningsListTitle}>{title}</Text>
-        <TouchableOpacity activeOpacity={0.8}>
-          <Text style={styles.earningsViewAll}>View all</Text>
-        </TouchableOpacity>
-      </View>
-      {children}
-    </View>
-  );
-}
-
-function EarningsTransaction({ icon, title, meta, amount }) {
-  return (
-    <TouchableOpacity style={styles.earningsTransactionRow} activeOpacity={0.84}>
-      <View style={styles.earningsTransactionIcon}>
-        <Ionicons name={icon} size={17} color="#17191D" />
-      </View>
-      <View style={styles.earningsTransactionInfo}>
-        <Text style={styles.earningsTransactionTitle} numberOfLines={1}>{title}</Text>
-        <Text style={styles.earningsTransactionMeta}>{meta}</Text>
-      </View>
-      <Text style={styles.earningsTransactionAmount}>{amount}</Text>
-      <Ionicons name="chevron-forward" size={16} color="#8B9098" />
-    </TouchableOpacity>
-  );
-}
-
-function PayoutRow({ date, meta, amount }) {
-  return (
-    <TouchableOpacity style={styles.earningsTransactionRow} activeOpacity={0.84}>
-      <View style={styles.earningsTransactionIcon}>
-        <Ionicons name="business-outline" size={17} color="#17191D" />
-      </View>
-      <View style={styles.earningsTransactionInfo}>
-        <Text style={styles.earningsTransactionTitle}>{date}</Text>
-        <Text style={styles.earningsTransactionMeta}>{meta}</Text>
-      </View>
-      <Text style={styles.earningsTransactionAmount}>{amount}</Text>
-      <Ionicons name="chevron-forward" size={16} color="#8B9098" />
-    </TouchableOpacity>
-  );
-}
-
-function ProfileScreen({ online, setOnline, refreshControl, scrollSignal }) {
-  const scrollRef = useScrollToTop(scrollSignal);
-  const trustItems = [
-    { title: 'Identity verified', detail: 'Government ID checked', icon: 'shield-checkmark-outline', done: true },
-    { title: 'Insurance active', detail: 'Expires Sep 18, 2026', icon: 'document-text-outline', done: true },
-    { title: 'Background check', detail: 'Approved', icon: 'checkmark-done-outline', done: true },
-  ];
-  const serviceItems = [
-    { title: 'Service radius', value: '18 mi', icon: 'navigate-outline' },
-    { title: 'Primary services', value: 'Battery, Tires, Diagnostics', icon: 'construct-outline' },
-    { title: 'Response time', value: '12 min avg', icon: 'timer-outline' },
-  ];
-
-  return (
-    <ScrollView ref={scrollRef} style={[styles.container, styles.homeContainer]} contentContainerStyle={styles.profileContent} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
-      <View style={styles.profileHeader}>
-        <Text style={styles.profileTitle}>Profile</Text>
-      </View>
-
-      <View style={styles.profileHeroCard}>
-        <View style={styles.profileAvatar}>
-          <Text style={styles.profileAvatarText}>{PROVIDER.initials}</Text>
-        </View>
-        <View style={styles.profileHeroInfo}>
-          <Text style={styles.profileName}>{PROVIDER.company}</Text>
-          <Text style={styles.profileSub}>Mobile Service Provider</Text>
-          <View style={styles.profileRatingRow}>
-            <Ionicons name="star" size={13} color="#F5B301" />
-            <Text style={styles.profileRatingText}>{PROVIDER.rating} rating</Text>
-            <View style={styles.profileDot} />
-            <Text style={styles.profileRatingText}>128 reviews</Text>
-          </View>
-        </View>
-      </View>
-
-      <View style={styles.profileStatusCard}>
-        <View>
-          <Text style={styles.profileStatusTitle}>Availability</Text>
-          <Text style={styles.profileStatusMeta}>{online ? 'You are visible for new requests' : 'You are not receiving requests'}</Text>
-        </View>
-        <View style={styles.profileStatusToggle}>
-          <Text style={[styles.profileStatusText, online && styles.profileStatusTextOnline]}>{online ? 'Online' : 'Offline'}</Text>
-          <Switch value={online} onValueChange={setOnline} trackColor={{ false: '#E6E8EB', true: '#D9DDE2' }} thumbColor={online ? '#128A3A' : '#8B9098'} style={styles.profileOnlineSwitch} />
-        </View>
-      </View>
-
-      <View style={styles.profileStatsPanel}>
-        <ProfileStat label="This Month" value="$4,280" icon="cash-outline" color="#16A34A" bg="rgba(22,163,74,0.10)" first />
-        <ProfileStat label="Jobs Completed" value="128" icon="briefcase-outline" color="#2F80FF" bg="rgba(47,128,255,0.10)" />
-        <ProfileStat label="Rating" value="4.9" icon="star-outline" color="#A855F7" bg="rgba(168,85,247,0.10)" />
-        <ProfileStat label="On-Time" value="96%" icon="time-outline" color="#F59E0B" bg="rgba(245,158,11,0.10)" />
-      </View>
-
-      <ProfileSection title="Trust & Compliance">
-        {trustItems.map(item => <ProfileRow key={item.title} {...item} />)}
-      </ProfileSection>
-
-      <ProfileSection title="Service Settings">
-        {serviceItems.map(item => <ProfileRow key={item.title} detail={item.value} icon={item.icon} />)}
-      </ProfileSection>
-
-      <ProfileSection title="Account">
-        <ProfileRow title="Payout method" detail="Bank ending 4821" icon="card-outline" />
-        <ProfileRow title="Business documents" detail="W-9 and licenses" icon="folder-open-outline" />
-        <ProfileRow title="Notification preferences" detail="Push, SMS, Email" icon="notifications-outline" />
-      </ProfileSection>
-
-      <ProfileSection title="Support">
-        <ProfileRow title="Contact Auterio support" detail="Get help with a job or payout" icon="headset-outline" />
-        <ProfileRow title="Safety center" detail="Policies and emergency guidance" icon="medical-outline" />
-      </ProfileSection>
-    </ScrollView>
-  );
-}
-
-function ProfileStat({ label, value, icon, color, bg, first }) {
-  return (
-    <View style={[styles.profileStatCard, first && styles.profileStatCardFirst]}>
-      <View style={[styles.profileStatIcon, { backgroundColor: bg }]}>
-        <Ionicons name={icon} size={14} color={color} />
-      </View>
-      <Text style={styles.profileStatValue} numberOfLines={1}>{value}</Text>
-      <Text style={styles.profileStatLabel} numberOfLines={1}>{label}</Text>
-    </View>
-  );
-}
-
-function ProfileSection({ title, children }) {
-  return (
-    <View style={styles.profileSection}>
-      <Text style={styles.profileSectionTitle}>{title}</Text>
-      {children}
-    </View>
-  );
-}
-
-function ProfileRow({ title, detail, icon, done }) {
-  return (
-    <TouchableOpacity style={styles.profileRow} activeOpacity={0.84}>
-      <View style={[styles.profileRowIcon, done && styles.profileRowIconDone]}>
-        <Ionicons name={icon} size={18} color={done ? '#16A34A' : '#17191D'} />
-      </View>
-      <View style={styles.profileRowInfo}>
-        <Text style={styles.profileRowTitle}>{title}</Text>
-        <Text style={styles.profileRowDetail}>{detail}</Text>
-      </View>
-      {done ? <Ionicons name="checkmark-circle" size={18} color="#16A34A" /> : <Ionicons name="chevron-forward" size={17} color="#8B9098" />}
-    </TouchableOpacity>
-  );
-}
-
-function JobMetric({ title, value, meta, icon, color, star }) {
-  return (
-    <View style={styles.jobsStatCard}>
-      <View style={styles.jobsStatTop}>
-        <Text style={styles.jobsStatTitle} numberOfLines={2}>{title}</Text>
-        <View style={styles.jobsStatIcon}>
-          <Ionicons name={icon} size={15} color={color} />
-        </View>
-      </View>
-      <View style={styles.jobsStatValueRow}>
-        {star && <Ionicons name="star" size={16} color="#FFC107" />}
-        <Text style={[styles.jobsStatValue, { color: star ? '#17191D' : color }]}>{value}</Text>
-      </View>
-      <Text style={styles.jobsStatMeta}>{meta}</Text>
-    </View>
-  );
-}
-
 function pulseTabChange() {
   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-}
-
-function SwipePager({ tabs, activeKey, onChange, children, tabBarStyle, tabStyle, tabTextStyle, pagerStyle, pageStyle }) {
-  const pages = Array.isArray(children) ? children : [children];
-  const [pagerWidth, setPagerWidth] = useState(0);
-  const [tabBarWidth, setTabBarWidth] = useState(0);
-  const scrollRef = useRef(null);
-  const scrollX = useRef(new Animated.Value(0)).current;
-  const activeIndex = Math.max(0, tabs.findIndex(tab => tab.key === activeKey));
-  const tactileIndexRef = useRef(activeIndex);
-  const tabWidth = tabBarWidth ? (tabBarWidth - 6) / tabs.length : 0;
-
-  useEffect(() => {
-    if (!pagerWidth) return;
-    tactileIndexRef.current = activeIndex;
-    scrollRef.current?.scrollTo({ x: activeIndex * pagerWidth, animated: true });
-  }, [activeIndex, pagerWidth]);
-
-  const pulseCrossedPage = (event) => {
-    if (!pagerWidth) return;
-    const offsetX = event.nativeEvent.contentOffset.x;
-    const nextIndex = Math.max(0, Math.min(tabs.length - 1, Math.round(offsetX / pagerWidth)));
-    if (nextIndex !== tactileIndexRef.current) {
-      tactileIndexRef.current = nextIndex;
-      pulseTabChange();
-    }
-  };
-
-  const syncActivePage = (event) => {
-    if (!pagerWidth) return;
-    const offsetX = event.nativeEvent.contentOffset.x;
-    const nextIndex = Math.max(0, Math.min(tabs.length - 1, Math.round(offsetX / pagerWidth)));
-    tactileIndexRef.current = nextIndex;
-    if (nextIndex !== activeIndex) onChange(tabs[nextIndex].key);
-  };
-
-  const selectTab = (tabKey) => {
-    if (tabKey !== activeKey) pulseTabChange();
-    onChange(tabKey);
-  };
-
-  return (
-    <View>
-      <View style={tabBarStyle} onLayout={event => setTabBarWidth(event.nativeEvent.layout.width)}>
-        {!!tabWidth && (
-          <Animated.View
-            pointerEvents="none"
-            style={[
-              styles.swipeTabsIndicator,
-              {
-                width: tabWidth,
-                transform: [{
-                  translateX: scrollX.interpolate({
-                    inputRange: tabs.map((_, index) => index * Math.max(1, pagerWidth)),
-                    outputRange: tabs.map((_, index) => index * tabWidth),
-                    extrapolate: 'clamp',
-                  }),
-                }],
-              },
-            ]}
-          />
-        )}
-        {tabs.map((tab, index) => {
-          const activeOpacity = scrollX.interpolate({
-            inputRange: [
-              (index - 1) * Math.max(1, pagerWidth),
-              index * Math.max(1, pagerWidth),
-              (index + 1) * Math.max(1, pagerWidth),
-            ],
-            outputRange: [0, 1, 0],
-            extrapolate: 'clamp',
-          });
-          const inactiveOpacity = scrollX.interpolate({
-            inputRange: [
-              (index - 1) * Math.max(1, pagerWidth),
-              index * Math.max(1, pagerWidth),
-              (index + 1) * Math.max(1, pagerWidth),
-            ],
-            outputRange: [1, 0, 1],
-            extrapolate: 'clamp',
-          });
-          return (
-          <TouchableOpacity key={tab.key} style={tabStyle} onPress={() => selectTab(tab.key)} activeOpacity={0.84}>
-            <View style={styles.swipeTabLabelWrap}>
-              <Text style={[tabTextStyle, styles.swipeTabLabelSizer]}>{tab.label}</Text>
-              <Animated.Text pointerEvents="none" style={[tabTextStyle, styles.swipeTabLabelLayer, { opacity: inactiveOpacity }]}>{tab.label}</Animated.Text>
-              <Animated.Text pointerEvents="none" style={[tabTextStyle, styles.swipeTabMaskedText, styles.swipeTabLabelLayer, { opacity: activeOpacity }]}>{tab.label}</Animated.Text>
-            </View>
-          </TouchableOpacity>
-          );
-        })}
-      </View>
-
-      <View style={[styles.swipePager, pagerStyle]} onLayout={event => setPagerWidth(event.nativeEvent.layout.width)}>
-        <Animated.ScrollView
-        ref={scrollRef}
-        horizontal
-        pagingEnabled
-        nestedScrollEnabled
-        directionalLockEnabled
-        decelerationRate="fast"
-        showsHorizontalScrollIndicator={false}
-        scrollEventThrottle={16}
-        contentContainerStyle={styles.swipePagerTrack}
-        onScroll={Animated.event(
-          [{ nativeEvent: { contentOffset: { x: scrollX } } }],
-          { useNativeDriver: true, listener: pulseCrossedPage }
-        )}
-        onMomentumScrollEnd={syncActivePage}
-      >
-        {pages.map((page, index) => (
-          <View key={tabs[index]?.key || index} style={[styles.swipePagerPage, pageStyle, pagerWidth ? { width: pagerWidth } : null]}>
-            {page}
-          </View>
-        ))}
-        </Animated.ScrollView>
-      </View>
-    </View>
-  );
-}
-
-function ActiveJobCard({ job, onOpen, completed }) {
-  const status = job.displayStatus || job.status;
-  const meta = getJobStatusMeta(status);
-  const isInProgress = !completed;
-  const accent = isInProgress ? (meta.color || '#F04416') : '#F04416';
-  const vehicle = `${job.vehicle.make} - ${job.vehicle.year}`;
-  const note = getJobStatusNote(status, job);
-  const distance = job.distance || (status === 'waiting_approval' ? '' : '6.2 mi');
-
-  return (
-    <TouchableOpacity style={[styles.activeListCard, !isInProgress && styles.neutralListCard]} onPress={() => onOpen(job)} activeOpacity={0.86}>
-      {isInProgress && <View style={[styles.activeListAccent, { backgroundColor: accent }]} />}
-      <View style={styles.activeListIcon}>
-        <Ionicons name={job.icon || job.service.icon || 'briefcase-outline'} size={20} color={accent} />
-      </View>
-      <View style={styles.activeListInfo}>
-        <Text style={[styles.activeListStatus, { color: accent }]}>{completed ? 'COMPLETED' : meta.label}</Text>
-        <Text style={styles.activeListTitle} numberOfLines={1}>{job.service.type}</Text>
-        <Text style={styles.activeListVehicle} numberOfLines={1}>{vehicle}</Text>
-        <Text style={styles.activeListAddress} numberOfLines={1}>{job.pickup.address}</Text>
-      </View>
-      <View style={styles.activeListAside}>
-        <Text style={[styles.activeListPrice, { color: accent }]}>${job.payment.total}</Text>
-        <View style={styles.activeListEtaRow}>
-          <Ionicons name="time-outline" size={10} color={accent} style={styles.activeListEtaIcon} />
-          <Text style={[styles.activeListEta, { color: accent }]} numberOfLines={1}>{completed ? 'Receipt ready' : note}</Text>
-        </View>
-        {!!distance && <Text style={styles.activeListDistance} numberOfLines={1}>{distance}</Text>}
-      </View>
-    </TouchableOpacity>
-  );
-}
-
-function MiniJobProgress({ status, accent }) {
-  const currentIndex = getJobProgressIndex(status);
-  return (
-    <View style={styles.miniProgressRow}>
-      <View style={styles.miniProgressTrack} />
-      {JOB_STEPS.map((step, index) => {
-        const done = index <= currentIndex;
-        return (
-          <View key={step.key} style={styles.miniProgressItem}>
-            <View style={[styles.miniProgressDot, done && { backgroundColor: accent }]}>
-              <Ionicons name={step.icon} size={10} color={done ? '#FFFFFF' : '#8B9098'} />
-            </View>
-            <Text style={[styles.miniProgressText, done && { color: accent }]}>{step.label}</Text>
-          </View>
-        );
-      })}
-    </View>
-  );
-}
-
-function JobAction({ label, icon, color, onPress, filled }) {
-  return (
-    <TouchableOpacity style={[styles.activeJobActionBtn, { borderColor: color + '66' }, filled && { backgroundColor: color + '18' }]} onPress={onPress} activeOpacity={0.84}>
-      {!!icon && <Ionicons name={icon} size={15} color={color} />}
-      <Text style={[styles.activeJobActionText, { color }]}>{label}</Text>
-    </TouchableOpacity>
-  );
-}
-
-function ScheduledJobCard({ job, onOpen }) {
-  return (
-    <TouchableOpacity style={[styles.activeListCard, styles.neutralListCard]} onPress={() => onOpen(job)} activeOpacity={0.86}>
-      <View style={styles.activeListIcon}>
-        <Ionicons name={job.icon || job.service.icon || 'calendar-outline'} size={20} color="#F04416" />
-      </View>
-      <View style={styles.activeListInfo}>
-        <Text style={styles.neutralListStatus}>{job.time || 'SCHEDULED'}</Text>
-        <Text style={styles.activeListTitle} numberOfLines={1}>{job.service.type}</Text>
-        <Text style={styles.activeListVehicle} numberOfLines={1}>{job.vehicle.make} - {job.vehicle.year}</Text>
-        <Text style={styles.activeListAddress} numberOfLines={1}>{job.pickup.address}</Text>
-      </View>
-      <View style={styles.activeListAside}>
-        <Text style={styles.neutralListPrice}>${job.payment.total}</Text>
-        <View style={styles.activeListEtaRow}>
-          <Ionicons name="time-outline" size={10} color="#F04416" style={styles.activeListEtaIcon} />
-          <Text style={styles.neutralListEta} numberOfLines={1}>{job.eta || 'Scheduled'}</Text>
-        </View>
-      </View>
-    </TouchableOpacity>
-  );
-}
-
-function getJobProgressIndex(status) {
-  if (status === 'accepted') return 0;
-  if (status === 'on_the_way') return 1;
-  if (status === 'arrived') return 2;
-  if (status === 'inspection' || status === 'estimate' || status === 'waiting_approval') return 3;
-  if (status === 'completed') return 4;
-  return 0;
-}
-
-function getJobStatusMeta(status) {
-  if (status === 'arrived') return { label: 'ARRIVED', actionLabel: 'Start Inspection', actionIcon: 'construct-outline', color: '#22C55E' };
-  if (status === 'inspection') return { label: 'WORKING', actionLabel: 'Continue Diagnosis', actionIcon: 'construct-outline', color: '#F04416' };
-  if (status === 'estimate') return { label: 'BUILD ESTIMATE', actionLabel: 'Send Estimate', actionIcon: 'document-text-outline', color: '#F04416' };
-  if (status === 'waiting_approval') return { label: 'WAITING APPROVAL', actionLabel: 'Message Customer', actionIcon: 'chatbubble-outline', color: '#1F6BFF' };
-  if (status === 'completed') return { label: 'COMPLETED', actionLabel: 'Receipt', actionIcon: 'receipt-outline', color: '#22C55E' };
-  return { label: 'ON THE WAY', actionLabel: 'Navigate', actionIcon: 'navigate-outline', color: '#F04416' };
-}
-
-function getWorkflowJobStatus(baseStatus, workflow) {
-  if (!workflow?.stage || workflow.stage === 'details') return baseStatus;
-  if (workflow.stage === 'route') return 'on_the_way';
-  if (workflow.stage === 'arrived') return 'arrived';
-  if (workflow.stage === 'diagnosis') return 'inspection';
-  if (workflow.stage === 'estimate') return 'estimate';
-  if (workflow.stage === 'approval') return 'waiting_approval';
-  if (workflow.stage === 'working') return 'inspection';
-  if (workflow.stage === 'complete_review') return 'inspection';
-  if (workflow.stage === 'completed') return 'completed';
-  return baseStatus;
-}
-
-function getJobStatusNote(status, job) {
-  if (status === 'waiting_approval') return 'Waiting 12 min';
-  if (status === 'arrived') return 'Ready for checklist';
-  if (status === 'inspection') return 'Diagnosis in progress';
-  if (status === 'estimate') return 'Preparing estimate';
-  if (status === 'completed') return 'Receipt ready';
-  return job.eta ? `${job.eta} away` : '15 min away';
-}
-
-function RequestDetailScreen({ order, accepting, onBack, onAccept, onDecline, refreshControl }) {
-  const [noteOpen, setNoteOpen] = useState(false);
-  const [bottomPanelHeight, setBottomPanelHeight] = useState(0);
-  const accent = order.accent || '#42D463';
-  const serviceMeta = getServiceMeta(order);
-  const icon = serviceMeta.icon;
-  const title = serviceMeta.title;
-  const displayTitle = title;
-  const vehicle = getVehicleLabel(order);
-  const vehicleFallback = vehicle === 'Vehicle details pending' ? '' : vehicle;
-  const displayVehicle = [order.vehicle?.year, order.vehicle?.make, order.vehicle?.model].filter(Boolean).join(' ') || vehicleFallback || '2020 Honda Civic';
-  const address = order.pickup?.address || '456 Oak Ave, San Francisco, CA 94102';
-  const dropoffAddress = getDropoffAddress(order);
-  const payout = Number(order.payment?.totalHeld || order.payment?.total || 120);
-  const platformFee = Math.max(8, Math.round(payout * 0.1));
-  const net = Math.max(0, payout - platformFee);
-  const requestNumber = order.number || String(order.id || '12346').replace(/\D/g, '').slice(-5) || '12346';
-  const customerNote = order.orderContext?.customerNote || order.customerNote || 'Car broke down on the highway.';
-  const rawCustomerFiles = order.orderContext?.files || order.files || order.photos || [
-    { name: 'Front damage photo', type: 'image' },
-    { name: 'Warning light photo', type: 'image' },
-    { name: 'Customer note attachment', type: 'file' },
-  ];
-  const customerFiles = Array.isArray(rawCustomerFiles) ? rawCustomerFiles : [rawCustomerFiles].filter(Boolean);
-  const isTowing = isTowingService(order);
-  const intakeRows = getProviderIntakeItems(order)
-    .filter(item => item.value !== undefined && item.value !== null && String(item.value).trim())
-    .map((item, index) => ({
-      key: `intake-${item.key || index}`,
-      icon: 'help-circle-outline',
-      color: '#F04416',
-      label: item.label,
-      value: String(item.value),
-    }));
-  const jobDetailRows = [
-    { key: 'note', icon: 'chatbox-outline', color: '#2F80FF', label: 'Customer Note', value: customerNote, chevron: true, onPress: () => setNoteOpen(true) },
-    ...intakeRows,
-    { key: 'pickup', icon: 'location-outline', color: '#7C3AED', label: isTowing ? 'Pickup Location' : 'Service Location', value: address },
-    ...(isTowing ? [{ key: 'dropoff', icon: 'flag-outline', color: '#EF4444', label: 'Drop-off Location', value: dropoffAddress }] : []),
-    { key: 'distance', icon: 'trail-sign-outline', color: '#42D463', label: 'Distance', value: order.distance || (isTowing ? '6.8 mi away' : '3.1 mi away') },
-    { key: 'payout', icon: 'cash-outline', color: '#EAB308', label: 'Est. Payout', value: `$${payout}` },
-  ];
-
-  return (
-    <View style={styles.requestDetailShell}>
-      <View style={styles.requestDetailHeader}>
-        <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={styles.requestHeaderIconBtn}>
-          <Ionicons name="close" size={24} color="#17191D" />
-        </TouchableOpacity>
-        <Text style={styles.requestHeaderTitle}>New Request</Text>
-        <View style={styles.requestHeaderIconBtn} />
-      </View>
-
-      <ScrollView
-        style={[styles.container, styles.requestDetailScroll, { marginBottom: bottomPanelHeight + 28 }]}
-        contentContainerStyle={styles.requestDetailContent}
-        showsVerticalScrollIndicator={false}
-        refreshControl={refreshControl}
-      >
-        <View style={styles.requestSummaryCard}>
-          <View style={styles.earningsMain}>
-            <Text style={styles.earningsLabel}>ESTIMATED{`\n`}EARNINGS</Text>
-            <Text style={styles.earningsAmount} numberOfLines={1}>${net}</Text>
-            <Text style={styles.earningsNet} numberOfLines={1}>Net earnings</Text>
-          </View>
-          <View style={styles.earningsDivider} />
-          <EarningStat icon="car-sport-outline" value="20 min" label="Drive time" />
-          <View style={styles.earningsDivider} />
-          <EarningStat icon="construct-outline" value="15 min" label="Work time" />
-          <View style={styles.earningsDivider} />
-          <EarningStat icon="time-outline" value="35 min" label="Total time" />
-        </View>
-
-        <View style={styles.verifiedCard}>
-          <View style={styles.verifiedIcon}>
-            <Ionicons name="shield-checkmark-outline" size={22} color="#F04416" />
-          </View>
-          <View style={styles.verifiedInfo}>
-            <Text style={styles.verifiedTitle} numberOfLines={1}>Verified Customer</Text>
-            <View style={styles.ratingLine}>
-              <Ionicons name="star" size={13} color="#FFC107" />
-              <Text style={styles.ratingScore}>4.9</Text>
-            </View>
-            <View style={[styles.trustedLine, styles.verifiedTrustedLine]}>
-              <Ionicons name="shield-checkmark-outline" size={13} color="#F04416" />
-              <Text style={styles.verifiedTrusted} numberOfLines={1}>Verified & trusted</Text>
-            </View>
-          </View>
-          <View style={styles.lockedContact}>
-            <Ionicons name="lock-closed-outline" size={18} color="#5E646D" />
-            <Text style={styles.lockedContactText}>Contact available{`\n`}after acceptance</Text>
-          </View>
-        </View>
-
-        <View style={styles.vehicleInfoCard}>
-          <View style={styles.requestVehicleIcon}>
-            <Ionicons name={icon} size={22} color="#F04416" />
-          </View>
-          <View style={styles.serviceInfo}>
-            <Text style={styles.serviceType} numberOfLines={2}>{displayVehicle}</Text>
-            <Text style={styles.serviceVehicle} numberOfLines={1}>Sedan - 92,000 mi</Text>
-            <View style={[styles.trustedLine, styles.vehicleTrustedLine]}>
-              <Ionicons name="checkmark-circle-outline" size={13} color="#F04416" />
-              <Text style={styles.verifiedTrusted}>VIN verified</Text>
-            </View>
-          </View>
-          <View style={styles.vehicleMetaBox}>
-            <View style={styles.requestSpecRow}>
-              <Text style={styles.requestSpecLabel}>Service Type</Text>
-              <Text style={styles.requestSpecValue} numberOfLines={1}>{displayTitle}</Text>
-            </View>
-          </View>
-        </View>
-
-        <View style={styles.mapPreview}>
-          <MapView
-            style={styles.mapView}
-            initialRegion={REQUEST_MAP_REGION}
-            scrollEnabled={false}
-            zoomEnabled={false}
-            rotateEnabled={false}
-            pitchEnabled={false}
-            toolbarEnabled={false}
-          >
-            <Polyline coordinates={REQUEST_ROUTE} strokeColor="#F04416" strokeWidth={4} />
-            <Marker coordinate={REQUEST_ROUTE[0]} anchor={{ x: 0.5, y: 0.5 }}>
-              <View style={styles.mapStartMarker} />
-            </Marker>
-            <Marker coordinate={REQUEST_ROUTE[REQUEST_ROUTE.length - 1]} anchor={{ x: 0.5, y: 1 }}>
-              <View style={styles.mapEndMarker}>
-                <Ionicons name="location" size={20} color="#FFFFFF" />
-              </View>
-            </Marker>
-          </MapView>
-          <View style={styles.mapBubble}><Text style={styles.mapBubbleText}>20 min{`\n`}6.8 mi</Text></View>
-        </View>
-
-        <View style={styles.requestBriefCard}>
-          <Text style={styles.jobDetailHeading}>Job Details</Text>
-          {jobDetailRows.map(row => (
-            <RequestInfoRow
-              key={row.key}
-              icon={row.icon}
-              color={row.color}
-              label={row.label}
-              value={row.value}
-              chevron={row.chevron}
-              onPress={row.onPress}
-            />
-          ))}
-        </View>
-      </ScrollView>
-
-      <View
-        style={styles.requestBottomPanel}
-        onLayout={(event) => setBottomPanelHeight(event.nativeEvent.layout.height)}
-      >
-        <View style={styles.acceptTimerBanner}>
-          <Ionicons name="time-outline" size={16} color="#F04416" />
-          <Text style={styles.acceptTimerText}>Auto-decline in <Text style={styles.acceptTimerTime}>00:55</Text></Text>
-        </View>
-        <View style={styles.requestBottomActions}>
-          <TouchableOpacity style={styles.largeDeclineButton} onPress={() => onDecline(order)} activeOpacity={0.84}>
-            <Text style={styles.largeDeclineTitle}>Decline</Text>
-            <Text style={styles.largeButtonSubtitle}>Reject this request</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.largeAcceptButton} onPress={() => onAccept(order)} disabled={accepting} activeOpacity={0.84}>
-            <Text style={styles.largeAcceptTitle}>{accepting ? 'Accepting...' : 'Accept'}</Text>
-            <Text style={styles.largeAcceptSubtitle}>Accept and continue</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-
-      <Modal visible={noteOpen} transparent animationType="fade" onRequestClose={() => setNoteOpen(false)}>
-        <View style={styles.noteModalOverlay}>
-          <TouchableOpacity style={styles.noteModalBackdrop} activeOpacity={1} onPress={() => setNoteOpen(false)} />
-          <View style={styles.noteModalCard}>
-            <View style={styles.noteModalHeader}>
-              <Text style={styles.noteModalTitle}>Customer Note</Text>
-              <TouchableOpacity style={styles.noteCloseBtn} activeOpacity={0.8} onPress={() => setNoteOpen(false)}>
-                <Ionicons name="close" size={20} color="#17191D" />
-              </TouchableOpacity>
-            </View>
-            <Text style={styles.noteModalText}>{customerNote}</Text>
-            {!!customerFiles.length && (
-              <View style={styles.noteFilesBlock}>
-                <Text style={styles.noteFilesTitle}>Uploaded files</Text>
-                {customerFiles.map((file, index) => {
-                  const fileName = typeof file === 'string' ? file : file.name || `Attachment ${index + 1}`;
-                  const fileType = typeof file === 'string' ? 'file' : file.type || 'file';
-                  const fileIcon = fileType === 'image' || fileType === 'photo' ? 'image-outline' : 'document-attach-outline';
-                  return (
-                    <View key={`${fileName}-${index}`} style={styles.noteFileRow}>
-                      <View style={styles.noteFileIcon}>
-                        <Ionicons name={fileIcon} size={16} color="#F04416" />
-                      </View>
-                      <Text style={styles.noteFileName} numberOfLines={1}>{fileName}</Text>
-                    </View>
-                  );
-                })}
-              </View>
-            )}
-          </View>
-        </View>
-      </Modal>
-    </View>
-  );
-}
-
-function EarningStat({ icon, value, label }) {
-  return (
-    <View style={styles.earningStat}>
-      <Ionicons name={icon} size={19} color="#5E646D" />
-      <Text style={styles.earningStatValue} numberOfLines={1}>{value}</Text>
-      <Text style={styles.earningStatLabel} numberOfLines={1}>{label}</Text>
-    </View>
-  );
-}
-
-function RequestInfoRow({ icon, color, label, value, chevron, onPress }) {
-  const RowComponent = onPress ? TouchableOpacity : View;
-  const rowProps = onPress ? { activeOpacity: 0.82, onPress } : {};
-  return (
-    <RowComponent style={styles.requestInfoRow} {...rowProps}>
-      <View style={[styles.requestInfoIcon, { backgroundColor: color + '18' }]}>
-        <Ionicons name={icon} size={16} color={color} />
-      </View>
-      <Text style={styles.requestInfoLabel}>{label}</Text>
-      <Text style={styles.requestInfoValue} numberOfLines={2}>{value}</Text>
-      {chevron && <Ionicons style={styles.requestInfoChevron} name="chevron-forward" size={16} color="#8B9098" />}
-    </RowComponent>
-  );
 }
 
 function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshControl }) {
@@ -1882,6 +558,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
   const [diagnosisOpen, setDiagnosisOpen] = useState(workflow.stage === 'diagnosis');
   const [estimateOpen, setEstimateOpen] = useState(workflow.stage === 'estimate');
   const [approvalOpen, setApprovalOpen] = useState(workflow.stage === 'approval');
+  const [estimateDeclinedOpen, setEstimateDeclinedOpen] = useState(workflow.stage === 'estimate_declined');
   const [workOpen, setWorkOpen] = useState(workflow.stage === 'working');
   const [completeOpen, setCompleteOpen] = useState(workflow.stage === 'complete_review');
   const [estimateItems, setEstimateItems] = useState(workflow.estimateItems || []);
@@ -1909,6 +586,74 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
     loadTest: 'weak',
   });
   const [batteryVoltage, setBatteryVoltage] = useState(workflow.batteryVoltage || '');
+  const [includeCallFee, setIncludeCallFee] = useState(true);
+  const [providerTypeCached, setProviderTypeCached] = useState('mobile');
+  const [workTimer, setWorkTimer] = useState(0);
+  useEffect(() => { loadPricing().then(p => { const t = p.providerType || 'mobile'; setProviderTypeCached(t); setIncludeCallFee(t !== 'shop'); }); }, []);
+  useEffect(() => {
+    if (!workOpen) return;
+    const startTs = workflow.estimateApprovedAt && !isNaN(new Date(workflow.estimateApprovedAt).getTime())
+      ? new Date(workflow.estimateApprovedAt).getTime()
+      : Date.now();
+    const tick = () => setWorkTimer(Math.floor((Date.now() - startTs) / 1000));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [workOpen, workflow.estimateApprovedAt]);
+  const formatWorkTimer = (s) => {
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const sec = s % 60;
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+  };
+  useEffect(() => {
+    if (!workOpen || !job.id || String(job.id || '').startsWith('demo-')) return;
+    const interval = setInterval(async () => {
+      try {
+        const order = await fetchJson(`${API_URL}/orders/${job.id}`);
+        const liveApprovals = order?.orderContext?.additionalApprovals;
+        if (!Array.isArray(liveApprovals)) return;
+        setAdditionalApprovals(prev => {
+          const hasChange = liveApprovals.some(live => {
+            const local = prev.find(p => p.id === live.id);
+            return local && local.status !== live.status;
+          });
+          return hasChange ? liveApprovals.filter(item => item.kind === 'required') : prev;
+        });
+      } catch {}
+    }, 8000);
+    return () => clearInterval(interval);
+  }, [workOpen, job.id]);
+
+  useEffect(() => {
+    if (!approvalOpen || !job.id || String(job.id || '').startsWith('demo-')) return;
+    const interval = setInterval(async () => {
+      try {
+        const order = await fetchJson(`${API_URL}/orders/${job.id}`);
+        const step = order?.tracking?.currentStep;
+        if (step === 'estimate_approved') {
+          clearInterval(interval);
+          setApprovalOpen(false);
+          setWorkOpen(true);
+          onWorkflowChange?.({
+            stage: 'working',
+            estimateItems,
+            estimateRemovedItems,
+            estimateApprovedAt: order?.orderContext?.estimateApprovedAt || 'Approved just now',
+            approveOptional: order?.orderContext?.approveOptional ?? false,
+            approvedTotal: order?.orderContext?.approvedTotal ?? null,
+            additionalApprovals,
+          });
+        } else if (step === 'estimate_declined') {
+          clearInterval(interval);
+          setApprovalOpen(false);
+          setEstimateDeclinedOpen(true);
+          onWorkflowChange?.({ stage: 'estimate_declined', declineReason: order?.orderContext?.declineReason });
+        }
+      } catch {}
+    }, 8000);
+    return () => clearInterval(interval);
+  }, [approvalOpen]);
   const [diagnosisNotes, setDiagnosisNotes] = useState(workflow.diagnosisNotes || '');
   const [arrivedChecklist, setArrivedChecklist] = useState(workflow.arrivedChecklist || {
     photos: false,
@@ -1953,9 +698,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
       label: item.label,
       value: String(item.value),
     }));
-  const jobDetailsRows = [
-    { key: 'note', icon: 'chatbox-outline', color: '#2F80FF', label: 'Customer Note', value: customerNote, chevron: true, onPress: () => setNoteOpen(true) },
-    ...intakeRows,
+  const locationDetailRows = [
     { key: 'pickup', icon: 'location-outline', color: '#7C3AED', label: isTowing ? 'Pickup Location' : 'Service Location', value: address },
     ...(isTowing ? [{ key: 'dropoff', icon: 'flag-outline', color: '#EF4444', label: 'Drop-off Location', value: dropoffAddress }] : []),
     { key: 'distance', icon: 'trail-sign-outline', color: '#42D463', label: 'Distance', value: job.distance || '5.2 mi away' },
@@ -1985,7 +728,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
 
   if (estimateOpen) {
     const workingIndex = Math.max(0, JOB_STEPS.findIndex(step => step.key === 'inspection'));
-    const estimate = getDemoEstimate(diagnosisAnswers, batteryVoltage, estimateItems, estimateRemovedItems, job);
+    const estimate = getDemoEstimate(diagnosisAnswers, batteryVoltage, estimateItems, estimateRemovedItems, job, { includeServiceCallFee: includeCallFee });
     const estimateCatalog = getEstimateCatalog(estimatePickerMode);
     const filteredEstimateCatalog = estimateCatalog.filter(item => {
       const query = estimateSearch.trim().toLowerCase();
@@ -2061,7 +804,9 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
           partsSubtotal: estimate.partsSubtotal,
           subtotal: estimate.subtotal,
           tax: estimate.tax,
-          total: estimate.optionalSubtotal > 0 ? estimate.totalIfApproved : estimate.total,
+          total: estimate.total,
+          optionalSubtotal: estimate.optionalSubtotal,
+          optionalTax: estimate.optionalTax,
           totalIfApproved: estimate.totalIfApproved,
         },
       });
@@ -2113,7 +858,22 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
           </EstimateSection>
 
           <EstimateSection title="Fees" icon="cash-outline" color="#7C3AED">
+            {providerTypeCached === 'both' && (
+              <View style={styles.callFeeToggleRow}>
+                <View style={styles.callFeeToggleInfo}>
+                  <Text style={styles.callFeeToggleLabel}>Service Call Fee</Text>
+                  <Text style={styles.callFeeToggleSub}>{includeCallFee ? 'Mobile — provider drove to customer' : 'In-shop — no call fee applied'}</Text>
+                </View>
+                <Switch
+                  value={includeCallFee}
+                  onValueChange={setIncludeCallFee}
+                  trackColor={{ false: '#E6E8EB', true: '#16A34A' }}
+                  thumbColor="#FFFFFF"
+                />
+              </View>
+            )}
             {estimate.fees.map((item, index) => <EstimateLine key={`${item.label}-${index}`} {...item} />)}
+            {estimate.fees.length === 0 && <EstimateLine label="No fees applied" amount={0} mutedLabel />}
           </EstimateSection>
 
           {(estimate.optionalLabor.length > 0 || estimate.optionalParts.length > 0) && (
@@ -2274,6 +1034,89 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
     );
   }
 
+  if (estimateDeclinedOpen) {
+    const declineReason = workflow.declineReason || 'No reason provided';
+    const isShop = providerTypeCached === 'shop';
+    const feeLabel = isShop ? 'Diagnostic Fee' : 'Service Call Fee';
+    const feeAmount = isShop
+      ? formatMoney(job.payment?.dispatchFee || job.payment?.totalHeld || 75)
+      : formatMoney(job.payment?.dispatchFee || job.payment?.totalHeld || job.payment?.priceMin || 45);
+    return (
+      <View style={styles.requestDetailShell}>
+        <View style={styles.requestDetailHeader}>
+          <View style={styles.requestHeaderIconBtn} />
+          <View style={styles.jobPopupHeaderTextWrap}>
+            <Text style={styles.jobPopupHeaderTitle}>Job #{job.number}</Text>
+            <Text style={styles.jobPopupAcceptedText}>{acceptedLabel}</Text>
+          </View>
+          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={[styles.requestHeaderIconBtn, { alignItems: 'flex-end' }]}>
+            <Ionicons name="close" size={22} color="#17191D" />
+          </TouchableOpacity>
+        </View>
+        <ScrollView style={styles.requestDetailScroll} contentContainerStyle={styles.requestDetailContent} showsVerticalScrollIndicator={false}>
+          <View style={styles.declinedNoticeCard}>
+            <View style={styles.declinedNoticeIcon}>
+              <Ionicons name="close-circle" size={32} color="#DC2626" />
+            </View>
+            <Text style={styles.declinedNoticeTitle}>Estimate Declined</Text>
+            <Text style={styles.declinedNoticeSubtitle}>The customer has declined your estimate.</Text>
+          </View>
+
+          <View style={styles.declinedReasonCard}>
+            <Text style={styles.declinedReasonLabel}>Reason from customer</Text>
+            <Text style={styles.declinedReasonValue}>{declineReason}</Text>
+          </View>
+
+          <View style={styles.declinedFeeCard}>
+            <View style={styles.declinedFeeRow}>
+              <Ionicons name="card-outline" size={18} color="#16A34A" />
+              <Text style={styles.declinedFeeLabel}>{feeLabel} charged</Text>
+              <Text style={styles.declinedFeeAmount}>{feeAmount}</Text>
+            </View>
+            <Text style={styles.declinedFeeNote}>
+              {isShop
+                ? 'The diagnostic fee has been charged to the customer for the inspection performed.'
+                : 'The service call fee has been charged to the customer for your time and travel to the location.'}
+            </Text>
+          </View>
+
+          <Text style={styles.declinedActionsTitle}>What would you like to do?</Text>
+
+          <TouchableOpacity
+            style={styles.declinedReviseBtn}
+            activeOpacity={0.86}
+            onPress={() => {
+              setEstimateDeclinedOpen(false);
+              setEstimateOpen(true);
+              onWorkflowChange?.({ stage: 'estimate', estimateItems, estimateRemovedItems });
+            }}
+          >
+            <Ionicons name="create-outline" size={20} color="#FF6B00" />
+            <Text style={styles.declinedReviseBtnText}>Send Revised Estimate</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.declinedCloseBtn}
+            activeOpacity={0.86}
+            onPress={() => {
+              if (!String(job.id || '').startsWith('demo-')) {
+                fetchJson(`${API_URL}/orders/${job.id}/cancel`, {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ cancelledBy: 'provider', reason: 'Customer declined estimate' }),
+                }).catch(() => {});
+              }
+              onBack?.();
+            }}
+          >
+            <Ionicons name="checkmark-done-outline" size={20} color="#5E646D" />
+            <Text style={styles.declinedCloseBtnText}>Close Job</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </View>
+    );
+  }
+
   if (approvalOpen) {
     const workingIndex = Math.max(0, JOB_STEPS.findIndex(step => step.key === 'inspection'));
     const estimate = getDemoEstimate(diagnosisAnswers, batteryVoltage, estimateItems, estimateRemovedItems, job);
@@ -2359,9 +1202,8 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
             </TouchableOpacity>
           </View>
 
-          <TouchableOpacity style={styles.approvalDemoBtn} activeOpacity={0.86} onPress={approveEstimateDemo}>
-            <Text style={styles.approvalDemoText}>Demo: Customer Approved</Text>
-            <Ionicons name="chevron-forward" size={17} color="#FFFFFF" />
+          <TouchableOpacity style={styles.approvalDemoBtn} activeOpacity={0.6} onPress={approveEstimateDemo}>
+            <Text style={styles.approvalDemoText}>Simulate approval (demo only)</Text>
           </TouchableOpacity>
         </ScrollView>
 
@@ -2375,7 +1217,8 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
   if (workOpen) {
     const workingIndex = Math.max(0, JOB_STEPS.findIndex(step => step.key === 'inspection'));
     const estimate = getDemoEstimate(diagnosisAnswers, batteryVoltage, estimateItems, estimateRemovedItems, job);
-    const originalTotal = estimate.optionalSubtotal > 0 ? estimate.totalIfApproved : estimate.total;
+    const approveOptional = workflow.approveOptional ?? false;
+    const originalTotal = workflow.approvedTotal ?? (approveOptional ? estimate.totalIfApproved : estimate.total);
     const approvedAdditionalTotal = sumAmounts(additionalApprovals.filter(item => item.status === 'approved'));
     const pendingAdditionalTotal = sumAmounts(additionalApprovals.filter(item => item.status === 'pending'));
     const saveAdditionalApprovals = (nextItems) => {
@@ -2409,6 +1252,13 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
         amount: Math.round(changeRequestParsedAmount * 100) / 100,
       };
       saveAdditionalApprovals([...additionalApprovals, nextItem]);
+      if (!String(job.id || '').startsWith('demo-')) {
+        fetchJson(`${API_URL}/orders/${job.id}/change-request`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'add', changeRequest: nextItem }),
+        }).catch(e => console.log('Change request sync error:', e.message));
+      }
       setChangeRequestOpen(false);
     };
     const updateAdditionalApproval = (id, status) => {
@@ -2455,12 +1305,100 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
             <JobStepper steps={JOB_STEPS} currentIndex={workingIndex} />
           </View>
 
+          <TouchableOpacity style={styles.approvedEstimateCard} activeOpacity={0.84} onPress={() => setEstimatePreviewOpen(true)}>
+            <View style={styles.approvedEstimateLeft}>
+              <View style={styles.approvedEstimateIconWrap}>
+                <Ionicons name="checkmark-circle" size={20} color="#16A34A" />
+              </View>
+              <View>
+                <Text style={styles.approvedEstimateTitle}>Estimate Approved</Text>
+                <Text style={styles.approvedEstimateAmount}>{formatCurrency(originalTotal)}</Text>
+              </View>
+            </View>
+            <View style={styles.approvedEstimateRight}>
+              <View style={[styles.approvedEstimateBadge, !approveOptional && styles.approvedEstimateBadgePartial]}>
+                <Text style={[styles.approvedEstimateBadgeText, !approveOptional && styles.approvedEstimateBadgeTextPartial]}>
+                  {approveOptional ? 'Full Estimate' : 'Required Only'}
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={16} color="#8B9098" />
+            </View>
+          </TouchableOpacity>
+
+          <View style={styles.additionalApprovalCard}>
+            <Text style={styles.approvalNextTitle}>Required change requests</Text>
+            <Text style={styles.additionalApprovalSubtitle}>Use this only if the approved repair cannot be completed without an extra required item. Non-urgent recommendations should be saved for a future service.</Text>
+            <View style={styles.additionalActionRow}>
+              <TouchableOpacity style={styles.additionalRequiredBtn} activeOpacity={0.86} onPress={openRequiredChangeRequest}>
+                <Ionicons name="alert-circle-outline" size={17} color="#FFFFFF" />
+                <Text style={styles.additionalRequiredText}>Request required change</Text>
+              </TouchableOpacity>
+            </View>
+            {additionalApprovals.length === 0 ? (
+              <View style={styles.additionalEmptyBox}>
+                <Ionicons name="document-text-outline" size={20} color="#8B9098" />
+                <Text style={styles.additionalEmptyText}>No additional approvals yet.</Text>
+              </View>
+            ) : (
+              additionalApprovals.map(item => {
+                const isApproved = item.status === 'approved';
+                const isDeclined = item.status === 'declined';
+                const isPending = item.status === 'pending';
+                return (
+                  <View key={item.id} style={[styles.crCard, isApproved && styles.crCardApproved, isDeclined && styles.crCardDeclined]}>
+                    <View style={styles.crHeader}>
+                      <View style={[styles.crIconWrap, isApproved && styles.crIconWrapApproved, isDeclined && styles.crIconWrapDeclined]}>
+                        <Ionicons
+                          name={isApproved ? 'checkmark-circle-outline' : isDeclined ? 'close-circle-outline' : 'construct-outline'}
+                          size={18}
+                          color={isApproved ? '#16A34A' : isDeclined ? '#DC2626' : '#F04416'}
+                        />
+                      </View>
+                      <View style={styles.crHeaderText}>
+                        <Text style={styles.crTitle}>Additional Work Required</Text>
+                        <Text style={styles.crSubtitle} numberOfLines={1}>{item.title}</Text>
+                      </View>
+                      <Text style={[styles.crAmount, isApproved && styles.crAmountApproved, isDeclined && styles.crAmountDeclined]}>
+                        {formatCurrency(item.amount)}
+                      </Text>
+                    </View>
+                    {item.description ? (
+                      <View>
+                        <Text style={styles.crFieldLabel}>Why is it required?</Text>
+                        <Text style={styles.crDesc}>{item.description}</Text>
+                      </View>
+                    ) : null}
+                    {item.evidence ? (
+                      <View>
+                        <Text style={styles.crFieldLabel}>Evidence</Text>
+                        <View style={styles.crEvidenceRow}>
+                          <Ionicons name="camera-outline" size={13} color="#8B9098" />
+                          <Text style={styles.crEvidenceText}>{item.evidence}</Text>
+                        </View>
+                      </View>
+                    ) : null}
+                    <View style={[styles.crStatusRow, isApproved && styles.crStatusApproved, isDeclined && styles.crStatusDeclined, isPending && styles.crStatusPending]}>
+                      <Ionicons
+                        name={isApproved ? 'checkmark-circle' : isDeclined ? 'close-circle' : 'time-outline'}
+                        size={14}
+                        color={isApproved ? '#16A34A' : isDeclined ? '#DC2626' : '#8B9098'}
+                      />
+                      <Text style={[styles.crStatusText, isApproved && styles.crStatusTextApproved, isDeclined && styles.crStatusTextDeclined]}>
+                        {isApproved ? 'Approved by customer' : isDeclined ? 'Declined by customer' : 'Waiting for customer...'}
+                      </Text>
+                    </View>
+                  </View>
+                );
+              })
+            )}
+          </View>
+
           <View style={styles.repairProgressCard}>
             <View style={styles.repairProgressHeader}>
               <View>
                 <Text style={styles.repairProgressTitle}>Repair in Progress</Text>
                 <Text style={styles.repairProgressMeta}>Timer</Text>
-                <Text style={styles.repairTimer}>00:18:32</Text>
+                <Text style={styles.repairTimer}>{formatWorkTimer(workTimer)}</Text>
               </View>
               <View style={styles.repairLivePill}>
                 <View style={styles.repairLiveDot} />
@@ -2532,69 +1470,20 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
             />
           </View>
 
-          <View style={styles.workSummaryCard}>
-            <EstimateLine label="Approved estimate" amount={originalTotal} strong />
-            <EstimateLine label="Approved required changes" amount={approvedAdditionalTotal} />
-            <EstimateLine label="Pending required changes" amount={pendingAdditionalTotal} mutedLabel />
-            <EstimateLine label="Current approved total" amount={originalTotal + approvedAdditionalTotal} total />
-          </View>
-
-          <View style={styles.additionalApprovalCard}>
-            <Text style={styles.approvalNextTitle}>Required change requests</Text>
-            <Text style={styles.additionalApprovalSubtitle}>Use this only if the approved repair cannot be completed without an extra required item. Non-urgent recommendations should be saved for a future service.</Text>
-            <View style={styles.additionalActionRow}>
-              <TouchableOpacity style={styles.additionalRequiredBtn} activeOpacity={0.86} onPress={openRequiredChangeRequest}>
-                <Ionicons name="alert-circle-outline" size={17} color="#FFFFFF" />
-                <Text style={styles.additionalRequiredText}>Request required change</Text>
-              </TouchableOpacity>
-            </View>
-
-            {additionalApprovals.length === 0 ? (
-              <View style={styles.additionalEmptyBox}>
-                <Ionicons name="document-text-outline" size={20} color="#8B9098" />
-                <Text style={styles.additionalEmptyText}>No additional approvals yet.</Text>
-              </View>
-            ) : (
-              additionalApprovals.map(item => (
-                <View key={item.id} style={[styles.additionalItem, styles.additionalItemRequired]}>
-                  <View style={styles.additionalItemTop}>
-                    <View style={styles.additionalItemInfo}>
-                      <Text style={styles.additionalItemKind}>Required to continue</Text>
-                      <Text style={styles.additionalItemTitle}>{item.title}</Text>
-                      <Text style={styles.additionalItemDescription}>{item.description}</Text>
-                      <View style={styles.additionalEvidenceRow}>
-                        <Ionicons name="camera-outline" size={13} color="#5E646D" />
-                        <Text style={styles.additionalEvidenceText}>{item.evidence || 'Evidence required before sending to customer.'}</Text>
-                      </View>
-                    </View>
-                    <Text style={styles.additionalItemAmount}>{formatCurrency(item.amount)}</Text>
-                  </View>
-                  <View style={styles.additionalItemBottom}>
-                    <View style={[styles.additionalStatusPill, item.status === 'approved' && styles.additionalStatusApproved, item.status === 'declined' && styles.additionalStatusDeclined]}>
-                      <Text style={[styles.additionalStatusText, item.status === 'approved' && styles.additionalStatusTextApproved, item.status === 'declined' && styles.additionalStatusTextDeclined]}>{item.status === 'pending' ? 'Pending customer approval' : item.status === 'approved' ? 'Approved by customer' : 'Declined by customer'}</Text>
-                    </View>
-                    {item.status === 'pending' && (
-                      <View style={styles.additionalDemoActions}>
-                        <TouchableOpacity style={styles.additionalApproveMini} activeOpacity={0.84} onPress={() => updateAdditionalApproval(item.id, 'approved')}>
-                          <Ionicons name="checkmark" size={14} color="#FFFFFF" />
-                        </TouchableOpacity>
-                        <TouchableOpacity style={styles.additionalDeclineMini} activeOpacity={0.84} onPress={() => updateAdditionalApproval(item.id, 'declined')}>
-                          <Ionicons name="close" size={14} color="#F04416" />
-                        </TouchableOpacity>
-                      </View>
-                    )}
-                  </View>
-                </View>
-              ))
-            )}
-          </View>
-
           <TouchableOpacity style={styles.completeWorkBtn} activeOpacity={0.86} onPress={openCompleteReview}>
             <Ionicons name="checkmark-done-outline" size={18} color="#FFFFFF" />
             <Text style={styles.completeWorkText}>Complete Work</Text>
           </TouchableOpacity>
 
         </ScrollView>
+
+        <Modal visible={estimatePreviewOpen} transparent animationType="fade" onRequestClose={() => setEstimatePreviewOpen(false)}>
+          <CustomerEstimatePreview
+            job={job}
+            estimate={approveOptional ? estimate : { ...estimate, optionalLabor: [], optionalParts: [], optionalSubtotal: 0, optionalTax: 0, totalIfApproved: estimate.total }}
+            onClose={() => setEstimatePreviewOpen(false)}
+          />
+        </Modal>
 
         <Modal visible={changeRequestOpen} transparent animationType="fade" onRequestClose={() => setChangeRequestOpen(false)}>
           <KeyboardAvoidingView style={styles.checklistKeyboardAvoider} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
@@ -3336,8 +2225,31 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
 
         <View style={styles.requestBriefCard}>
           <Text style={styles.jobDetailHeading}>Job Details</Text>
-          {jobDetailsRows.map(row => (
-            <RequestInfoRow key={row.key} icon={row.icon} color={row.color} label={row.label} value={row.value} chevron={row.chevron} onPress={row.onPress} />
+
+          <RequestInfoRow icon="chatbox-outline" color="#2F80FF" label="Customer Note" value={customerNote} chevron onPress={() => setNoteOpen(true)} />
+
+          {intakeRows.length > 0 && (
+            <>
+              <View style={styles.jobDetailSectionRow}>
+                <View style={[styles.requestInfoIcon, { backgroundColor: '#F04416' + '18' }]}>
+                  <Ionicons name="clipboard-outline" size={16} color="#F04416" />
+                </View>
+                <Text style={styles.jobDetailSectionLabel} numberOfLines={1}>Customer Diagnostic</Text>
+              </View>
+              <View style={styles.diagnosticIndent}>
+                {intakeRows.map(row => (
+                  <View key={row.key} style={styles.diagnosticRow}>
+                    <View style={styles.diagnosticDot} />
+                    <Text style={styles.diagnosticLabel} numberOfLines={2}>{row.label}</Text>
+                    <Text style={styles.diagnosticValue} numberOfLines={1}>{row.value}</Text>
+                  </View>
+                ))}
+              </View>
+            </>
+          )}
+
+          {locationDetailRows.map(row => (
+            <RequestInfoRow key={row.key} icon={row.icon} color={row.color} label={row.label} value={row.value} />
           ))}
         </View>
 
@@ -3574,426 +2486,6 @@ function CompletionCheckRow({ done, title, detail }) {
   );
 }
 
-function getRecommendedServicesFromDiagnosis(answers, batteryVoltage, order) {
-  const serviceType = getOrderServiceType(order);
-  if (serviceType === 'tire_change') {
-    const recommendations = [];
-    if (answers.tireDamage === 'not_repairable') recommendations.push('Tire Replacement');
-    if (answers.spareTire === 'not_available') recommendations.push('Tow to Tire Shop');
-    if (answers.wheelCondition === 'damaged') recommendations.push('Wheel Inspection');
-    return recommendations.length ? recommendations : ['Tire Change Labor'];
-  }
-  if (serviceType === 'towing') {
-    const recommendations = [];
-    if (answers.towMethod === 'flatbed') recommendations.push('Flatbed Towing');
-    if (answers.vehicleRolls === 'locked' || answers.steering === 'locked') recommendations.push('Special Recovery Setup');
-    return recommendations.length ? recommendations : ['Tow Service'];
-  }
-  if (serviceType === 'lockout') {
-    if (answers.ownershipVerified === 'not_verified') return ['Customer Verification Required'];
-    return ['Lockout Service'];
-  }
-  if (serviceType === 'mobile_mechanic') {
-    const recommendations = [];
-    if (answers.scanResult === 'codes_present') recommendations.push('Advanced Diagnostics');
-    if (answers.safeToDrive === 'no') recommendations.push('Safety Inspection');
-    return recommendations.length ? recommendations : ['General Diagnostics'];
-  }
-
-  const recommendations = [];
-  const voltage = Number.parseFloat(String(batteryVoltage || '').replace(',', '.'));
-  if (answers.loadTest === 'weak' || answers.loadTest === 'bad' || (Number.isFinite(voltage) && voltage < 12.2)) {
-    recommendations.push('Battery Replacement');
-  }
-  if (answers.alternator === 'failed') {
-    recommendations.push('Alternator Replacement');
-  }
-  if (answers.jumpStart === 'not_started') {
-    recommendations.push('Advanced Electrical Diagnosis');
-  }
-  return recommendations.length ? recommendations : ['Electrical System Check'];
-}
-
-function getDemoEstimate(answers, batteryVoltage, extraItems = [], removedItems = [], order) {
-  const serviceType = getOrderServiceType(order);
-  let labor = [];
-  let parts = [];
-
-  if (serviceType === 'tire_change') {
-    labor = [
-      { id: 'base-labor-tire-change', source: 'base', scope: 'required', label: 'Tire Change Labor', hours: '0.6 hr', amount: 72 },
-    ];
-    parts = [
-      { id: 'base-part-shop-supplies', source: 'base', scope: 'required', label: 'Shop Supplies', amount: 12 },
-    ];
-    if (answers.tireDamage === 'not_repairable') {
-      parts.splice(0, 0, { id: 'ai-part-replacement-tire', source: 'ai', scope: 'required', label: 'Replacement Tire', amount: 149 });
-    }
-  } else if (serviceType === 'towing') {
-    labor = [
-      { id: 'base-labor-tow-service', source: 'base', scope: 'required', label: answers.towMethod === 'flatbed' ? 'Flatbed Towing' : 'Tow Service', hours: '1.0 hr', amount: answers.towMethod === 'flatbed' ? 145 : 120 },
-    ];
-    parts = [
-      { id: 'base-part-tow-supplies', source: 'base', scope: 'required', label: 'Tow Supplies', amount: 15 },
-    ];
-  } else if (serviceType === 'lockout') {
-    labor = [
-      { id: 'base-labor-lockout-service', source: 'base', scope: 'required', label: 'Lockout Service', hours: '0.7 hr', amount: 89 },
-    ];
-    parts = [];
-  } else if (serviceType === 'mobile_mechanic') {
-    labor = [
-      { id: 'base-labor-diagnostics', source: 'base', scope: 'required', label: 'Mobile Diagnostics', hours: '0.8 hr', amount: 96 },
-    ];
-    parts = [
-      { id: 'base-part-shop-supplies', source: 'base', scope: 'required', label: 'Shop Supplies', amount: 12 },
-    ];
-  } else {
-    labor = [
-      { id: 'base-labor-battery-replacement', source: 'base', scope: 'required', label: 'Battery Replacement', hours: '1.0 hr', amount: 120 },
-    ];
-    parts = [
-      { id: 'base-part-battery-group-35', source: 'base', scope: 'required', label: 'Battery Group 35', amount: 169 },
-      { id: 'base-part-shop-supplies', source: 'base', scope: 'required', label: 'Shop Supplies', amount: 12 },
-    ];
-  }
-  const optionalLabor = [];
-  const optionalParts = [];
-
-  if (serviceType === 'tire_change' && answers.wheelCondition === 'damaged') {
-    optionalLabor.push({ id: 'ai-labor-wheel-inspection', source: 'ai', scope: 'optional', label: 'Wheel Inspection', hours: '0.4 hr', amount: 48 });
-  }
-
-  if ((serviceType === 'jump_start' || serviceType === 'battery_replacement') && answers.alternator === 'failed') {
-    labor.push({ id: 'ai-labor-alternator-replacement', source: 'ai', scope: 'required', label: 'Alternator Replacement', hours: '1.2 hr', amount: 144 });
-    parts.splice(1, 0, { id: 'ai-part-alternator', source: 'ai', scope: 'required', label: 'Alternator', amount: 189 });
-  }
-  if ((serviceType === 'jump_start' || serviceType === 'battery_replacement') && answers.jumpStart === 'not_started') {
-    labor.push({ id: 'ai-labor-electrical-diagnosis', source: 'ai', scope: 'required', label: 'Electrical Diagnosis', hours: '0.8 hr', amount: 96 });
-  }
-  const voltage = Number.parseFloat(String(batteryVoltage || '').replace(',', '.'));
-  if ((serviceType === 'jump_start' || serviceType === 'battery_replacement') && Number.isFinite(voltage) && voltage >= 12.2 && answers.loadTest === 'good') {
-    parts.splice(0, 1);
-  }
-
-  extraItems.forEach(item => {
-    const targetLabor = item.scope === 'optional' ? optionalLabor : labor;
-    const targetParts = item.scope === 'optional' ? optionalParts : parts;
-    if (item.type === 'parts') {
-      targetParts.push({ id: item.id, source: 'custom', scope: item.scope || 'required', label: item.label, amount: item.amount, priceWarning: item.priceWarning });
-    } else {
-      targetLabor.push({ id: item.id, source: 'custom', scope: item.scope || 'required', label: item.label, hours: item.hours || '1.0 hr', amount: item.amount, priceWarning: item.priceWarning });
-    }
-  });
-
-  const visibleLabor = labor.filter(item => !removedItems.includes(item.id));
-  const visibleParts = parts.filter(item => !removedItems.includes(item.id));
-  const visibleOptionalLabor = optionalLabor.filter(item => !removedItems.includes(item.id));
-  const visibleOptionalParts = optionalParts.filter(item => !removedItems.includes(item.id));
-  const fees = [{ label: 'Diagnostic Fee', amount: 49 }];
-  const laborSubtotal = sumAmounts(visibleLabor);
-  const partsSubtotal = sumAmounts(visibleParts);
-  const optionalLaborSubtotal = sumAmounts(visibleOptionalLabor);
-  const optionalPartsSubtotal = sumAmounts(visibleOptionalParts);
-  const feesSubtotal = sumAmounts(fees);
-  const subtotal = laborSubtotal + partsSubtotal + feesSubtotal;
-  const optionalSubtotal = optionalLaborSubtotal + optionalPartsSubtotal;
-  const tax = Math.round(subtotal * 0.0675 * 100) / 100;
-  const optionalTax = Math.round(optionalSubtotal * 0.0675 * 100) / 100;
-  const total = Math.round((subtotal + tax) * 100) / 100;
-  const totalIfApproved = Math.round((total + optionalSubtotal + optionalTax) * 100) / 100;
-  return {
-    labor: visibleLabor,
-    parts: visibleParts,
-    optionalLabor: visibleOptionalLabor,
-    optionalParts: visibleOptionalParts,
-    fees,
-    laborSubtotal,
-    partsSubtotal,
-    optionalLaborSubtotal,
-    optionalPartsSubtotal,
-    subtotal,
-    optionalSubtotal,
-    tax,
-    optionalTax,
-    total,
-    totalIfApproved,
-  };
-}
-
-function getEstimateCatalog(type) {
-  const labor = [
-    { type: 'labor', label: 'Battery Replacement', hours: '1.0 hr', amount: 120, category: 'Electrical' },
-    { type: 'labor', label: 'Alternator Replacement', hours: '1.2 hr', amount: 144, category: 'Electrical' },
-    { type: 'labor', label: 'Starter Replacement', hours: '1.4 hr', amount: 168, category: 'Electrical' },
-    { type: 'labor', label: 'Electrical Diagnosis', hours: '0.8 hr', amount: 96, category: 'Diagnostics' },
-    { type: 'labor', label: 'Tire Change Labor', hours: '0.6 hr', amount: 72, category: 'Roadside' },
-    { type: 'labor', label: 'Brake Inspection', hours: '0.7 hr', amount: 84, category: 'Inspection' },
-  ];
-  const parts = [
-    { type: 'parts', label: 'Battery Group 35', amount: 169, category: 'Battery' },
-    { type: 'parts', label: 'Alternator', amount: 189, category: 'Charging System' },
-    { type: 'parts', label: 'Starter Motor', amount: 215, category: 'Starting System' },
-    { type: 'parts', label: 'Battery Terminal Kit', amount: 24, category: 'Electrical' },
-    { type: 'parts', label: 'Serpentine Belt', amount: 39, category: 'Engine' },
-    { type: 'parts', label: 'Shop Supplies', amount: 12, category: 'Supplies' },
-  ];
-  return type === 'parts' ? parts : labor;
-}
-
-function getEstimatePriceCheck(type, name, amount) {
-  if (!Number.isFinite(amount) || amount <= 0) return { warning: false };
-  const normalizedName = String(name || '').toLowerCase();
-  const ranges = [
-    { type: 'labor', match: ['battery'], min: 90, max: 150 },
-    { type: 'labor', match: ['alternator'], min: 120, max: 190 },
-    { type: 'labor', match: ['starter'], min: 135, max: 210 },
-    { type: 'labor', match: ['diagnosis', 'diagnostic'], min: 70, max: 130 },
-    { type: 'labor', match: ['tire'], min: 55, max: 95 },
-    { type: 'parts', match: ['battery'], min: 120, max: 210 },
-    { type: 'parts', match: ['alternator'], min: 150, max: 260 },
-    { type: 'parts', match: ['starter'], min: 160, max: 280 },
-    { type: 'parts', match: ['terminal'], min: 15, max: 45 },
-    { type: 'parts', match: ['belt'], min: 25, max: 70 },
-  ];
-  const fallback = type === 'parts'
-    ? { min: 10, max: 250 }
-    : { min: 60, max: 180 };
-  const matched = ranges.find(range => range.type === type && range.match.some(match => normalizedName.includes(match))) || fallback;
-  return { ...matched, warning: amount > matched.max };
-}
-
-function sumAmounts(items) {
-  return items.reduce((sum, item) => sum + Number(item.amount || 0), 0);
-}
-
-function formatCurrency(value) {
-  return `$${Number(value || 0).toFixed(2)}`;
-}
-
-function JobDetailScreen({ job, onBack, refreshControl }) {
-  const [currentStepIndex, setCurrentStepIndex] = useState(
-    Math.max(0, JOB_STEPS.findIndex(s => s.key === 'on_the_way'))
-  );
-  const [mapOpen, setMapOpen] = useState(false);
-  useEffect(() => {
-    setCurrentStepIndex(Math.max(0, JOB_STEPS.findIndex(s => s.key === 'on_the_way')));
-  }, [job.id]);
-
-  const isComplete = currentStepIndex >= JOB_STEPS.length - 1;
-  const nextStep = JOB_STEPS[Math.min(currentStepIndex + 1, JOB_STEPS.length - 1)];
-  const total = job.payment?.total || 0;
-  const address = job.pickup?.address || 'Location pending';
-  const isTowing = isTowingService(job);
-  const dropoffAddress = getDropoffAddress(job);
-  const jobDetailsRows = [
-    { label: 'Service Type', value: job.service.type },
-    { label: isTowing ? 'Pickup Location' : 'Service Location', value: address },
-    ...(isTowing ? [{ label: 'Drop-off Location', value: dropoffAddress }] : []),
-    { label: 'Payment Method', value: `${job.payment.method} - Card on file` },
-    { label: 'Customer Note', value: job.customerNote },
-    { label: 'Created', value: job.createdAt },
-  ];
-
-  const arrivedIndex = Math.max(0, JOB_STEPS.findIndex(s => s.key === 'arrived'));
-  const isArrived = currentStepIndex >= arrivedIndex;
-  const markArrived = () => setCurrentStepIndex(arrivedIndex);
-  const openMapApp = async (provider) => {
-    const destination = encodeURIComponent(address);
-    const urls = {
-      google: {
-        app: `comgooglemaps://?daddr=${destination}&directionsmode=driving`,
-        web: `https://www.google.com/maps/dir/?api=1&destination=${destination}&travelmode=driving`,
-      },
-      apple: {
-        app: `maps://?daddr=${destination}&dirflg=d`,
-        web: `http://maps.apple.com/?daddr=${destination}&dirflg=d`,
-      },
-      waze: {
-        app: `waze://?q=${destination}&navigate=yes`,
-        web: `https://waze.com/ul?q=${destination}&navigate=yes`,
-      },
-    };
-    const target = urls[provider] || urls.google;
-    setMapOpen(false);
-    const canOpenApp = await Linking.canOpenURL(target.app);
-    Linking.openURL(canOpenApp ? target.app : target.web);
-  };
-
-  return (
-    <View style={{ flex: 1, backgroundColor: '#020C1A' }}>
-      <View style={styles.jobHeader}>
-        <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={styles.jobBackBtn}>
-          <Ionicons name="chevron-back" size={24} color="#fff" />
-        </TouchableOpacity>
-        <Text style={styles.jobHeaderTitle}>Job #{job.number}</Text>
-        <TouchableOpacity activeOpacity={0.8} style={styles.jobMenuBtn}>
-          <Ionicons name="apps-outline" size={22} color="#fff" />
-        </TouchableOpacity>
-      </View>
-
-      <ScrollView style={styles.container} contentContainerStyle={styles.jobContent} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
-        <View style={styles.jobStatusBar}>
-          <View style={styles.jobStatusLeft}>
-            <View style={styles.jobStatusDot} />
-            <Text style={styles.jobStatusText}>{JOB_STEPS[currentStepIndex]?.label || 'Accepted'}</Text>
-          </View>
-          <Text style={styles.jobEtaText}>ETA {job.eta}</Text>
-        </View>
-
-        <View style={styles.jobCard}>
-          <View style={styles.customerRow}>
-            <View style={styles.customerAvatar}>
-              <Text style={styles.customerInitials}>{job.customer.initials}</Text>
-            </View>
-            <View style={styles.customerInfo}>
-              <Text style={styles.customerName}>{job.customer.name}</Text>
-              <Text style={styles.customerPhone}>{job.customer.phone}</Text>
-            </View>
-            <View style={styles.customerActions}>
-              <TouchableOpacity style={styles.callBtn} activeOpacity={0.8}>
-                <Ionicons name="call" size={20} color="#42D463" />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.msgBtn} activeOpacity={0.8}>
-                <Ionicons name="chatbox" size={20} color="#2F80FF" />
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-
-        <View style={styles.jobCard}>
-          <View style={styles.serviceRow}>
-            <View style={[styles.serviceIconWrap, { backgroundColor: (job.accent || '#42D463') + '20' }]}>
-              <Ionicons name={job.service.icon} size={26} color={job.accent || '#42D463'} />
-            </View>
-            <View style={styles.serviceInfo}>
-              <Text style={styles.serviceType}>{job.service.type}</Text>
-              <Text style={styles.serviceVehicle}>{job.vehicle.year} {job.vehicle.make} {job.vehicle.model}</Text>
-              <Text style={styles.serviceAddress}>{address}</Text>
-            </View>
-          </View>
-        </View>
-
-        <View style={styles.jobCard}>
-          <JobStepper steps={JOB_STEPS} currentIndex={currentStepIndex} />
-        </View>
-
-        <View style={styles.jobCard}>
-          <Text style={styles.jobDetailHeading}>Job Details</Text>
-          {jobDetailsRows.map((row, index) => (
-            <JobDetailRow key={row.label} label={row.label} value={row.value} last={index === jobDetailsRows.length - 1} />
-          ))}
-        </View>
-
-        <TouchableOpacity style={styles.openNavBtn} onPress={() => setMapOpen(true)} activeOpacity={0.84}>
-          <Ionicons name="navigate" size={22} color="#2F80FF" />
-          <View>
-            <Text style={styles.openNavBtnTitle}>Open Navigation</Text>
-            <Text style={styles.openNavBtnSub}>Choose your preferred app</Text>
-          </View>
-        </TouchableOpacity>
-
-        <View style={styles.customerNotifiedBanner}>
-          <Ionicons name="notifications-outline" size={16} color="#A8B3C8" />
-          <Text style={styles.customerNotifiedText}>Customer has been notified that you're on the way.</Text>
-        </View>
-
-        <TouchableOpacity
-          style={[styles.arrivedActionBtn, isArrived && styles.arrivedActionBtnDone]}
-          onPress={markArrived}
-          disabled={isArrived}
-          activeOpacity={0.84}
-        >
-          <View style={[styles.actionSlidePill, { display: 'none' }]}>
-            <Ionicons name={isArrived ? "checkmark" : "chevron-forward"} size={20} color="#fff" />
-          </View>
-          <View style={styles.actionSlideTextWrap}>
-            <Text style={styles.actionSlideBtnTitle}>{isArrived ? 'Arrived' : "I've Arrived"}</Text>
-            <Text style={styles.actionSlideBtnSub}>
-              {isArrived ? 'You are at the location' : 'Confirm when you arrive at the location'}
-            </Text>
-          </View>
-        </TouchableOpacity>
-      </ScrollView>
-
-      <Modal visible={mapOpen} transparent animationType="fade" onRequestClose={() => setMapOpen(false)}>
-        <View style={styles.mapModalOverlay}>
-          <TouchableOpacity style={styles.mapModalBackdrop} activeOpacity={1} onPress={() => setMapOpen(false)} />
-          <View style={styles.mapChoiceCard}>
-            <View style={styles.mapChoiceHeader}>
-              <Text style={styles.mapChoiceTitle}>Choose Map</Text>
-              <TouchableOpacity onPress={() => setMapOpen(false)} activeOpacity={0.8}>
-                <Ionicons name="close" size={20} color="#D7DCE8" />
-              </TouchableOpacity>
-            </View>
-            {[
-              { id: 'google', label: 'Google Maps', icon: 'map-outline', color: '#2F80FF' },
-              { id: 'apple', label: 'Apple Maps', icon: 'logo-apple', color: '#D7DCE8' },
-              { id: 'waze', label: 'Waze', icon: 'navigate-circle-outline', color: '#42D463' },
-            ].map(app => (
-              <TouchableOpacity key={app.label} style={styles.mapChoiceRow} onPress={() => openMapApp(app.id)} activeOpacity={0.84}>
-                <Ionicons name={app.icon} size={20} color={app.color} />
-                <Text style={styles.mapChoiceText}>{app.label}</Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </View>
-      </Modal>
-    </View>
-  );
-}
-
-function JobStepper({ steps, currentIndex }) {
-  return (
-    <View style={styles.stepperContainer}>
-      {steps.map((step, index) => {
-        const isCompleted = index < currentIndex;
-        const isCurrent = index === currentIndex;
-        const isFirst = index === 0;
-        const isLast = index === steps.length - 1;
-        return (
-          <View key={step.key} style={styles.stepperItem}>
-            <View style={styles.stepperRow}>
-              <View style={[styles.stepperLineSeg, { backgroundColor: isFirst ? 'transparent' : index <= currentIndex ? '#F04416' : '#E1E4E8' }]} />
-              <View style={[styles.stepperCircle, isCompleted && styles.stepperCircleCompleted, isCurrent && styles.stepperCircleCurrent]}>
-                {isCompleted
-                  ? <Ionicons name="checkmark" size={13} color="#FFFFFF" />
-                  : <Ionicons name="car-outline" size={13} color={isCurrent ? '#FFFFFF' : '#8B9098'} />}
-              </View>
-              <View style={[styles.stepperLineSeg, { backgroundColor: isLast ? 'transparent' : index < currentIndex ? '#F04416' : '#E1E4E8' }]} />
-            </View>
-            <Text style={[styles.stepperLabel, (isCompleted || isCurrent) && styles.stepperLabelActive]} numberOfLines={1}>{step.label}</Text>
-          </View>
-        );
-      })}
-    </View>
-  );
-}
-
-function JobDetailRow({ label, value, last }) {
-  return (
-    <View style={[styles.jobDetailRow, !last && styles.jobDetailRowBorder]}>
-      <Text style={styles.jobDetailLabel}>{label}</Text>
-      <Text style={styles.jobDetailValue} numberOfLines={2}>{value}</Text>
-    </View>
-  );
-}
-
-function Metric({ title, value, meta, icon, color, compact }) {
-  return (
-    <View style={[styles.metricCard, compact && styles.metricCardCompact]}>
-      <View style={styles.metricTop}>
-        <Text style={styles.metricTitle}>{title}</Text>
-        <View style={[styles.metricIcon, { backgroundColor: color + '20' }]}>
-          <Ionicons name={icon} size={16} color={color} />
-        </View>
-      </View>
-      <Text style={[styles.metricValue, { color }]} numberOfLines={1}>{value}</Text>
-      <Text style={styles.metricMeta}>{meta}</Text>
-    </View>
-  );
-}
-
 function Tab({ icon, label, active, badge }) {
   return (
     <View style={styles.tabItem} pointerEvents="none">
@@ -4004,442 +2496,6 @@ function Tab({ icon, label, active, badge }) {
       <Text style={[styles.tabLabel, active && styles.tabLabelActive]}>{label}</Text>
     </View>
   );
-}
-
-function formatMoney(order) {
-  const rawValue = order.pricing?.total ?? order.payment?.totalHeld ?? order.price ?? order.total ?? order.estimate ?? order.service?.price;
-  if (typeof rawValue === 'number') return `$${Math.round(rawValue)}`;
-  if (typeof rawValue === 'string' && rawValue.trim()) return rawValue.startsWith('$') ? rawValue : `$${rawValue}`;
-  return '$89';
-}
-
-const SERVICE_TYPES = [
-  { title: 'Towing', icon: 'car-sport-outline', matches: ['tow', 'towing', 'transport', 'flatbed', 'эваку'] },
-  { title: 'Jump Start', icon: 'battery-charging-outline', matches: ['jump', 'jump start', 'battery jump', 'boost', 'start car', 'dead battery'] },
-  { title: 'Battery Replacement', icon: 'battery-full-outline', matches: ['battery replacement', 'replace battery', 'new battery'] },
-  { title: 'Tire Change', icon: 'disc-outline', matches: ['tire', 'tyre', 'flat', 'wheel', 'колес', 'шина'] },
-  { title: 'Diagnostics', icon: 'speedometer-outline', matches: ['diagnostic', 'diagnostics', 'check engine', 'scan'] },
-  { title: 'Mobile Mechanic', icon: 'construct-outline', matches: ['mechanic', 'repair', 'mobile service', 'fix', 'engine'] },
-  { title: 'Lockout', icon: 'lock-open-outline', matches: ['lockout', 'locked', 'keys'] },
-  { title: 'Fuel Delivery', icon: 'water-outline', matches: ['fuel', 'gas', 'petrol'] },
-];
-
-const SERVICE_FLOW_SCHEMAS = {
-  towing: {
-    title: 'Towing',
-    icon: 'car-sport-outline',
-    requiredPhotos: [
-      { key: 'front', label: 'Front of vehicle', hint: 'License plate must be readable' },
-      { key: 'vin', label: 'VIN', hint: 'VIN label must be clear and readable' },
-      { key: 'odometer', label: 'Odometer', hint: 'Mileage reading must be visible' },
-      { key: 'tow_access', label: 'Tow access', hint: 'Show access path and vehicle position for towing' },
-    ],
-    intakeQuestions: [
-      { key: 'vehicle_undrivable', label: 'Is the vehicle completely undrivable?' },
-      { key: 'road_type', label: 'Are you on a highway?' },
-      { key: 'injury', label: 'Is anyone injured?' },
-      { key: 'keys_available', label: 'Are the keys available?' },
-    ],
-    diagnosis: {
-      title: 'Towing Readiness',
-      metric: { key: 'towAccess', label: 'Tow Access Clearance', icon: 'resize-outline', unit: '' },
-      checks: [
-        { key: 'vehicleRolls', icon: 'car-sport-outline', label: 'Vehicle Rolls', options: [{ label: 'Rolls', value: 'rolls' }, { label: 'Does Not Roll', value: 'locked' }] },
-        { key: 'steering', icon: 'git-branch-outline', label: 'Steering Condition', options: [{ label: 'Steers', value: 'steers' }, { label: 'Locked', value: 'locked' }] },
-        { key: 'towMethod', icon: 'trail-sign-outline', label: 'Tow Method', options: [{ label: 'Wheel Lift', value: 'wheel_lift' }, { label: 'Flatbed', value: 'flatbed' }] },
-      ],
-      fallbackRecommendations: ['Tow Service'],
-    },
-  },
-  jump_start: {
-    title: 'Jump Start',
-    icon: 'battery-charging-outline',
-    requiredPhotos: [
-      { key: 'front', label: 'Front of vehicle', hint: 'License plate must be readable' },
-      { key: 'vin', label: 'VIN', hint: 'VIN label must be clear and readable' },
-      { key: 'odometer', label: 'Odometer', hint: 'Mileage reading must be visible' },
-      { key: 'battery_area', label: 'Battery area', hint: 'Show battery terminals or jump points if accessible' },
-    ],
-    intakeQuestions: [
-      { key: 'interior_lights', label: 'Are the interior lights working?' },
-      { key: 'engine_clicks', label: 'Does the engine click when starting?' },
-      { key: 'battery_age', label: 'Is the battery older than 3 years?' },
-    ],
-    diagnosis: {
-      title: 'Battery & Electrical System',
-      metric: { key: 'batteryVoltage', label: 'Battery Voltage', icon: 'battery-half-outline', unit: 'V', keyboardType: 'decimal-pad' },
-      checks: [
-        { key: 'jumpStart', icon: 'flash-outline', label: 'Jump Start Result', options: [{ label: 'Vehicle Started', value: 'started' }, { label: 'Vehicle Did Not Start', value: 'not_started' }] },
-        { key: 'alternator', icon: 'battery-charging-outline', label: 'Charging System (Alternator)', options: [{ label: 'Alternator OK', value: 'ok' }, { label: 'Alternator Failed', value: 'failed' }] },
-        { key: 'loadTest', icon: 'shield-checkmark-outline', label: 'Battery Load Test', options: [{ label: 'Good', value: 'good' }, { label: 'Weak', value: 'weak' }, { label: 'Bad', value: 'bad' }] },
-      ],
-      fallbackRecommendations: ['Electrical System Check'],
-    },
-  },
-  battery_replacement: {
-    title: 'Battery Replacement',
-    icon: 'battery-full-outline',
-    requiredPhotos: [
-      { key: 'front', label: 'Front of vehicle', hint: 'License plate must be readable' },
-      { key: 'vin', label: 'VIN', hint: 'VIN label must be clear and readable' },
-      { key: 'odometer', label: 'Odometer', hint: 'Mileage reading must be visible' },
-      { key: 'battery_area', label: 'Battery area', hint: 'Show current battery label and terminals' },
-    ],
-    intakeQuestions: [
-      { key: 'interior_lights', label: 'Are the interior lights working?' },
-      { key: 'engine_clicks', label: 'Does the engine click when starting?' },
-      { key: 'battery_age', label: 'Is the battery older than 3 years?' },
-    ],
-    diagnosis: {
-      title: 'Battery Replacement Check',
-      metric: { key: 'batteryVoltage', label: 'Battery Voltage', icon: 'battery-half-outline', unit: 'V', keyboardType: 'decimal-pad' },
-      checks: [
-        { key: 'batteryFitment', icon: 'barcode-outline', label: 'Battery Fitment', options: [{ label: 'Matched', value: 'matched' }, { label: 'Mismatch', value: 'mismatch' }] },
-        { key: 'terminalCondition', icon: 'hardware-chip-outline', label: 'Terminal Condition', options: [{ label: 'Clean', value: 'clean' }, { label: 'Corroded', value: 'corroded' }] },
-        { key: 'systemTest', icon: 'checkmark-circle-outline', label: 'Post-install Test', options: [{ label: 'Passed', value: 'passed' }, { label: 'Failed', value: 'failed' }] },
-      ],
-      fallbackRecommendations: ['Battery Replacement'],
-    },
-  },
-  lockout: {
-    title: 'Lockout',
-    icon: 'lock-open-outline',
-    requiredPhotos: [
-      { key: 'front', label: 'Front of vehicle', hint: 'License plate must be readable' },
-      { key: 'vin', label: 'VIN', hint: 'VIN label must be clear and readable if accessible' },
-      { key: 'door_area', label: 'Door area', hint: 'Show the affected door/lock area' },
-    ],
-    intakeQuestions: [
-      { key: 'keys_inside', label: 'Are keys inside the vehicle?' },
-      { key: 'engine_running', label: 'Is the engine running?' },
-      { key: 'child_or_pet_inside', label: 'Is there a child or pet inside?' },
-    ],
-    diagnosis: {
-      title: 'Lockout Verification',
-      checks: [
-        { key: 'ownershipVerified', icon: 'shield-checkmark-outline', label: 'Ownership / Permission', options: [{ label: 'Verified', value: 'verified' }, { label: 'Not Verified', value: 'not_verified' }] },
-        { key: 'entryMethod', icon: 'lock-open-outline', label: 'Entry Method', options: [{ label: 'Standard Entry', value: 'standard' }, { label: 'Key Service', value: 'key_service' }] },
-        { key: 'damageCheck', icon: 'car-outline', label: 'Damage Check', options: [{ label: 'No Damage', value: 'no_damage' }, { label: 'Damage Present', value: 'damage' }] },
-      ],
-      fallbackRecommendations: ['Lockout Service'],
-    },
-  },
-  tire_change: {
-    title: 'Tire Change',
-    icon: 'disc-outline',
-    requiredPhotos: [
-      { key: 'front', label: 'Front of vehicle', hint: 'License plate must be readable' },
-      { key: 'vin', label: 'VIN', hint: 'VIN label must be clear and readable' },
-      { key: 'odometer', label: 'Odometer', hint: 'Mileage reading must be visible' },
-      { key: 'problem', label: 'Problem tire', hint: 'Show the flat/damaged tire and wheel position' },
-    ],
-    intakeQuestions: [
-      { key: 'vehicle_moves', label: 'Can the vehicle still move?' },
-      { key: 'spare_tire', label: 'Do you have a spare tire?' },
-    ],
-    diagnosis: {
-      title: 'Tire & Wheel System',
-      metric: { key: 'tirePressure', label: 'Tire Pressure', icon: 'speedometer-outline', unit: 'PSI', keyboardType: 'decimal-pad' },
-      checks: [
-        { key: 'tireDamage', icon: 'disc-outline', label: 'Tire Damage', options: [{ label: 'Repairable', value: 'repairable' }, { label: 'Not Repairable', value: 'not_repairable' }] },
-        { key: 'spareTire', icon: 'ellipse-outline', label: 'Spare Tire', options: [{ label: 'Available', value: 'available' }, { label: 'Not Available', value: 'not_available' }] },
-        { key: 'wheelCondition', icon: 'radio-button-on-outline', label: 'Wheel / Rim Condition', options: [{ label: 'OK', value: 'ok' }, { label: 'Damaged', value: 'damaged' }] },
-      ],
-      fallbackRecommendations: ['Tire Change Labor'],
-    },
-  },
-  mobile_mechanic: {
-    title: 'Mobile Mechanic',
-    icon: 'construct-outline',
-    requiredPhotos: [
-      { key: 'front', label: 'Front of vehicle', hint: 'License plate must be readable' },
-      { key: 'vin', label: 'VIN', hint: 'VIN label must be clear and readable' },
-      { key: 'odometer', label: 'Odometer', hint: 'Mileage reading must be visible' },
-      { key: 'problem', label: 'Problem area', hint: 'Capture warning lights, leak, smoke, or affected part' },
-    ],
-    intakeQuestions: [
-      { key: 'drivable', label: 'Is the vehicle drivable?' },
-      { key: 'safe_location', label: 'Are you in a safe location?' },
-      { key: 'immediate_help', label: 'Do you need immediate help?' },
-    ],
-    diagnosis: {
-      title: 'General Mechanical Diagnosis',
-      checks: [
-        { key: 'visualInspection', icon: 'eye-outline', label: 'Visual Inspection', options: [{ label: 'Normal', value: 'normal' }, { label: 'Issue Found', value: 'issue_found' }] },
-        { key: 'scanResult', icon: 'speedometer-outline', label: 'Scan / Warning Lights', options: [{ label: 'No Codes', value: 'no_codes' }, { label: 'Codes Present', value: 'codes_present' }] },
-        { key: 'safeToDrive', icon: 'shield-checkmark-outline', label: 'Safe To Drive', options: [{ label: 'Yes', value: 'yes' }, { label: 'No', value: 'no' }] },
-      ],
-      fallbackRecommendations: ['General Diagnostics'],
-    },
-  },
-};
-
-const DEMO_SERVICE_BY_ID = {
-  9025: { title: 'Towing', icon: 'car-sport-outline' },
-  4427: { title: 'Jump Start', icon: 'battery-charging-outline' },
-  9462: { title: 'Tire Change', icon: 'disc-outline' },
-};
-
-const DEMO_REQUEST_DETAILS_BY_ID = {
-  9025: { vehicle: 'Toyota Highlander - 2018', location: '123 Main St, San Francisco, CA', distance: '5.2 mi away' },
-  4427: { vehicle: 'Honda Civic - 2020', location: '456 Oak Ave, San Francisco, CA', distance: '6.8 mi away' },
-  9462: { vehicle: 'Nissan Altima - 2019', location: '789 Pine St, San Francisco, CA', distance: '3.1 mi away' },
-};
-
-const DEMO_VIN_BY_JOB_ID = {
-  'job-12345': '5TDJZRFH8JS12345',
-  'job-12346': '2HGFC2F59LH12346',
-  'job-12347': '5UXKR0C54H012347',
-};
-
-function getServiceTitle(order) {
-  return getServiceMeta(order).title;
-}
-
-function getServiceMeta(order) {
-  const serviceText = getServiceTypeText(order);
-  const matched = SERVICE_TYPES.find(type => type.matches.some(match => serviceText.includes(match)));
-  if (matched) return { title: matched.title, icon: matched.icon };
-
-  const explicitTitle = getRawServiceTitle(order);
-  if (explicitTitle && explicitTitle.toLowerCase() !== 'service request') {
-    return { title: explicitTitle, icon: order.icon || order.service?.icon || 'construct-outline' };
-  }
-
-  const demoService = DEMO_SERVICE_BY_ID[String(order.id || order.number || '')];
-  if (demoService) return demoService;
-
-  return {
-    title: 'Service Request',
-    icon: order.icon || order.service?.icon || 'receipt-outline',
-  };
-}
-
-function getRawServiceTitle(order) {
-  if (typeof order.service === 'string' && order.service.trim()) return order.service.trim();
-  return (
-    order.issueName ||
-    order.serviceType ||
-    order.serviceName ||
-    order.requestedService ||
-    order.recommendedService ||
-    order.issue?.name ||
-    order.issue?.title ||
-    order.service?.type ||
-    order.service?.issueName ||
-    order.service?.recommendedService ||
-    order.service?.name ||
-    order.problem ||
-    order.issue ||
-    order.selectedProblem ||
-    order.title ||
-    ''
-  );
-}
-
-function getServiceTypeText(order) {
-  const rawService = [
-    getRawServiceTitle(order),
-    order.category,
-    order.service?.category,
-    order.service?.description,
-    order.issue?.category,
-    order.orderContext?.issue,
-    order.orderContext?.problem,
-    order.orderContext?.service,
-    order.orderContext?.serviceType,
-    order.orderContext?.recommendedService,
-  ].filter(Boolean).join(' ');
-  return String(rawService).trim().toLowerCase();
-}
-
-function getOrderServiceType(order) {
-  const explicitType = order.serviceType || order.service?.serviceType || order.service?.typeKey || order.orderContext?.serviceType;
-  const schemas = SERVICE_FLOW_SCHEMAS || {};
-  if (explicitType && schemas[explicitType]) return explicitType;
-  const serviceText = getServiceTypeText(order);
-  if (serviceText.includes('tow')) return 'towing';
-  if (serviceText.includes('jump') || serviceText.includes('dead battery') || serviceText.includes('boost')) return 'jump_start';
-  if (serviceText.includes('lock') || serviceText.includes('key')) return 'lockout';
-  if (serviceText.includes('tire') || serviceText.includes('tyre') || serviceText.includes('flat') || serviceText.includes('wheel')) return 'tire_change';
-  if (serviceText.includes('battery replacement') || serviceText.includes('replace battery')) return 'battery_replacement';
-  return 'mobile_mechanic';
-}
-
-function getServiceFlowSchema(order) {
-  const schemas = SERVICE_FLOW_SCHEMAS || {};
-  return schemas[getOrderServiceType(order)] || schemas.mobile_mechanic || {
-    title: 'Mobile Mechanic',
-    icon: 'construct-outline',
-    requiredPhotos: [
-      { key: 'front', label: 'Front of vehicle', hint: 'License plate must be readable' },
-      { key: 'vin', label: 'VIN', hint: 'VIN label must be clear and readable' },
-      { key: 'odometer', label: 'Odometer', hint: 'Mileage reading must be visible' },
-      { key: 'problem', label: 'Problem area', hint: 'Capture the visible issue or affected area' },
-    ],
-    intakeQuestions: [],
-  };
-}
-
-function getDiagnosisSchema(order) {
-  const schema = getServiceFlowSchema(order);
-  return schema.diagnosis || SERVICE_FLOW_SCHEMAS.mobile_mechanic.diagnosis || {
-    title: `${schema.title || 'Service'} Diagnosis`,
-    checks: [
-      { key: 'visualInspection', icon: 'eye-outline', label: 'Visual Inspection', options: [{ label: 'Normal', value: 'normal' }, { label: 'Issue Found', value: 'issue_found' }] },
-      { key: 'safeToProceed', icon: 'shield-checkmark-outline', label: 'Safe To Proceed', options: [{ label: 'Yes', value: 'yes' }, { label: 'No', value: 'no' }] },
-    ],
-    fallbackRecommendations: ['General Diagnostics'],
-  };
-}
-
-function getProviderIntakeItems(order) {
-  const schema = getServiceFlowSchema(order);
-  const serviceType = getOrderServiceType(order);
-  const diagnosticInfo = order.service?.diagnosticInfo || order.diagnosticInfo || {};
-  const explicitQuestions = order.service?.intakeQuestions || diagnosticInfo.intakeQuestions || order.orderContext?.intakeQuestions;
-  const explicitServiceType = diagnosticInfo.serviceType || order.orderContext?.diagnosticServiceType;
-  const answers = order.service?.intakeAnswers || diagnosticInfo.intakeAnswers || diagnosticInfo.answers || order.orderContext?.intakeAnswers || {};
-
-  if (Array.isArray(explicitQuestions) && explicitQuestions.length && (!explicitServiceType || explicitServiceType === serviceType)) {
-    return explicitQuestions.map((item, index) => ({
-      key: item.key || item.id || `intake-${index}`,
-      label: item.label || item.question || item.title || `Question ${index + 1}`,
-      value: item.answer ?? answers[item.key] ?? answers[item.id] ?? '',
-    })).filter(item => item.label);
-  }
-
-  return schema.intakeQuestions.map((item, index) => ({
-    ...item,
-    key: item.key || `intake-${index}`,
-    value: answers[item.key] ?? answers[index + 1] ?? answers[String(index + 1)] ?? '',
-  }));
-}
-
-function isTowingService(order) {
-  const serviceText = getServiceTypeText(order);
-  return serviceText.includes('tow') || serviceText.includes('эваку') || serviceText.includes('буксир');
-}
-
-function getDropoffAddress(order) {
-  return (
-    (typeof order.dropoff === 'string' ? order.dropoff : '') ||
-    order.dropoff?.address ||
-    (typeof order.dropOff === 'string' ? order.dropOff : '') ||
-    order.dropOff?.address ||
-    (typeof order.destination === 'string' ? order.destination : '') ||
-    order.destination?.address ||
-    order.towDestination?.address ||
-    order.service?.dropoffAddress ||
-    order.service?.destinationAddress ||
-    order.dropoffAddress ||
-    order.destinationAddress ||
-    'Drop-off location pending'
-  );
-}
-
-function getDemoRequestDetails(order) {
-  return DEMO_REQUEST_DETAILS_BY_ID[String(order.id || order.number || '')] || {};
-}
-
-function getRequestLocation(order) {
-  const demo = getDemoRequestDetails(order);
-  return (
-    order.pickup?.address ||
-    order.location?.address ||
-    order.address ||
-    order.selectedAddress ||
-    order.orderContext?.location ||
-    order.orderContext?.address ||
-    demo.location ||
-    'Location pending'
-  );
-}
-
-function getRequestDistance(order) {
-  const demo = getDemoRequestDetails(order);
-  return order.distance || order.orderContext?.distance || demo.distance || 'Distance pending';
-}
-
-function getVehicleVin(job) {
-  return job.vehicle?.vin || job.vin || DEMO_VIN_BY_JOB_ID[job.id] || 'VIN pending';
-}
-
-function normalizeComplaintItem(item, index) {
-  if (!item) return null;
-  if (typeof item === 'string') {
-    const trimmed = item.trim();
-    return trimmed ? { key: `complaint-${index}`, label: trimmed, value: '' } : null;
-  }
-  const label = (
-    item.label ||
-    item.title ||
-    item.name ||
-    item.question ||
-    item.symptom ||
-    item.problem ||
-    item.issue ||
-    item.text ||
-    `Complaint ${index + 1}`
-  );
-  const value = item.value || item.answer || item.description || item.detail || item.note || '';
-  return { key: item.id || item.key || `complaint-${index}`, label: String(label), value: String(value || '') };
-}
-
-function getCustomerComplaintItems(job, fallbackNote) {
-  const intakeItems = getProviderIntakeItems(job)
-    .filter(item => item.value !== undefined && item.value !== null && String(item.value).trim())
-    .map((item, index) => normalizeComplaintItem({ key: item.key || `intake-${index}`, label: item.label, value: item.value }, index))
-    .filter(Boolean);
-  if (intakeItems.length) return intakeItems;
-
-  const context = job.orderContext || {};
-  const rawItems =
-    context.customerComplaint ||
-    context.customerComplaints ||
-    context.complaintItems ||
-    context.symptoms ||
-    context.selectedSymptoms ||
-    context.answers ||
-    context.issueDetails ||
-    job.customerComplaint ||
-    job.customerComplaints ||
-    job.symptoms ||
-    job.issueDetails;
-
-  if (Array.isArray(rawItems)) {
-    return rawItems.map(normalizeComplaintItem).filter(Boolean);
-  }
-
-  if (rawItems && typeof rawItems === 'object') {
-    return Object.entries(rawItems)
-      .map(([key, value], index) => normalizeComplaintItem({ key, label: key, value }, index))
-      .filter(Boolean);
-  }
-
-  const fallbackItem = normalizeComplaintItem(fallbackNote, 0);
-  return fallbackItem ? [fallbackItem] : [];
-}
-
-function getAcceptedAtLabel(job) {
-  const rawValue = job.acceptedAt || job.createdAt || job.date;
-  if (!rawValue) return 'Accepted today, 10:24 AM';
-  const date = new Date(rawValue);
-  if (Number.isNaN(date.getTime())) return `Accepted ${rawValue}`;
-  return `Accepted ${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}, ${date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
-}
-
-function getVehicleLabel(order) {
-  const demo = getDemoRequestDetails(order);
-  const make = order.vehicle?.make;
-  const model = order.vehicle?.model;
-  const year = order.vehicle?.year;
-  const label = [make, model].filter(Boolean).join(' ');
-  if (label && year) return `${label} - ${year}`;
-  if (label) return label;
-  if (year) return `Vehicle - ${year}`;
-  if (demo.vehicle) return demo.vehicle;
-  return 'Vehicle details pending';
 }
 
 async function fetchJson(url, options) {
@@ -4461,14 +2517,6 @@ async function fetchJson(url, options) {
   return JSON.parse(text);
 }
 
-function getBackendStatusFromWorkflowStage(stage) {
-  if (stage === 'route') return 'en_route';
-  if (stage === 'arrived' || stage === 'diagnosis' || stage === 'estimate') return 'arrived';
-  if (stage === 'approval') return 'estimate_sent';
-  if (stage === 'working' || stage === 'complete_review') return 'in_progress';
-  if (stage === 'completed') return 'completed';
-  return null;
-}
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#020C1A' },
@@ -4923,6 +2971,10 @@ const styles = StyleSheet.create({
   previewEstimateText: { color: '#16A34A', fontSize: 12, lineHeight: 16, fontWeight: '800' },
   estimateApprovalNote: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 12 },
   estimateApprovalText: { color: '#5E646D', fontSize: 11, lineHeight: 15, fontWeight: '700', textAlign: 'center' },
+  callFeeToggleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10, paddingHorizontal: 2, marginBottom: 6, backgroundColor: '#F9FAFB', borderRadius: 10, paddingHorizontal: 10 },
+  callFeeToggleInfo: { flex: 1, marginRight: 10 },
+  callFeeToggleLabel: { color: '#17191D', fontSize: 13, fontWeight: '700' },
+  callFeeToggleSub: { color: '#6B7280', fontSize: 11, marginTop: 2 },
   estimatePickerOverlay: { flex: 1, justifyContent: 'flex-end', padding: 15 },
   estimatePickerCard: { maxHeight: '82%', borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', padding: 14, marginBottom: 18, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 12 },
   estimateSearchBox: { height: 42, borderRadius: 8, borderWidth: 1, borderColor: '#E1E4E8', backgroundColor: '#F3F4F5', flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 11, marginBottom: 10 },
@@ -4980,6 +3032,57 @@ const styles = StyleSheet.create({
   customerEstimateDivider: { height: 1, backgroundColor: '#E1E4E8', marginVertical: 6 },
   customerPreviewOnlyNote: { minHeight: 42, borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingHorizontal: 10 },
   customerPreviewOnlyText: { color: '#5E646D', fontSize: 11, lineHeight: 15, fontWeight: '700', textAlign: 'center', flexShrink: 1 },
+  approvedEstimateCard: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderRadius: 10, borderWidth: 1, borderColor: 'rgba(22,163,74,0.22)', backgroundColor: 'rgba(22,163,74,0.06)', padding: 12, marginBottom: 10 },
+  approvedEstimateLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  approvedEstimateIconWrap: { width: 36, height: 36, borderRadius: 10, backgroundColor: 'rgba(22,163,74,0.12)', alignItems: 'center', justifyContent: 'center' },
+  approvedEstimateTitle: { color: '#17191D', fontSize: 13, fontWeight: '800' },
+  approvedEstimateAmount: { color: '#16A34A', fontSize: 15, fontWeight: '900', marginTop: 1 },
+  approvedEstimateRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  approvedEstimateBadge: { borderRadius: 20, paddingVertical: 3, paddingHorizontal: 9, backgroundColor: '#16A34A' },
+  approvedEstimateBadgePartial: { backgroundColor: 'transparent', borderWidth: 1, borderColor: '#16A34A' },
+  approvedEstimateBadgeText: { color: '#FFFFFF', fontSize: 10, fontWeight: '800' },
+  approvedEstimateBadgeTextPartial: { color: '#16A34A' },
+  workSummaryApprovalRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
+  workSummaryApprovalLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  workSummaryApprovalLabel: { color: '#16A34A', fontSize: 12, fontWeight: '800' },
+  workSummaryApprovalBadge: { borderRadius: 20, paddingVertical: 3, paddingHorizontal: 9, backgroundColor: '#16A34A' },
+  workSummaryApprovalBadgePartial: { backgroundColor: 'transparent', borderWidth: 1, borderColor: '#16A34A' },
+  workSummaryApprovalBadgeText: { color: '#FFFFFF', fontSize: 10, fontWeight: '800' },
+  workSummaryApprovalBadgeTextPartial: { color: '#16A34A' },
+  workSummaryOptionalNote: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 6 },
+  workSummaryOptionalNoteText: { color: '#8B9098', fontSize: 11, fontWeight: '600' },
+  workSummaryDivider: { height: 1, backgroundColor: '#E1E4E8', marginBottom: 8 },
+  approvalConfirmedCard: { borderRadius: 10, borderWidth: 1, borderColor: 'rgba(22,163,74,0.22)', backgroundColor: 'rgba(22,163,74,0.06)', padding: 12, marginBottom: 10 },
+  approvalConfirmedTop: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
+  approvalConfirmedIconWrap: { width: 38, height: 38, borderRadius: 10, backgroundColor: 'rgba(22,163,74,0.12)', alignItems: 'center', justifyContent: 'center' },
+  approvalConfirmedTitle: { color: '#17191D', fontSize: 14, fontWeight: '800', lineHeight: 18 },
+  approvalConfirmedTime: { color: '#8B9098', fontSize: 11, fontWeight: '600', marginTop: 1 },
+  approvalConfirmedBadge: { borderRadius: 20, paddingVertical: 4, paddingHorizontal: 10, backgroundColor: '#16A34A' },
+  approvalConfirmedBadgePartial: { backgroundColor: 'transparent', borderWidth: 1, borderColor: '#16A34A' },
+  approvalConfirmedBadgeText: { color: '#FFFFFF', fontSize: 10, fontWeight: '800' },
+  approvalConfirmedBadgeTextPartial: { color: '#16A34A' },
+  approvalConfirmedAmountRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', borderTopWidth: 1, borderTopColor: 'rgba(22,163,74,0.15)', paddingTop: 10 },
+  approvalConfirmedAmountLabel: { color: '#5E646D', fontSize: 12, fontWeight: '600' },
+  approvalConfirmedAmount: { color: '#16A34A', fontSize: 18, fontWeight: '900' },
+  approvalConfirmedNote: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: 'rgba(22,163,74,0.15)' },
+  approvalConfirmedNoteText: { flex: 1, color: '#8B9098', fontSize: 11, lineHeight: 15, fontWeight: '600' },
+  declinedNoticeCard: { alignItems: 'center', paddingVertical: 24, paddingHorizontal: 16, marginBottom: 12 },
+  declinedNoticeIcon: { width: 64, height: 64, borderRadius: 32, backgroundColor: 'rgba(220,38,38,0.1)', alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
+  declinedNoticeTitle: { color: '#17191D', fontSize: 20, lineHeight: 25, fontWeight: '900', marginBottom: 6, textAlign: 'center' },
+  declinedNoticeSubtitle: { color: '#5E646D', fontSize: 13, lineHeight: 18, textAlign: 'center' },
+  declinedReasonCard: { borderRadius: 10, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', padding: 14, marginBottom: 10 },
+  declinedReasonLabel: { color: '#8B9098', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 },
+  declinedReasonValue: { color: '#17191D', fontSize: 14, fontWeight: '700' },
+  declinedFeeCard: { borderRadius: 10, borderWidth: 1, borderColor: 'rgba(22,163,74,0.2)', backgroundColor: 'rgba(22,163,74,0.06)', padding: 14, marginBottom: 20 },
+  declinedFeeRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
+  declinedFeeLabel: { flex: 1, color: '#17191D', fontSize: 14, fontWeight: '700' },
+  declinedFeeAmount: { color: '#16A34A', fontSize: 16, fontWeight: '900' },
+  declinedFeeNote: { color: '#5E646D', fontSize: 12, lineHeight: 17 },
+  declinedActionsTitle: { color: '#5E646D', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 },
+  declinedReviseBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, borderWidth: 1.5, borderColor: '#FF6B00', borderRadius: 12, paddingVertical: 15, marginBottom: 10 },
+  declinedReviseBtnText: { color: '#FF6B00', fontSize: 15, fontWeight: '700' },
+  declinedCloseBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, borderWidth: 1.5, borderColor: '#E1E4E8', borderRadius: 12, paddingVertical: 15, marginBottom: 24 },
+  declinedCloseBtnText: { color: '#5E646D', fontSize: 15, fontWeight: '600' },
   approvalContent: { paddingHorizontal: 15, paddingTop: 10, paddingBottom: 34 },
   approvalHero: { alignItems: 'center', paddingTop: 8, paddingBottom: 16 },
   approvalClock: { width: 68, height: 68, borderRadius: 34, backgroundColor: '#EAB308', borderWidth: 8, borderColor: 'rgba(234,179,8,0.22)', alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
@@ -5001,8 +3104,8 @@ const styles = StyleSheet.create({
   approvalEditText: { color: '#2F80FF', fontSize: 15, lineHeight: 19, fontWeight: '900' },
   approvalCallBtn: { flex: 1, height: 54, borderRadius: 10, backgroundColor: '#16A34A', alignItems: 'center', justifyContent: 'center' },
   approvalCallText: { color: '#FFFFFF', fontSize: 15, lineHeight: 19, fontWeight: '900' },
-  approvalDemoBtn: { height: 48, borderRadius: 10, backgroundColor: '#17191D', alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 7, marginTop: 12 },
-  approvalDemoText: { color: '#FFFFFF', fontSize: 14, lineHeight: 18, fontWeight: '900' },
+  approvalDemoBtn: { alignItems: 'center', paddingVertical: 12, marginTop: 4 },
+  approvalDemoText: { color: '#C4C9D1', fontSize: 11, fontWeight: '500' },
   workContent: { paddingHorizontal: 15, paddingTop: 10, paddingBottom: 34 },
   repairProgressCard: { borderRadius: 10, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', padding: 13, marginBottom: 12 },
   repairProgressHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, marginBottom: 14 },
@@ -5037,13 +3140,39 @@ const styles = StyleSheet.create({
   additionalRequiredText: { color: '#FFFFFF', fontSize: 12, lineHeight: 16, fontWeight: '900', textAlign: 'center', flexShrink: 1 },
   additionalEmptyBox: { minHeight: 74, borderRadius: 8, borderWidth: 1, borderColor: '#E1E4E8', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', gap: 5 },
   additionalEmptyText: { color: '#5E646D', fontSize: 12, lineHeight: 16, fontWeight: '700' },
+  crCard: { borderRadius: 12, borderWidth: 1.5, borderColor: 'rgba(240,68,22,0.28)', backgroundColor: '#FFFFFF', padding: 14, gap: 10 },
+  crCardApproved: { borderColor: 'rgba(22,163,74,0.25)', backgroundColor: 'rgba(22,163,74,0.04)' },
+  crCardDeclined: { borderColor: 'rgba(220,38,38,0.2)', backgroundColor: 'rgba(220,38,38,0.03)' },
+  crHeader: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  crIconWrap: { width: 36, height: 36, borderRadius: 10, backgroundColor: 'rgba(240,68,22,0.1)', alignItems: 'center', justifyContent: 'center' },
+  crIconWrapApproved: { backgroundColor: 'rgba(22,163,74,0.1)' },
+  crIconWrapDeclined: { backgroundColor: 'rgba(220,38,38,0.08)' },
+  crHeaderText: { flex: 1, minWidth: 0 },
+  crTitle: { color: '#17191D', fontSize: 13, fontWeight: '800' },
+  crSubtitle: { color: '#5E646D', fontSize: 11, fontWeight: '600', marginTop: 1 },
+  crAmount: { color: '#F04416', fontSize: 16, fontWeight: '900' },
+  crAmountApproved: { color: '#16A34A' },
+  crAmountDeclined: { color: '#DC2626' },
+  crFieldLabel: { color: '#8B9098', fontSize: 9, lineHeight: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 3 },
+  crDesc: { color: '#17191D', fontSize: 12, lineHeight: 17, fontWeight: '500' },
+  crEvidenceRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 5 },
+  crEvidenceText: { flex: 1, color: '#5E646D', fontSize: 11, lineHeight: 15, fontWeight: '500' },
+  crStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8 },
+  crStatusPending: { backgroundColor: 'rgba(139,144,152,0.08)' },
+  crStatusApproved: { backgroundColor: 'rgba(22,163,74,0.08)' },
+  crStatusDeclined: { backgroundColor: 'rgba(220,38,38,0.06)' },
+  crStatusText: { fontSize: 12, fontWeight: '700', color: '#8B9098' },
+  crStatusTextApproved: { color: '#16A34A' },
+  crStatusTextDeclined: { color: '#DC2626' },
   additionalItem: { borderRadius: 8, borderWidth: 1, padding: 11, marginBottom: 9 },
   additionalItemRequired: { borderColor: 'rgba(240,68,22,0.28)', backgroundColor: 'rgba(240,68,22,0.07)' },
   additionalItemTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
   additionalItemInfo: { flex: 1, minWidth: 0 },
-  additionalItemKind: { color: '#F04416', fontSize: 10, lineHeight: 13, fontWeight: '900', textTransform: 'uppercase', marginBottom: 3 },
-  additionalItemTitle: { color: '#17191D', fontSize: 14, lineHeight: 18, fontWeight: '900' },
-  additionalItemDescription: { color: '#5E646D', fontSize: 11, lineHeight: 15, fontWeight: '700', marginTop: 3 },
+  additionalItemKind: { color: '#F04416', fontSize: 10, lineHeight: 13, fontWeight: '900', textTransform: 'uppercase', marginBottom: 6 },
+  additionalItemFieldLabel: { color: '#8B9098', fontSize: 9, lineHeight: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4, marginTop: 8, marginBottom: 2 },
+  additionalItemTitle: { color: '#17191D', fontSize: 13, lineHeight: 17, fontWeight: '700' },
+  additionalItemDescription: { color: '#17191D', fontSize: 12, lineHeight: 16, fontWeight: '500' },
+  additionalEvidenceLabel: { color: '#8B9098', fontSize: 10, lineHeight: 13, fontWeight: '700' },
   additionalEvidenceRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 7 },
   additionalEvidenceText: { flex: 1, minWidth: 0, color: '#5E646D', fontSize: 10, lineHeight: 13, fontWeight: '700' },
   additionalItemAmount: { color: '#17191D', fontSize: 15, lineHeight: 19, fontWeight: '900', flexShrink: 0 },
@@ -5159,6 +3288,13 @@ const styles = StyleSheet.create({
   requestInfoValue: { flex: 1, minWidth: 0, color: '#17191D', fontSize: 11, lineHeight: 15, fontWeight: '600', textAlign: 'right' },
   requestInfoChevron: { position: 'absolute', right: 0 },
   requestInfoValueNode: { flex: 1, alignItems: 'flex-end' },
+  jobDetailSectionRow: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#E1E4E8' },
+  jobDetailSectionLabel: { flex: 1, color: '#5E646D', fontSize: 10, lineHeight: 13, fontWeight: '600' },
+  diagnosticIndent: { paddingLeft: 34 },
+  diagnosticRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, paddingVertical: 7, paddingRight: 22, borderBottomWidth: 1, borderBottomColor: '#E1E4E8' },
+  diagnosticDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#C4C9D1', marginTop: 4 },
+  diagnosticLabel: { flex: 2, color: '#5E646D', fontSize: 10, lineHeight: 14, fontWeight: '600' },
+  diagnosticValue: { flex: 1, color: '#17191D', fontSize: 11, lineHeight: 15, fontWeight: '600', textAlign: 'right' },
   photoRow: { flexDirection: 'row', justifyContent: 'flex-end', alignItems: 'center', gap: 5 },
   photoThumb: { width: 28, height: 26, borderRadius: 6, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E1E4E8' },
   photoThumbDark: { width: 28, height: 26, borderRadius: 6, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E1E4E8', alignItems: 'center', justifyContent: 'center' },
