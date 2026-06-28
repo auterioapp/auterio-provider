@@ -5,7 +5,7 @@ import MapView, { Marker, Polyline } from 'react-native-maps';
 import { getServiceMeta, getVehicleLabel, getDropoffAddress, isTowingService, getProviderIntakeItems } from '../utils/serviceUtils';
 import { REQUEST_MAP_REGION, REQUEST_ROUTE } from '../constants';
 
-export default function RequestDetailScreen({ order, accepting, onBack, onAccept, onDecline, refreshControl }) {
+export default function RequestDetailScreen({ order, accepting, providerType = 'mobile', onBack, onAccept, onSchedule, onDecline, refreshControl }) {
   const [noteOpen, setNoteOpen] = useState(false);
   const [bottomPanelHeight, setBottomPanelHeight] = useState(0);
   const accent = order.accent || '#42D463';
@@ -183,10 +183,18 @@ export default function RequestDetailScreen({ order, accepting, onBack, onAccept
             <Text style={styles.largeDeclineTitle}>Decline</Text>
             <Text style={styles.largeButtonSubtitle}>Reject this request</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.largeAcceptButton} onPress={() => onAccept(order)} disabled={accepting} activeOpacity={0.84}>
-            <Text style={styles.largeAcceptTitle}>{accepting ? 'Accepting...' : 'Accept'}</Text>
-            <Text style={styles.largeAcceptSubtitle}>Accept and continue</Text>
-          </TouchableOpacity>
+          {providerType !== 'shop' && (
+            <TouchableOpacity style={styles.largeAcceptButton} onPress={() => onAccept(order)} disabled={accepting} activeOpacity={0.84}>
+              <Text style={styles.largeAcceptTitle}>{accepting ? 'Accepting...' : providerType === 'both' ? 'Go Now' : 'Accept'}</Text>
+              <Text style={styles.largeAcceptSubtitle}>Accept and head out</Text>
+            </TouchableOpacity>
+          )}
+          {providerType !== 'mobile' && (
+            <TouchableOpacity style={styles.largeScheduleButton} onPress={() => onSchedule && onSchedule(order)} activeOpacity={0.84}>
+              <Text style={styles.largeScheduleTitle}>{providerType === 'both' ? 'Schedule' : 'Book Appointment'}</Text>
+              <Text style={styles.largeScheduleSubtitle}>Pick a date & time</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </View>
 
@@ -319,6 +327,9 @@ const styles = StyleSheet.create({
   largeAcceptButton: { flex: 1, minHeight: 60, borderRadius: 8, backgroundColor: '#17191D', alignItems: 'center', justifyContent: 'center', gap: 3 },
   largeAcceptTitle: { color: '#fff', fontSize: 17, lineHeight: 20, fontWeight: '800' },
   largeAcceptSubtitle: { color: 'rgba(255,255,255,0.78)', fontSize: 11, lineHeight: 14, fontWeight: '600' },
+  largeScheduleButton: { flex: 1, minHeight: 60, borderRadius: 8, backgroundColor: '#2563EB', alignItems: 'center', justifyContent: 'center', gap: 3 },
+  largeScheduleTitle: { color: '#fff', fontSize: 17, lineHeight: 20, fontWeight: '800' },
+  largeScheduleSubtitle: { color: 'rgba(255,255,255,0.78)', fontSize: 11, lineHeight: 14, fontWeight: '600' },
   acceptTimerBanner: { minHeight: 28, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginBottom: 9 },
   acceptTimerText: { color: '#5E646D', fontSize: 14, lineHeight: 18, fontWeight: '700', textAlign: 'center' },
   acceptTimerTime: { color: '#F04416', fontWeight: '800' },

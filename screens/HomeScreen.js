@@ -1,4 +1,5 @@
-import { Animated, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
+import { useState } from 'react';
+import { Modal, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import useScrollToTop from '../hooks/useScrollToTop';
 import { getServiceMeta, formatMoney } from '../utils/serviceUtils';
@@ -25,9 +26,14 @@ const activity = [
   { icon: 'checkmark-done', color: '#2F80FF', title: 'Job completed', meta: 'Battery Replacement - Job #12341', value: '$125.00' },
 ];
 
-export default function HomeScreen({ online, setOnline, featuredRequest, requestAnim, acceptingId, pendingCount, activeJobs, onAccept, onDecline, onOpenRequest, refreshControl, scrollSignal }) {
+export default function HomeScreen({ online, setOnline, requests = [], requestAnim, acceptingId, pendingCount, activeJobs, onOpenRequest, onViewAll, allowScheduling, onAccept, onDecline, refreshControl, scrollSignal }) {
   const scrollRef = useScrollToTop(scrollSignal);
+  const [showAllRequests, setShowAllRequests] = useState(false);
+  const featuredRequest = requests[0] || null;
+  const extraCount = requests.length - 1;
+
   return (
+    <>
     <ScrollView ref={scrollRef} style={[styles.container, styles.homeContainer]} contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
       <View style={styles.header}>
         <View><Text style={[styles.title, styles.homeTitle]}>Dashboard</Text></View>
@@ -54,14 +60,22 @@ export default function HomeScreen({ online, setOnline, featuredRequest, request
       </View>
 
       {!!featuredRequest && (
-        <IncomingRequest
-          order={featuredRequest}
-          accepting={acceptingId === featuredRequest.id}
-          animation={requestAnim}
-          onAccept={onAccept}
-          onDecline={onDecline}
-          onOpen={onOpenRequest}
-        />
+        <>
+          <IncomingRequest
+            order={featuredRequest}
+            accepting={acceptingId === featuredRequest.id}
+            onOpen={onOpenRequest}
+            onAccept={onAccept}
+            onDecline={onDecline}
+            allowScheduling={allowScheduling}
+          />
+          {extraCount > 0 && (
+            <TouchableOpacity style={styles.viewAllBtn} onPress={() => setShowAllRequests(true)} activeOpacity={0.84}>
+              <Text style={styles.viewAllText}>View all requests</Text>
+              <View style={styles.viewAllBadge}><Text style={styles.viewAllBadgeText}>{requests.length}</Text></View>
+            </TouchableOpacity>
+          )}
+        </>
       )}
 
       <View style={styles.sectionCard}>
@@ -98,59 +112,96 @@ export default function HomeScreen({ online, setOnline, featuredRequest, request
         ))}
       </View>
     </ScrollView>
+
+      <Modal visible={showAllRequests} transparent animationType="slide" onRequestClose={() => setShowAllRequests(false)}>
+        <TouchableOpacity style={styles.sheetOverlay} activeOpacity={1} onPress={() => setShowAllRequests(false)} />
+        <View style={styles.sheetContainer}>
+          <View style={styles.sheetHandle} />
+          <View style={styles.sheetHeader}>
+            <Text style={styles.sheetTitle}>All Requests</Text>
+            <View style={styles.viewAllBadge}><Text style={styles.viewAllBadgeText}>{requests.length}</Text></View>
+            <TouchableOpacity onPress={() => setShowAllRequests(false)} style={styles.sheetClose}>
+              <Ionicons name="close" size={20} color="#5E646D" />
+            </TouchableOpacity>
+          </View>
+          <ScrollView style={styles.sheetScroll} showsVerticalScrollIndicator={false}>
+            {requests.map((order, i) => {
+              const meta = getServiceMeta(order);
+              const vehicle = [order.vehicle?.make, order.vehicle?.model].filter(Boolean).join(' ');
+              const addr = order.pickup?.address || 'Location pending';
+              return (
+                <TouchableOpacity
+                  key={order.id || order._id || i}
+                  style={[styles.sheetRow, i > 0 && styles.sheetRowBorder]}
+                  onPress={() => { setShowAllRequests(false); onOpenRequest && onOpenRequest(order); }}
+                  activeOpacity={0.84}
+                >
+                  <View style={[styles.sheetRowIcon, { backgroundColor: (meta.color || '#F97316') + '18' }]}>
+                    <Ionicons name={meta.icon} size={20} color={meta.color || '#F97316'} />
+                  </View>
+                  <View style={styles.sheetRowInfo}>
+                    <Text style={styles.sheetRowTitle} numberOfLines={1}>{meta.title}</Text>
+                    {!!vehicle && <Text style={styles.sheetRowSub} numberOfLines={1}>{vehicle}</Text>}
+                    <Text style={styles.sheetRowAddr} numberOfLines={1}>{addr}</Text>
+                  </View>
+                  <View style={styles.sheetRowRight}>
+                    <Text style={styles.sheetRowPrice}>{formatMoney(order)}</Text>
+                    <Text style={styles.sheetRowEta}>{order.eta || 'Est. 20 min'}</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color="#C4C9D1" />
+                </TouchableOpacity>
+              );
+            })}
+            <View style={{ height: 32 }} />
+          </ScrollView>
+        </View>
+      </Modal>
+    </>
   );
 }
 
-function IncomingRequest({ order, accepting, animation, onAccept, onDecline, onOpen }) {
-  const translateY = animation.interpolate({ inputRange: [0, 1], outputRange: [-18, 0] });
+
+function IncomingRequest({ order, accepting, onOpen, onAccept, onDecline, allowScheduling }) {
   const serviceMeta = getServiceMeta(order);
-  const title = serviceMeta.title;
   const iconColor = serviceMeta.color || '#F97316';
   const address = order.pickup?.address || 'Location pending';
   const vehicle = [order.vehicle?.make, order.vehicle?.model].filter(Boolean).join(' ');
 
   return (
-    <Animated.View style={[styles.incomingCard, { opacity: animation, transform: [{ translateY }] }]}>
-      <TouchableOpacity onPress={() => onOpen && onOpen(order)} activeOpacity={0.88} style={{ marginBottom: 10 }}>
-        <View style={styles.incomingTop}>
-          <View style={styles.incomingLabelWrap}>
-            <View style={styles.newBadge}><Text style={styles.newBadgeText}>NEW</Text></View>
-            <Text style={styles.incomingLabel}>New Request</Text>
-          </View>
-          <View style={styles.liveWrap}>
-            <Text style={styles.justNow}>Just now</Text>
-            <Ionicons name="radio-outline" size={18} color="#F04416" />
-          </View>
+    <TouchableOpacity style={styles.incomingCard} onPress={() => onOpen && onOpen(order)} activeOpacity={0.88}>
+      <View style={styles.incomingTop}>
+        <View style={styles.incomingLabelWrap}>
+          <View style={styles.newBadge}><Text style={styles.newBadgeText}>NEW</Text></View>
+          <Text style={styles.incomingLabel}>New Request</Text>
         </View>
-        <View style={styles.incomingBody}>
-          <View style={[styles.incomingIcon, { backgroundColor: iconColor + '18' }]}>
-            <Ionicons name={serviceMeta.icon} size={25} color={iconColor} />
-          </View>
-          <View style={styles.incomingInfo}>
-            <Text style={styles.incomingTitle} numberOfLines={1}>{title}</Text>
-            {!!vehicle && <Text style={styles.incomingVehicle} numberOfLines={1}>{vehicle}</Text>}
-            <View style={styles.incomingMetaRow}>
-              <Ionicons name="location-outline" size={15} color="#B7C1D7" />
-              <Text style={styles.incomingMeta} numberOfLines={1}>{address}</Text>
-            </View>
-            <View style={styles.incomingMetaRow}>
-              <Ionicons name="navigate-outline" size={15} color="#B7C1D7" />
-              <Text style={styles.incomingMeta}>{order.distance || '5.2 mi away'}</Text>
-            </View>
-          </View>
-          <View style={styles.incomingPriceBox}>
-            <Text style={styles.incomingPrice}>{formatMoney(order)}</Text>
-            <Text style={styles.incomingEta}>{order.eta || 'Est. 25 min'}</Text>
-          </View>
+        <View style={styles.liveWrap}>
+          <Text style={styles.justNow}>Just now</Text>
+          <Ionicons name="radio-outline" size={18} color="#F04416" />
         </View>
-      </TouchableOpacity>
-      <View style={styles.incomingActions}>
-        <TouchableOpacity style={styles.reviewRequestBtn} onPress={() => onOpen && onOpen(order)} activeOpacity={0.84}>
-          <Text style={styles.reviewRequestText}>Review request</Text>
-          <Ionicons name="chevron-forward" size={16} color="#FFFFFF" />
-        </TouchableOpacity>
       </View>
-    </Animated.View>
+      <View style={styles.incomingBody}>
+        <View style={[styles.incomingIcon, { backgroundColor: iconColor + '18' }]}>
+          <Ionicons name={serviceMeta.icon} size={25} color={iconColor} />
+        </View>
+        <View style={styles.incomingInfo}>
+          <Text style={styles.incomingTitle} numberOfLines={1}>{serviceMeta.title}</Text>
+          {!!vehicle && <Text style={styles.incomingVehicle} numberOfLines={1}>{vehicle}</Text>}
+          <View style={styles.incomingMetaRow}>
+            <Ionicons name="location-outline" size={15} color="#B7C1D7" />
+            <Text style={styles.incomingMeta} numberOfLines={1}>{address}</Text>
+          </View>
+          <View style={styles.incomingMetaRow}>
+            <Ionicons name="navigate-outline" size={15} color="#B7C1D7" />
+            <Text style={styles.incomingMeta}>{order.distance || '5.2 mi away'}</Text>
+          </View>
+        </View>
+        <View style={styles.incomingPriceBox}>
+          <Text style={styles.incomingPrice}>{formatMoney(order)}</Text>
+          <Text style={styles.incomingEta}>{order.eta || 'Est. 25 min'}</Text>
+        </View>
+      </View>
+
+    </TouchableOpacity>
   );
 }
 
@@ -196,6 +247,13 @@ const styles = StyleSheet.create({
   metricValue: { fontSize: 20, lineHeight: 24, fontWeight: '800', marginBottom: 1 },
   metricMeta: { color: '#5E646D', fontSize: 9, lineHeight: 12, fontWeight: '600' },
   incomingCard: { borderRadius: 8, backgroundColor: '#F3F4F5', borderWidth: 1.6, borderColor: 'rgba(240,68,22,0.42)', padding: 12, marginBottom: 10, shadowColor: '#F04416', shadowOpacity: 0.08, shadowRadius: 14, shadowOffset: { width: 0, height: 7 }, elevation: 4 },
+  incomingBtnRow: { flexDirection: 'row', marginHorizontal: -12, marginTop: 12, borderTopWidth: 1, borderTopColor: 'rgba(240,68,22,0.15)' },
+  incomingBtnDecline: { flex: 1, paddingVertical: 11, alignItems: 'center', justifyContent: 'center', borderRightWidth: 1, borderRightColor: 'rgba(240,68,22,0.15)' },
+  incomingBtnDeclineText: { color: '#EF4444', fontSize: 13, fontWeight: '700' },
+  incomingBtnSchedule: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingVertical: 11, borderRightWidth: 1, borderRightColor: 'rgba(240,68,22,0.15)' },
+  incomingBtnScheduleText: { color: '#7C3AED', fontSize: 13, fontWeight: '700' },
+  incomingBtnAccept: { flex: 1, paddingVertical: 11, alignItems: 'center', justifyContent: 'center', backgroundColor: '#16A34A' },
+  incomingBtnAcceptText: { color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
   incomingTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
   incomingLabelWrap: { flexDirection: 'row', alignItems: 'center', gap: 9, minWidth: 0, flex: 1 },
   newBadge: { height: 21, borderRadius: 11, backgroundColor: '#17191D', paddingHorizontal: 9, alignItems: 'center', justifyContent: 'center' },
@@ -216,6 +274,27 @@ const styles = StyleSheet.create({
   incomingActions: { flexDirection: 'row', gap: 8 },
   reviewRequestBtn: { flex: 1, height: 40, borderRadius: 20, backgroundColor: '#F04416', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
   reviewRequestText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
+  viewAllBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#F04416', borderRadius: 10, paddingHorizontal: 16, paddingVertical: 12, marginBottom: 10 },
+  viewAllText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
+  viewAllBadge: { backgroundColor: 'rgba(255,255,255,0.25)', borderRadius: 10, minWidth: 20, height: 20, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6 },
+  viewAllBadgeText: { color: '#FFFFFF', fontSize: 10, fontWeight: '800' },
+  sheetOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
+  sheetContainer: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingTop: 10, maxHeight: '80%' },
+  sheetHandle: { width: 36, height: 4, borderRadius: 2, backgroundColor: '#DEE0E3', alignSelf: 'center', marginBottom: 12 },
+  sheetHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 16, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: '#ECEEF0' },
+  sheetTitle: { flex: 1, color: '#17191D', fontSize: 17, fontWeight: '700' },
+  sheetClose: { padding: 4 },
+  sheetScroll: { paddingHorizontal: 16 },
+  sheetRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14 },
+  sheetRowBorder: { borderTopWidth: 1, borderTopColor: '#F0F1F3' },
+  sheetRowIcon: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  sheetRowInfo: { flex: 1, minWidth: 0 },
+  sheetRowTitle: { color: '#17191D', fontSize: 14, fontWeight: '700' },
+  sheetRowSub: { color: '#5E646D', fontSize: 12, marginTop: 1 },
+  sheetRowAddr: { color: '#8B9098', fontSize: 11, marginTop: 2 },
+  sheetRowRight: { alignItems: 'flex-end', gap: 2 },
+  sheetRowPrice: { color: '#17191D', fontSize: 14, fontWeight: '800' },
+  sheetRowEta: { color: '#8B9098', fontSize: 11 },
   sectionCard: { borderRadius: 8, backgroundColor: '#F3F4F5', borderWidth: 1, borderColor: '#ECEEF0', padding: 12, marginBottom: 11 },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
   sectionTitle: { color: '#17191D', fontSize: 16, lineHeight: 20, fontWeight: '700' },

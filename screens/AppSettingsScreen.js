@@ -8,10 +8,20 @@ export default function AppSettingsScreen({ visible, onClose }) {
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [vibrationEnabled, setVibrationEnabled] = useState(true);
   const [providerType, setProviderTypeState] = useState('mobile');
+  const [allowScheduling, setAllowSchedulingState] = useState(false);
 
   useEffect(() => {
-    loadPricing().then(p => setProviderTypeState(p.providerType || 'mobile'));
+    loadPricing().then(p => {
+      setProviderTypeState(p.providerType || 'mobile');
+      setAllowSchedulingState(p.allowScheduling ?? false);
+    });
   }, []);
+
+  const changeAllowScheduling = async (val) => {
+    setAllowSchedulingState(val);
+    const current = await loadPricing();
+    await savePricing({ ...current, allowScheduling: val });
+  };
 
   const changeProviderType = async (type) => {
     setProviderTypeState(type);
@@ -102,6 +112,17 @@ export default function AppSettingsScreen({ visible, onClose }) {
             </TouchableOpacity>
           </View>
 
+          {/* Request Handling */}
+          <Text style={styles.sectionLabel}>Request Handling</Text>
+          <View style={styles.card}>
+            <ToggleRow
+              label="Allow Scheduling"
+              sublabel="Offer customers a scheduled appointment option"
+              value={allowScheduling}
+              onChange={changeAllowScheduling}
+            />
+          </View>
+
           {/* Notifications */}
           <Text style={styles.sectionLabel}>Notifications</Text>
           <View style={styles.card}>
@@ -158,10 +179,13 @@ export default function AppSettingsScreen({ visible, onClose }) {
   );
 }
 
-function ToggleRow({ label, value, onChange, border }) {
+function ToggleRow({ label, sublabel, value, onChange, border }) {
   return (
     <View style={[styles.row, border && styles.rowBorder]}>
-      <Text style={styles.rowLabel}>{label}</Text>
+      <View style={{ flex: 1 }}>
+        <Text style={styles.rowLabel}>{label}</Text>
+        {!!sublabel && <Text style={styles.rowSublabel}>{sublabel}</Text>}
+      </View>
       <Switch
         value={value}
         onValueChange={onChange}
@@ -196,6 +220,7 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 14 },
   rowBorder: { borderTopWidth: 1, borderTopColor: '#F0F1F3' },
   rowLabel: { color: '#17191D', fontSize: 15, fontWeight: '600' },
+  rowSublabel: { color: '#6B7280', fontSize: 12, marginTop: 2 },
   selectRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   selectValue: { color: '#6B7280', fontSize: 14, fontWeight: '500' },
   typeRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, gap: 12 },

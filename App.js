@@ -3,6 +3,7 @@ import { Animated, Easing, KeyboardAvoidingView, Linking, Modal, PanResponder, P
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import MapView, { Marker, Polyline } from 'react-native-maps';
 import HomeScreen from './screens/HomeScreen';
@@ -14,6 +15,7 @@ import JobsScreen from './screens/JobsScreen';
 import JobDetailScreen, { JobStepper } from './screens/JobDetailScreen';
 import { getJobProgressIndex } from './utils/jobUtils';
 import { API_URL, PROVIDER, ACCEPT_BLUE, TAB_BAR_PADDING, TAB_INDICATOR_EXTRA_WIDTH, TAB_INDICATOR_DROP_SCALE, TABS, REQUEST_ROUTE, REQUEST_MAP_REGION, JOB_STEPS } from './constants';
+import { demoRequests, demoCompletedJobs } from './data';
 
 import { formatMoney, getServiceMeta, getServiceTitle, getOrderServiceType, getServiceFlowSchema, getDiagnosisSchema, getProviderIntakeItems, isTowingService, getDropoffAddress, getRequestLocation, getRequestDistance, getVehicleVin, normalizeComplaintItem, getCustomerComplaintItems, getAcceptedAtLabel, getVehicleLabel, getBackendStatusFromWorkflowStage } from './utils/serviceUtils';
 import { getRecommendedServicesFromDiagnosis, getDemoEstimate, getEstimateCatalog, getEstimatePriceCheck, sumAmounts, formatCurrency } from './utils/estimateUtils';
@@ -88,6 +90,9 @@ export default function App() {
   const [refreshing, setRefreshing] = useState(false);
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [selectedJob, setSelectedJob] = useState(null);
+  const [providerType, setProviderType] = useState('mobile');
+  const [allowScheduling, setAllowScheduling] = useState(false);
+  const [appointmentOrder, setAppointmentOrder] = useState(null);
   const [jobWorkflows, setJobWorkflows] = useState({});
   const requestAnim = useRef(new Animated.Value(0)).current;
   const tabIndicatorX = useRef(new Animated.Value(0)).current;
@@ -100,21 +105,35 @@ export default function App() {
   const tabIndicatorTarget = useRef(0);
   const tabDragFrame = useRef(null);
 
-  const dashboardRequests = requests;
-  const providerJobs = useMemo(() => acceptedJobs, [acceptedJobs]);
+  const dashboardRequests = [...requests, ...demoRequests];
+  const providerJobs = useMemo(() => [...acceptedJobs, ...demoCompletedJobs], [acceptedJobs]);
   const activeJobs = useMemo(() => providerJobs.filter(job => job.status !== 'completed' && job.status !== 'scheduled').length, [providerJobs]);
-  const featuredRequest = dashboardRequests[0];
   const pendingCount = dashboardRequests.length;
   const tabWidth = tabBarWidth ? (tabBarWidth - TAB_BAR_PADDING * 2) / TABS.length : 0;
   const isLightVisible = !!selectedRequest || (!selectedRequest && (activeScreen === 'home' || activeScreen === 'requests' || activeScreen === 'jobs' || activeScreen === 'earnings' || activeScreen === 'profile'));
 
-  useEffect(() => { loadRequests(); loadPricing(); }, []);
+  useEffect(() => {
+    loadRequests();
+    loadPricing().then(p => {
+      setProviderType(p.providerType || 'mobile');
+      setAllowScheduling(p.allowScheduling ?? false);
+    });
+  }, []);
 
   useEffect(() => {
-    if (!featuredRequest) { requestAnim.setValue(0); return; }
+    if (activeScreen !== 'profile') {
+      loadPricing().then(p => {
+        setProviderType(p.providerType || 'mobile');
+        setAllowScheduling(p.allowScheduling ?? false);
+      });
+    }
+  }, [activeScreen]);
+
+  useEffect(() => {
+    if (!dashboardRequests.length) { requestAnim.setValue(0); return; }
     requestAnim.setValue(0);
     Animated.spring(requestAnim, { toValue: 1, tension: 74, friction: 10, useNativeDriver: true }).start();
-  }, [featuredRequest?.id]);
+  }, [dashboardRequests.length > 0]);
 
   const loadRequests = async () => {
     try {
@@ -155,6 +174,7 @@ export default function App() {
     try {
       setAcceptingId(order.id);
       const nextJob = addAcceptedJob(order, { status: 'accepted', acceptedAt: new Date().toISOString() });
+      if (order.demo) return nextJob;
       fetchJson(`${API_URL}/orders/${order.id}/accept`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -184,12 +204,39 @@ export default function App() {
     const realId = String(order.id || order._id || '');
     if (realId) dismissedRealIdsRef.current = [...dismissedRealIdsRef.current, realId];
     setRequests(c => c.filter(item => String(item.id || item._id) !== realId));
+    if (order.demo || !realId) return;
     if (realId) {
       fetchJson(`${API_URL}/orders/${realId}/decline`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ providerId: PROVIDER.id }),
       }).catch(() => {});
+    }
+  };
+
+  const scheduleOrder = async (order, appointmentTime) => {
+    try {
+      setAcceptingId(order.id);
+      const nextJob = addAcceptedJob(order, { status: 'scheduled', appointmentTime, acceptedAt: new Date().toISOString() });
+      if (order.demo) return nextJob;
+      fetchJson(`${API_URL}/orders/${order.id}/accept`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: {
+            id: PROVIDER.id, name: PROVIDER.company,
+            type: order.provider?.type || 'Mobile Service Provider',
+            phone: PROVIDER.phone, initials: PROVIDER.initials,
+            rating: PROVIDER.rating, eta: PROVIDER.eta, color: '#FF6B00',
+          },
+          appointmentTime,
+        }),
+      }).catch(e => console.log('Schedule order sync error:', e.message));
+      return nextJob;
+    } catch (error) {
+      console.log('Schedule order error:', error.message);
+    } finally {
+      setAcceptingId(null);
     }
   };
 
@@ -202,13 +249,28 @@ export default function App() {
     const nextStatus = getBackendStatusFromWorkflowStage(patch?.stage);
     if (!nextStatus) return;
 
+    const currentWorkflow = { ...(jobWorkflows[jobId] || {}), ...patch };
+    const body = { status: nextStatus, estimate: patch?.estimate };
+
+    if (nextStatus === 'completed') {
+      body.serviceDetails = {
+        servicesPerformed: (currentWorkflow.estimateItems || []).map(i => i.label).filter(Boolean),
+        providerNotes: currentWorkflow.workSummary || '',
+        photos: currentWorkflow.workPhotos || [],
+        duration: currentWorkflow.workDuration || null,
+        warranty: currentWorkflow.warranty || { days: 90, miles: 4000 },
+        diagnosisResults: {
+          batteryVoltage: currentWorkflow.batteryVoltage || null,
+          diagnosisNotes: currentWorkflow.diagnosisNotes || '',
+          answers: currentWorkflow.diagnosisAnswers || {},
+        },
+      };
+    }
+
     fetchJson(`${API_URL}/orders/${jobId}/status`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        status: nextStatus,
-        estimate: patch?.estimate,
-      }),
+      body: JSON.stringify(body),
     }).catch((error) => {
       console.log('Job status sync error:', error.message);
     });
@@ -420,6 +482,7 @@ export default function App() {
               onAccept={acceptOrder}
               onDecline={dismissRequest}
               onOpen={setSelectedRequest}
+              allowScheduling={allowScheduling}
               refreshControl={refreshControl}
               scrollSignal={screenResetNonce}
             />
@@ -433,14 +496,16 @@ export default function App() {
             <HomeScreen
               online={online}
               setOnline={setOnline}
-              featuredRequest={featuredRequest}
+              requests={dashboardRequests}
               requestAnim={requestAnim}
               acceptingId={acceptingId}
               pendingCount={pendingCount}
               activeJobs={activeJobs}
-              onAccept={async (order) => { const job = await acceptOrder(order); if (job) setSelectedJob(job); }}
-              onDecline={dismissRequest}
               onOpenRequest={setSelectedRequest}
+              onViewAll={() => setActiveScreen('requests')}
+              allowScheduling={allowScheduling}
+              onAccept={acceptOrder}
+              onDecline={dismissRequest}
               refreshControl={refreshControl}
               scrollSignal={screenResetNonce}
             />
@@ -482,6 +547,16 @@ export default function App() {
           ))}
         </View>
 
+        <AppointmentModal
+          order={appointmentOrder}
+          onClose={() => setAppointmentOrder(null)}
+          onConfirm={async (order, appointmentTime) => {
+            setAppointmentOrder(null);
+            const job = await scheduleOrder(order, appointmentTime);
+            if (job) setSelectedJob(job);
+          }}
+        />
+
         <Modal
           visible={!!selectedRequest}
           transparent
@@ -499,8 +574,10 @@ export default function App() {
                 <RequestDetailScreen
                   order={selectedRequest}
                   accepting={acceptingId === selectedRequest.id}
+                  providerType={providerType}
                   onBack={() => setSelectedRequest(null)}
-                  onAccept={async (o) => { await acceptOrder(o); setSelectedRequest(null); }}
+                  onAccept={async (o) => { const job = await acceptOrder(o); setSelectedRequest(null); if (job) setSelectedJob(job); }}
+                  onSchedule={(o) => { setSelectedRequest(null); setAppointmentOrder(o); }}
                   onDecline={(o) => { dismissRequest(o); setSelectedRequest(null); }}
                   refreshControl={refreshControl}
                 />
@@ -669,6 +746,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
   const [checklistDraft, setChecklistDraft] = useState('');
   const [navigationChoiceOpen, setNavigationChoiceOpen] = useState(false);
   const currentStepIndex = getJobProgressIndex(job.status);
+  const isCompleted = job.status === 'completed';
   const address = job.pickup?.address || 'Location pending';
   const isTowing = isTowingService(job);
   const dropoffAddress = getDropoffAddress(job);
@@ -676,6 +754,15 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
   const phone = job.customer?.phone || '';
   const customerNote = job.customerNote || 'No note provided';
   const acceptedLabel = getAcceptedAtLabel(job);
+  const jobDuration = (() => {
+    const start = job.acceptedAt ? new Date(job.acceptedAt).getTime() : null;
+    const end = job.completedAt && job.completedAt !== 'Completed just now' ? new Date(job.completedAt).getTime() : Date.now();
+    if (!start || isNaN(start)) return null;
+    const mins = Math.round((end - start) / 60000);
+    if (mins < 60) return `${mins} min`;
+    const h = Math.floor(mins / 60), m = mins % 60;
+    return m > 0 ? `${h}h ${m}min` : `${h}h`;
+  })();
   const customerFirstName = (job.customer?.name || 'customer').split(' ')[0] || 'customer';
   const rawCustomerFiles = job.orderContext?.files || job.files || job.photos || [
     { name: 'Inspection photo', type: 'image' },
@@ -694,8 +781,10 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
   const locationDetailRows = [
     { key: 'pickup', icon: 'location-outline', color: '#7C3AED', label: isTowing ? 'Pickup Location' : 'Service Location', value: address },
     ...(isTowing ? [{ key: 'dropoff', icon: 'flag-outline', color: '#EF4444', label: 'Drop-off Location', value: dropoffAddress }] : []),
-    { key: 'distance', icon: 'trail-sign-outline', color: '#42D463', label: 'Distance', value: job.distance || '5.2 mi away' },
-    { key: 'payout', icon: 'cash-outline', color: '#EAB308', label: 'Est. Payout', value: `$${job.payment?.total || 0}` },
+    ...(!isCompleted ? [
+      { key: 'distance', icon: 'trail-sign-outline', color: '#42D463', label: 'Distance', value: job.distance || '5.2 mi away' },
+      { key: 'payout', icon: 'cash-outline', color: '#EAB308', label: 'Est. Payout', value: `$${job.payment?.total || 0}` },
+    ] : []),
   ];
   const openNavigationApp = async (provider) => {
     const destination = encodeURIComponent(address);
@@ -1535,8 +1624,18 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
     const invoiceDate = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
     const paymentMethod = job.payment?.method ? `${job.payment.method} ••••${job.payment.last4 || '****'}` : 'Card on file';
 
-    const collectPayment = () => {
+    const collectPayment = async () => {
       pulseTabChange();
+      const startedAt = job?.startedAt ? new Date(job.startedAt) : null;
+      const durationMins = startedAt ? Math.round((Date.now() - startedAt.getTime()) / 60000) : null;
+      const workDuration = durationMins
+        ? (durationMins < 60 ? `${durationMins} min` : `${Math.floor(durationMins / 60)}h ${durationMins % 60}m`)
+        : null;
+      let warranty = { id: '90d', days: 90, miles: 4000 };
+      try {
+        const wVal = await AsyncStorage.getItem('@warranty_policy');
+        if (wVal) warranty = JSON.parse(wVal);
+      } catch { }
       onWorkflowChange?.({
         stage: 'completed',
         workPhotos,
@@ -1545,6 +1644,8 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
         additionalApprovals,
         completedAt: 'Completed just now',
         invoiceNumber,
+        workDuration,
+        warranty,
       });
       onBack?.();
     };
@@ -1923,20 +2024,15 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
     const serviceFlow = getServiceFlowSchema(job);
     const checklistItems = [
       { key: 'photos', title: 'Required Photos', subtitle: 'Add clear photos of the vehicle', icon: 'camera-outline', color: '#16A34A' },
-      { key: 'complaint', title: 'Confirm Customer Complaint', subtitle: 'Verify the issue with the customer', icon: 'chatbubbles-outline', color: '#7C3AED' },
       { key: 'notes', title: 'Arrival Notes', optional: true, subtitle: 'Add notes from arrival', icon: 'clipboard-outline', color: '#7C3AED' },
     ];
     const requiredPhotoItems = serviceFlow.requiredPhotos || getServiceFlowSchema({ service: { serviceType: 'mobile_mechanic' } }).requiredPhotos;
-    const canContinueDiagnosis = arrivedChecklist.photos && arrivedChecklist.complaint;
+    const canContinueDiagnosis = arrivedChecklist.photos;
     const activeChecklistMeta = checklistItems.find(item => item.key === activeChecklistItem);
     const photosReady = requiredPhotoItems.every(item => !!requiredPhotos[item.key]?.uri);
     const customerComplaintItems = getCustomerComplaintItems(job, customerNote);
     const complaintReady = customerComplaintItems.length > 0 && customerComplaintItems.every(item => !!complaintConfirmations[item.key]);
-    const canSaveChecklistItem = activeChecklistItem === 'photos'
-      ? photosReady
-        : activeChecklistItem === 'complaint'
-        ? complaintReady
-        : true;
+    const canSaveChecklistItem = activeChecklistItem === 'photos' ? photosReady : true;
     const openChecklistItem = (key) => {
       pulseTabChange();
       setActiveChecklistItem(key);
@@ -1947,9 +2043,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
       pulseTabChange();
       const nextValue = activeChecklistItem === 'photos'
         ? 'Required photos completed'
-        : activeChecklistItem === 'complaint'
-          ? customerComplaintItems.map(item => `${item.label}: ${complaintConfirmations[item.key]}`).join('\n')
-          : checklistDraft.trim() || 'No arrival notes added';
+        : checklistDraft.trim() || 'No arrival notes added';
       const nextData = { ...arrivedChecklistData, [activeChecklistItem]: nextValue };
       const nextChecklist = { ...arrivedChecklist, [activeChecklistItem]: true };
       setArrivedChecklistData(nextData);
@@ -2047,9 +2141,11 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
                 const checked = arrivedChecklist[item.key];
                 return (
               <TouchableOpacity key={item.key} style={[styles.arrivedNextRow, index > 0 && styles.arrivedNextRowBorder]} activeOpacity={0.84} onPress={() => openChecklistItem(item.key)}>
-                <View style={[styles.arrivedCheckCircle, checked && styles.arrivedCheckCircleDone]}>
-                  {checked && <Ionicons name="checkmark" size={18} color="#FFFFFF" />}
-                </View>
+                {!item.optional && (
+                  <View style={[styles.arrivedCheckCircle, checked && styles.arrivedCheckCircleDone]}>
+                    {checked && <Ionicons name="checkmark" size={18} color="#FFFFFF" />}
+                  </View>
+                )}
                 <View style={styles.arrivedNextInfo}>
                   <View style={styles.arrivedNextTitleRow}>
                     <Text style={styles.arrivedNextTitle}>{item.title}</Text>
@@ -2111,42 +2207,12 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
                       );
                     })}
                   </View>
-                ) : activeChecklistItem === 'complaint' ? (
-                  <View style={styles.complaintConfirmBox}>
-                    {customerComplaintItems.map((item, index) => {
-                      const decision = complaintConfirmations[item.key];
-                      return (
-                        <View key={item.key} style={[styles.complaintConfirmRow, index > 0 && styles.complaintConfirmRowBorder]}>
-                          <View style={styles.complaintConfirmTextWrap}>
-                            <Text style={styles.complaintConfirmLabel}>{item.label}</Text>
-                            {!!item.value && <Text style={styles.complaintConfirmValue}>{item.value}</Text>}
-                          </View>
-                          <View style={styles.complaintDecisionRow}>
-                            <TouchableOpacity
-                              style={[styles.complaintDecisionBtn, decision === 'confirmed' && styles.complaintDecisionConfirmed]}
-                              activeOpacity={0.84}
-                              onPress={() => setComplaintDecision(item.key, 'confirmed')}
-                            >
-                              <Ionicons name="checkmark" size={15} color={decision === 'confirmed' ? '#FFFFFF' : '#16A34A'} />
-                            </TouchableOpacity>
-                            <TouchableOpacity
-                              style={[styles.complaintDecisionBtn, decision === 'not_confirmed' && styles.complaintDecisionDenied]}
-                              activeOpacity={0.84}
-                              onPress={() => setComplaintDecision(item.key, 'not_confirmed')}
-                            >
-                              <Ionicons name="close" size={15} color={decision === 'not_confirmed' ? '#FFFFFF' : '#F04416'} />
-                            </TouchableOpacity>
-                          </View>
-                        </View>
-                      );
-                    })}
-                  </View>
                 ) : (
                   <TextInput
                     style={styles.checklistTextInput}
                     value={checklistDraft}
                     onChangeText={setChecklistDraft}
-                    placeholder={activeChecklistItem === 'complaint' ? 'Enter confirmed customer complaint' : 'Add optional arrival notes'}
+                    placeholder="Add optional arrival notes"
                     placeholderTextColor="#8B9098"
                     multiline
                     textAlignVertical="top"
@@ -2341,32 +2407,63 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
           </View>
         </View>
 
-        <View style={styles.mapPreview}>
-          <MapView
-            style={styles.mapView}
-            initialRegion={REQUEST_MAP_REGION}
-            scrollEnabled={false}
-            zoomEnabled={false}
-            rotateEnabled={false}
-            pitchEnabled={false}
-            toolbarEnabled={false}
-          >
-            <Polyline coordinates={REQUEST_ROUTE} strokeColor="#F04416" strokeWidth={4} />
-            <Marker coordinate={REQUEST_ROUTE[0]} anchor={{ x: 0.5, y: 0.5 }}>
-              <View style={styles.mapStartMarker} />
-            </Marker>
-            <Marker coordinate={REQUEST_ROUTE[REQUEST_ROUTE.length - 1]} anchor={{ x: 0.5, y: 1 }}>
-              <View style={styles.mapEndMarker}>
-                <Ionicons name="location" size={20} color="#FFFFFF" />
+        {isCompleted ? (
+          <View style={styles.completedSummaryCard}>
+            {!!jobDuration && (
+              <View style={styles.completedSummaryRow}>
+                <View style={[styles.completedSummaryIcon, { backgroundColor: '#2F80FF18' }]}>
+                  <Ionicons name="time-outline" size={18} color="#2F80FF" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.completedSummaryLabel}>Time on Job</Text>
+                  <Text style={styles.completedSummaryValue}>{jobDuration}</Text>
+                </View>
               </View>
-            </Marker>
-          </MapView>
-          <View style={styles.mapBubble}><Text style={styles.mapBubbleText}>{job.eta || '15 min'}{`\n`}On route</Text></View>
-        </View>
+            )}
+            <TouchableOpacity style={[styles.completedSummaryRow, !!jobDuration && styles.completedSummaryRowBorder]} activeOpacity={0.84} onPress={() => { setInvoiceOpen(true); }}>
+              <View style={[styles.completedSummaryIcon, { backgroundColor: '#7C3AED18' }]}>
+                <Ionicons name="document-text-outline" size={18} color="#7C3AED" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.completedSummaryLabel}>Invoice</Text>
+                <Text style={styles.completedSummaryValue}>{workflow?.invoiceNumber || job.invoiceNumber || `INV-${job.number || '00000'}`}</Text>
+              </View>
+              <View style={styles.completedInvoicePaid}>
+                <Text style={styles.completedInvoicePaidText}>PAID</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={16} color="#C4C9D1" style={{ marginLeft: 4 }} />
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <View style={styles.mapPreview}>
+            <MapView
+              style={styles.mapView}
+              initialRegion={REQUEST_MAP_REGION}
+              scrollEnabled={false}
+              zoomEnabled={false}
+              rotateEnabled={false}
+              pitchEnabled={false}
+              toolbarEnabled={false}
+            >
+              <Polyline coordinates={REQUEST_ROUTE} strokeColor="#F04416" strokeWidth={4} />
+              <Marker coordinate={REQUEST_ROUTE[0]} anchor={{ x: 0.5, y: 0.5 }}>
+                <View style={styles.mapStartMarker} />
+              </Marker>
+              <Marker coordinate={REQUEST_ROUTE[REQUEST_ROUTE.length - 1]} anchor={{ x: 0.5, y: 1 }}>
+                <View style={styles.mapEndMarker}>
+                  <Ionicons name="location" size={20} color="#FFFFFF" />
+                </View>
+              </Marker>
+            </MapView>
+            <View style={styles.mapBubble}><Text style={styles.mapBubbleText}>{job.eta || '15 min'}{`\n`}On route</Text></View>
+          </View>
+        )}
 
-        <View style={styles.jobProgressCard}>
-          <JobStepper steps={JOB_STEPS} currentIndex={currentStepIndex} />
-        </View>
+        {!isCompleted && (
+          <View style={styles.jobProgressCard}>
+            <JobStepper steps={JOB_STEPS} currentIndex={currentStepIndex} />
+          </View>
+        )}
 
         <View style={styles.requestBriefCard}>
           <Text style={styles.jobDetailHeading}>Job Details</Text>
@@ -2398,10 +2495,12 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
           ))}
         </View>
 
-        <TouchableOpacity style={styles.onTheWayBtn} activeOpacity={0.86} onPress={() => { setRouteOpen(true); onWorkflowChange?.({ stage: 'route' }); }}>
-          <Text style={styles.onTheWayText}>On the way</Text>
-          <Ionicons name="chevron-forward" size={18} color="#FFFFFF" />
-        </TouchableOpacity>
+        {!isCompleted && (
+          <TouchableOpacity style={styles.onTheWayBtn} activeOpacity={0.86} onPress={() => { setRouteOpen(true); onWorkflowChange?.({ stage: 'route' }); }}>
+            <Text style={styles.onTheWayText}>On the way</Text>
+            <Ionicons name="chevron-forward" size={18} color="#FFFFFF" />
+          </TouchableOpacity>
+        )}
       </ScrollView>
 
       <Modal visible={noteOpen} transparent animationType="fade" onRequestClose={() => setNoteOpen(false)}>
@@ -2662,6 +2761,133 @@ async function fetchJson(url, options) {
   return JSON.parse(text);
 }
 
+
+function AppointmentModal({ order, onClose, onConfirm }) {
+  const today = new Date();
+  const days = Array.from({ length: 7 }, (_, i) => {
+    const d = new Date(today);
+    d.setDate(today.getDate() + i);
+    return d;
+  });
+  const timeSlots = [];
+  for (let h = 8; h <= 17; h++) {
+    timeSlots.push(`${h > 12 ? h - 12 : h}:00 ${h >= 12 ? 'PM' : 'AM'}`);
+    if (h < 17) timeSlots.push(`${h > 12 ? h - 12 : h}:30 ${h >= 12 ? 'PM' : 'AM'}`);
+  }
+
+  const [selectedDay, setSelectedDay] = useState(0);
+  const [selectedTime, setSelectedTime] = useState(null);
+
+  const dayLabel = (d, i) => {
+    if (i === 0) return 'Today';
+    if (i === 1) return 'Tomorrow';
+    return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  };
+
+  const confirmLabel = () => {
+    if (!selectedTime) return 'Select a time';
+    const d = days[selectedDay];
+    const dayStr = selectedDay === 0 ? 'Today' : selectedDay === 1 ? 'Tomorrow' : d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    return `Confirm · ${dayStr}, ${selectedTime}`;
+  };
+
+  return (
+    <Modal visible={!!order} animationType="slide" transparent onRequestClose={onClose}>
+      <View style={apptStyles.overlay}>
+        <TouchableOpacity style={apptStyles.backdrop} activeOpacity={1} onPress={onClose} />
+        <View style={apptStyles.sheet}>
+          <View style={apptStyles.handle} />
+          <View style={apptStyles.header}>
+            <View style={apptStyles.headerIcon}>
+              <Ionicons name="calendar-outline" size={18} color="#2563EB" />
+            </View>
+            <View style={{ flex: 1 }}>
+              <Text style={apptStyles.title}>Schedule Appointment</Text>
+              <Text style={apptStyles.sub}>{order?.service?.issueName || order?.issue?.name || 'Service'} · {order?.vehicle?.make || ''}</Text>
+            </View>
+            <TouchableOpacity onPress={onClose} style={apptStyles.closeBtn}>
+              <Ionicons name="close" size={20} color="#5E646D" />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={apptStyles.content}>
+            <Text style={apptStyles.sectionLabel}>SELECT DAY</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={apptStyles.daysRow}>
+              {days.map((d, i) => (
+                <TouchableOpacity
+                  key={i}
+                  style={[apptStyles.dayChip, selectedDay === i && apptStyles.dayChipActive]}
+                  onPress={() => setSelectedDay(i)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[apptStyles.dayChipText, selectedDay === i && apptStyles.dayChipTextActive]}>{dayLabel(d, i)}</Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
+            <Text style={[apptStyles.sectionLabel, { marginTop: 20 }]}>SELECT TIME</Text>
+            <View style={apptStyles.timesGrid}>
+              {timeSlots.map(slot => (
+                <TouchableOpacity
+                  key={slot}
+                  style={[apptStyles.timeChip, selectedTime === slot && apptStyles.timeChipActive]}
+                  onPress={() => setSelectedTime(slot)}
+                  activeOpacity={0.8}
+                >
+                  <Text style={[apptStyles.timeChipText, selectedTime === slot && apptStyles.timeChipTextActive]}>{slot}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </ScrollView>
+
+          <View style={apptStyles.footer}>
+            <TouchableOpacity
+              style={[apptStyles.confirmBtn, !selectedTime && apptStyles.confirmBtnDisabled]}
+              activeOpacity={selectedTime ? 0.84 : 1}
+              onPress={() => {
+                if (!selectedTime) return;
+                const d = days[selectedDay];
+                const appointmentTime = `${d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}, ${selectedTime}`;
+                onConfirm(order, appointmentTime);
+              }}
+            >
+              <Ionicons name="calendar-outline" size={18} color="#fff" />
+              <Text style={apptStyles.confirmBtnText}>{confirmLabel()}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+const apptStyles = StyleSheet.create({
+  overlay: { flex: 1, justifyContent: 'flex-end' },
+  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(23,25,29,0.55)' },
+  sheet: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '88%' },
+  handle: { width: 36, height: 4, borderRadius: 2, backgroundColor: '#E1E4E8', alignSelf: 'center', marginTop: 10 },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingTop: 16, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: '#F0F1F3' },
+  headerIcon: { width: 38, height: 38, borderRadius: 10, backgroundColor: '#EFF6FF', alignItems: 'center', justifyContent: 'center' },
+  title: { color: '#17191D', fontSize: 16, fontWeight: '800' },
+  sub: { color: '#6B7280', fontSize: 12, marginTop: 1 },
+  closeBtn: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
+  content: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 12 },
+  sectionLabel: { color: '#9CA3AF', fontSize: 10, fontWeight: '800', letterSpacing: 0.8, marginBottom: 10 },
+  daysRow: { gap: 8, paddingRight: 4 },
+  dayChip: { height: 34, borderRadius: 8, backgroundColor: '#F3F4F5', borderWidth: 1, borderColor: '#ECEEF0', paddingHorizontal: 14, alignItems: 'center', justifyContent: 'center' },
+  dayChipActive: { backgroundColor: '#2563EB', borderColor: '#2563EB' },
+  dayChipText: { color: '#17191D', fontSize: 13, fontWeight: '600' },
+  dayChipTextActive: { color: '#FFFFFF' },
+  timesGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  timeChip: { height: 36, borderRadius: 8, backgroundColor: '#F3F4F5', borderWidth: 1, borderColor: '#ECEEF0', paddingHorizontal: 14, alignItems: 'center', justifyContent: 'center', minWidth: '22%' },
+  timeChipActive: { backgroundColor: '#2563EB', borderColor: '#2563EB' },
+  timeChipText: { color: '#17191D', fontSize: 13, fontWeight: '600' },
+  timeChipTextActive: { color: '#FFFFFF' },
+  footer: { padding: 16, borderTopWidth: 1, borderTopColor: '#F0F1F3' },
+  confirmBtn: { backgroundColor: '#2563EB', borderRadius: 14, paddingVertical: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  confirmBtnDisabled: { backgroundColor: '#C4C9D1' },
+  confirmBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: '800' },
+});
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#020C1A' },
@@ -3027,6 +3253,14 @@ const styles = StyleSheet.create({
   difficultyRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   difficultyDot: { width: 14, height: 14, borderRadius: 7, backgroundColor: '#FFB000' },
   mapPreview: { height: 148, borderRadius: 8, backgroundColor: '#F3F4F5', borderWidth: 1, borderColor: '#ECEEF0', marginBottom: 8, overflow: 'hidden', position: 'relative' },
+  completedSummaryCard: { borderRadius: 10, backgroundColor: '#F9FAFB', borderWidth: 1, borderColor: '#ECEEF0', marginBottom: 8, overflow: 'hidden' },
+  completedSummaryRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 13 },
+  completedSummaryRowBorder: { borderTopWidth: 1, borderTopColor: '#ECEEF0' },
+  completedSummaryIcon: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
+  completedSummaryLabel: { color: '#8B9098', fontSize: 11, fontWeight: '600', marginBottom: 1 },
+  completedSummaryValue: { color: '#17191D', fontSize: 14, fontWeight: '700' },
+  completedInvoicePaid: { backgroundColor: '#DCFCE7', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
+  completedInvoicePaidText: { color: '#16A34A', fontSize: 10, fontWeight: '800', letterSpacing: 0.5 },
   mapView: { ...StyleSheet.absoluteFillObject },
   mapStartMarker: { width: 18, height: 18, borderRadius: 9, backgroundColor: '#17191D', borderWidth: 3, borderColor: '#FFFFFF' },
   mapEndMarker: { width: 32, height: 38, borderRadius: 16, backgroundColor: '#F04416', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#FFFFFF' },
