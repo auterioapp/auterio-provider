@@ -1,13 +1,17 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import useScrollToTop from '../hooks/useScrollToTop';
 import SwipePager from '../components/SwipePager';
 import { getJobStatusMeta, getJobStatusNote, getJobProgressIndex, getWorkflowJobStatus } from '../utils/jobUtils';
 import { JOB_STEPS } from '../constants';
-export default function JobsScreen({ jobs, jobWorkflows = {}, onOpen, refreshControl, scrollSignal }) {
+import CalendarScreen from './CalendarScreen';
+
+export default function JobsScreen({ jobs, jobWorkflows = {}, onOpen, refreshControl, scrollSignal, providerType = 'mobile' }) {
+  const hasAppointments = providerType === 'shop' || providerType === 'both';
   const scrollRef = useScrollToTop(scrollSignal);
   const [activeTab, setActiveTab] = useState('active');
+  const [calendarOpen, setCalendarOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const jobsWithStatus = jobs.map(job => ({
     ...job,
@@ -24,7 +28,7 @@ export default function JobsScreen({ jobs, jobWorkflows = {}, onOpen, refreshCon
   const completedJobs = jobsWithStatus.filter(job => job.displayStatus === 'completed' && matchesSearch(job));
   const tabs = [
     { key: 'active', label: 'Active', icon: 'time-outline', color: '#2F80FF' },
-    { key: 'scheduled', label: 'Scheduled', icon: 'calendar-outline', color: '#2563EB' },
+    ...(hasAppointments ? [{ key: 'scheduled', label: 'Scheduled', icon: 'calendar-outline', color: '#2563EB' }] : []),
     { key: 'completed', label: 'Completed', icon: 'checkmark-circle', color: '#16A34A' },
   ];
 
@@ -60,6 +64,7 @@ export default function JobsScreen({ jobs, jobWorkflows = {}, onOpen, refreshCon
   };
 
   return (
+    <Fragment>
     <ScrollView
       ref={scrollRef}
       style={[styles.container, styles.homeContainer]}
@@ -69,10 +74,12 @@ export default function JobsScreen({ jobs, jobWorkflows = {}, onOpen, refreshCon
     >
       <View style={styles.jobsHeader}>
         <Text style={styles.jobsTitle}>Jobs</Text>
-        <TouchableOpacity style={styles.calendarBtn} activeOpacity={0.84}>
-          <Ionicons name="calendar-outline" size={14} color="#17191D" />
-          <Text style={styles.calendarText}>Calendar</Text>
-        </TouchableOpacity>
+        {hasAppointments && (
+          <TouchableOpacity style={styles.calendarBtn} activeOpacity={0.84} onPress={() => setCalendarOpen(true)}>
+            <Ionicons name="calendar-outline" size={14} color="#17191D" />
+            <Text style={styles.calendarText}>Calendar</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       <View style={styles.searchRow}>
@@ -116,6 +123,13 @@ export default function JobsScreen({ jobs, jobWorkflows = {}, onOpen, refreshCon
         </SwipePager>
       </View>
     </ScrollView>
+
+    <CalendarScreen
+      visible={calendarOpen}
+      onClose={() => setCalendarOpen(false)}
+      onOpenJob={(job) => { setCalendarOpen(false); onOpen(job); }}
+    />
+    </Fragment>
   );
 }
 

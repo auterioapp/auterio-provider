@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
-import { Alert, Modal, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Alert, Modal, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { loadPricing, savePricing } from '../utils/pricingStore';
+import { API_URL, GOOGLE_API_KEY, PROVIDER } from '../constants';
 
 export default function AppSettingsScreen({ visible, onClose }) {
   const [pushEnabled, setPushEnabled] = useState(true);
@@ -9,13 +10,59 @@ export default function AppSettingsScreen({ visible, onClose }) {
   const [vibrationEnabled, setVibrationEnabled] = useState(true);
   const [providerType, setProviderTypeState] = useState('mobile');
   const [allowScheduling, setAllowSchedulingState] = useState(false);
+  const [address, setAddress] = useState('');
+  const [addressSaved, setAddressSaved] = useState(false);
+  const [suggestions, setSuggestions] = useState([]);
+  const addressRef = useRef('');
+  const debounceRef = useRef(null);
 
   useEffect(() => {
     loadPricing().then(p => {
       setProviderTypeState(p.providerType || 'mobile');
       setAllowSchedulingState(p.allowScheduling ?? false);
     });
+    fetch(`${API_URL}/profiles/${PROVIDER.id}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data?.address) { setAddress(data.address); addressRef.current = data.address; } })
+      .catch(() => {});
   }, []);
+
+  const onAddressChange = (text) => {
+    setAddress(text);
+    setAddressSaved(false);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (text.length < 3) { setSuggestions([]); return; }
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(text)}&types=address&key=${GOOGLE_API_KEY}`;
+        const res = await fetch(url);
+        const json = await res.json();
+        if (json.predictions) setSuggestions(json.predictions);
+      } catch {}
+    }, 350);
+  };
+
+  const selectSuggestion = (prediction) => {
+    setAddress(prediction.description);
+    setSuggestions([]);
+  };
+
+  const saveAddress = async () => {
+    const val = address.trim();
+    if (!val) return;
+    try {
+      await fetch(`${API_URL}/profiles/${PROVIDER.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ address: val }),
+      });
+      addressRef.current = val;
+      setAddressSaved(true);
+      setTimeout(() => setAddressSaved(false), 2000);
+    } catch (e) {
+      Alert.alert('Error', 'Could not save address');
+    }
+  };
 
   const changeAllowScheduling = async (val) => {
     setAllowSchedulingState(val);
@@ -112,16 +159,62 @@ export default function AppSettingsScreen({ visible, onClose }) {
             </TouchableOpacity>
           </View>
 
-          {/* Request Handling */}
-          <Text style={styles.sectionLabel}>Request Handling</Text>
+          {/* Location */}
+          <Text style={styles.sectionLabel}>Location</Text>
           <View style={styles.card}>
-            <ToggleRow
-              label="Allow Scheduling"
-              sublabel="Offer customers a scheduled appointment option"
-              value={allowScheduling}
-              onChange={changeAllowScheduling}
-            />
+            <View style={styles.addressRow}>
+              <Ionicons name="location-outline" size={18} color="#6B7280" style={{ marginTop: 1 }} />
+              <TextInput
+                style={styles.addressInput}
+                placeholder="Enter your shop address"
+                placeholderTextColor="#9CA3AF"
+                value={address}
+                onChangeText={onAddressChange}
+                returnKeyType="done"
+                onSubmitEditing={saveAddress}
+              />
+              <TouchableOpacity onPress={saveAddress} style={styles.addressSaveBtn} activeOpacity={0.8}>
+                <Text style={styles.addressSaveBtnText}>{addressSaved ? 'Saved!' : 'Save'}</Text>
+              </TouchableOpacity>
+            </View>
+            {suggestions.length > 0 && (
+              <View style={styles.suggestionsBox}>
+                {suggestions.map((p, i) => (
+                  <TouchableOpacity
+                    key={p.place_id}
+                    style={[styles.suggestionRow, i > 0 && styles.suggestionBorder]}
+                    onPress={() => selectSuggestion(p)}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="location-outline" size={14} color="#9CA3AF" />
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.suggestionMain} numberOfLines={1}>
+                        {p.structured_formatting?.main_text || p.description}
+                      </Text>
+                      <Text style={styles.suggestionSub} numberOfLines={1}>
+                        {p.structured_formatting?.secondary_text || ''}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
           </View>
+
+          {/* Request Handling — only for hybrid */}
+          {providerType === 'both' && (
+            <>
+              <Text style={styles.sectionLabel}>Request Handling</Text>
+              <View style={styles.card}>
+                <ToggleRow
+                  label="Allow Scheduling"
+                  sublabel="Offer customers a scheduled appointment option"
+                  value={allowScheduling}
+                  onChange={changeAllowScheduling}
+                />
+              </View>
+            </>
+          )}
 
           {/* Notifications */}
           <Text style={styles.sectionLabel}>Notifications</Text>
@@ -231,6 +324,15 @@ const styles = StyleSheet.create({
   typeTitle: { color: '#17191D', fontSize: 15, fontWeight: '600' },
   typeTitleActive: { fontWeight: '700' },
   typeSub: { color: '#6B7280', fontSize: 12, marginTop: 2 },
+  addressRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, gap: 8 },
+  addressInput: { flex: 1, color: '#17191D', fontSize: 15 },
+  addressSaveBtn: { backgroundColor: '#17191D', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 },
+  addressSaveBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '700' },
+  suggestionsBox: { borderTopWidth: 1, borderTopColor: '#F0F1F3' },
+  suggestionRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 11, paddingHorizontal: 4 },
+  suggestionBorder: { borderTopWidth: 1, borderTopColor: '#F0F1F3' },
+  suggestionMain: { color: '#17191D', fontSize: 14, fontWeight: '500' },
+  suggestionSub: { color: '#9CA3AF', fontSize: 12, marginTop: 1 },
   logoutCard: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 1, borderColor: '#ECEEF0', paddingHorizontal: 16, paddingVertical: 16, marginTop: 20 },
   logoutText: { color: '#F04416', fontSize: 15, fontWeight: '700' },
   deleteCard: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#FEF2F2', borderRadius: 14, borderWidth: 1, borderColor: '#FECACA', paddingHorizontal: 16, paddingVertical: 16, marginTop: 10 },

@@ -4,7 +4,7 @@ import useScrollToTop from '../hooks/useScrollToTop';
 import SwipePager from '../components/SwipePager';
 import { getServiceMeta, formatMoney, getVehicleLabel, getRequestLocation } from '../utils/serviceUtils';
 
-export default function RequestsScreen({ requests, acceptingId, filter, onFilterChange, onAccept, onDecline, onOpen, allowScheduling, refreshControl, scrollSignal }) {
+export default function RequestsScreen({ requests, acceptingId, filter, onFilterChange, onAccept, onDecline, onConfirm, onCounter, onScheduleAccept, onScheduleDecline, onOpen, allowScheduling, refreshControl, scrollSignal }) {
   const scrollRef = useScrollToTop(scrollSignal);
   const acceptedCount = 2;
   const tabs = [
@@ -48,6 +48,10 @@ export default function RequestsScreen({ requests, acceptingId, filter, onFilter
                 accepting={acceptingId === order.id}
                 onAccept={onAccept}
                 onDecline={onDecline}
+                onConfirm={onConfirm}
+                onCounter={onCounter}
+                onScheduleAccept={onScheduleAccept}
+                onScheduleDecline={onScheduleDecline}
                 onOpen={onOpen}
                 allowScheduling={allowScheduling}
               />
@@ -67,47 +71,107 @@ export default function RequestsScreen({ requests, acceptingId, filter, onFilter
   );
 }
 
-function RequestCard({ order, accepting, onAccept, onDecline, onOpen, allowScheduling }) {
+function fmtScheduledTime(isoStr) {
+  if (!isoStr) return '';
+  const d = new Date(isoStr);
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const h = d.getHours();
+  const m = d.getMinutes();
+  const p = h >= 12 ? 'PM' : 'AM';
+  const displayH = h % 12 || 12;
+  return `${months[d.getMonth()]} ${d.getDate()} · ${displayH}:${String(m).padStart(2,'0')} ${p}`;
+}
+
+function RequestCard({ order, accepting, onAccept, onDecline, onConfirm, onCounter, onScheduleAccept, onScheduleDecline, onOpen, allowScheduling }) {
   const serviceMeta = getServiceMeta(order);
   const icon = serviceMeta.icon;
   const title = serviceMeta.title;
   const vehicle = getVehicleLabel(order);
   const location = getRequestLocation(order);
+  const isScheduledPending = order.status === 'scheduled_pending';
+  const isScheduled = isScheduledPending || order.isScheduledRequest || order.status === 'scheduled';
 
   return (
-    <TouchableOpacity style={[styles.activeListCard, styles.neutralListCard, styles.requestCardWrap]} onPress={() => onOpen && onOpen(order)} activeOpacity={0.86}>
+    <TouchableOpacity
+      style={[styles.activeListCard, styles.neutralListCard, styles.requestCardWrap, isScheduled && styles.scheduledCardWrap]}
+      onPress={() => onOpen && onOpen(order)}
+      activeOpacity={0.86}
+    >
+      {isScheduled && (
+        <View style={styles.scheduledBanner}>
+          <Ionicons name="calendar-outline" size={12} color="#7C3AED" />
+          <Text style={styles.scheduledBannerText}>Appointment Request</Text>
+          <Text style={styles.scheduledBannerTime}>{fmtScheduledTime(order.scheduledAt)}</Text>
+        </View>
+      )}
       <View style={styles.requestCardTop}>
         <View style={styles.activeListIcon}>
-          <Ionicons name={icon} size={20} color="#F04416" />
+          <Ionicons name={icon} size={20} color={isScheduled ? '#7C3AED' : '#F04416'} />
         </View>
         <View style={styles.activeListInfo}>
-          <Text style={styles.neutralListStatus}>NEW REQUEST</Text>
+          <Text style={[styles.neutralListStatus, isScheduled && { color: '#7C3AED' }]}>
+            {isScheduled ? 'APPOINTMENT' : 'NEW REQUEST'}
+          </Text>
           <Text style={styles.activeListTitle} numberOfLines={1}>{title}</Text>
           {!!vehicle && <Text style={styles.activeListVehicle} numberOfLines={1}>{vehicle}</Text>}
           <Text style={styles.activeListAddress} numberOfLines={1}>{location}</Text>
         </View>
         <View style={styles.activeListAside}>
           <Text style={styles.neutralListPrice}>{formatMoney(order)}</Text>
-          <View style={styles.activeListEtaRow}>
-            <Ionicons name="time-outline" size={10} color="#F04416" style={styles.activeListEtaIcon} />
-            <Text style={styles.neutralListEta} numberOfLines={1}>{order.eta || 'ETA 15 min'}</Text>
-          </View>
+          {isScheduled ? (
+            <View style={styles.apptTimeBadge}>
+              <Text style={styles.apptTimeBadgeText}>{order.scheduledSlotLabel || 'Scheduled'}</Text>
+            </View>
+          ) : (
+            <View style={styles.activeListEtaRow}>
+              <Ionicons name="time-outline" size={10} color="#F04416" style={styles.activeListEtaIcon} />
+              <Text style={styles.neutralListEta} numberOfLines={1}>{order.eta || 'ETA 15 min'}</Text>
+            </View>
+          )}
         </View>
       </View>
 
       <View style={styles.cardBtnRow}>
-        <TouchableOpacity style={styles.cardBtnDecline} activeOpacity={0.82} onPress={(e) => { e.stopPropagation(); onDecline && onDecline(order); }}>
-          <Text style={styles.cardBtnDeclineText}>Decline</Text>
-        </TouchableOpacity>
-        {allowScheduling && (
-          <TouchableOpacity style={styles.cardBtnSchedule} activeOpacity={0.82} onPress={(e) => { e.stopPropagation(); onOpen && onOpen(order); }}>
-            <Ionicons name="calendar-outline" size={14} color="#7C3AED" />
-            <Text style={styles.cardBtnScheduleText}>Schedule</Text>
-          </TouchableOpacity>
+        {isScheduledPending ? (
+          <>
+            <TouchableOpacity style={styles.cardBtnDecline} activeOpacity={0.82} onPress={(e) => { e.stopPropagation(); onScheduleDecline && onScheduleDecline(order); }}>
+              <Text style={styles.cardBtnDeclineText}>Decline</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.cardBtnSchedule} activeOpacity={0.82} onPress={(e) => { e.stopPropagation(); onCounter && onCounter(order); }}>
+              <Ionicons name="swap-horizontal-outline" size={14} color="#7C3AED" />
+              <Text style={styles.cardBtnScheduleText}>Suggest Time</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.cardBtnConfirm} activeOpacity={0.82} onPress={(e) => { e.stopPropagation(); onScheduleAccept && onScheduleAccept(order); }}>
+              <Ionicons name="checkmark-circle-outline" size={14} color="#FFFFFF" />
+              <Text style={styles.cardBtnConfirmText}>{accepting ? 'Confirming…' : 'Confirm'}</Text>
+            </TouchableOpacity>
+          </>
+        ) : isScheduled ? (
+          <>
+            <TouchableOpacity style={styles.cardBtnDecline} activeOpacity={0.82} onPress={(e) => { e.stopPropagation(); onDecline && onDecline(order); }}>
+              <Text style={styles.cardBtnDeclineText}>Decline</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.cardBtnConfirm} activeOpacity={0.82} onPress={(e) => { e.stopPropagation(); onConfirm && onConfirm(order); }}>
+              <Ionicons name="checkmark-circle-outline" size={14} color="#FFFFFF" />
+              <Text style={styles.cardBtnConfirmText}>{accepting ? 'Confirming…' : 'Confirm'}</Text>
+            </TouchableOpacity>
+          </>
+        ) : (
+          <>
+            <TouchableOpacity style={styles.cardBtnDecline} activeOpacity={0.82} onPress={(e) => { e.stopPropagation(); onDecline && onDecline(order); }}>
+              <Text style={styles.cardBtnDeclineText}>Decline</Text>
+            </TouchableOpacity>
+            {allowScheduling && (
+              <TouchableOpacity style={styles.cardBtnSchedule} activeOpacity={0.82} onPress={(e) => { e.stopPropagation(); onOpen && onOpen(order); }}>
+                <Ionicons name="calendar-outline" size={14} color="#7C3AED" />
+                <Text style={styles.cardBtnScheduleText}>Schedule</Text>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity style={styles.cardBtnAccept} activeOpacity={0.82} onPress={(e) => { e.stopPropagation(); onAccept && onAccept(order); }}>
+              <Text style={styles.cardBtnAcceptText}>{accepting ? 'Accepting…' : 'Accept'}</Text>
+            </TouchableOpacity>
+          </>
         )}
-        <TouchableOpacity style={styles.cardBtnAccept} activeOpacity={0.82} onPress={(e) => { e.stopPropagation(); onAccept && onAccept(order); }}>
-          <Text style={styles.cardBtnAcceptText}>{accepting ? 'Accepting…' : 'Accept'}</Text>
-        </TouchableOpacity>
       </View>
     </TouchableOpacity>
   );
@@ -140,6 +204,14 @@ const styles = StyleSheet.create({
   cardBtnScheduleText: { color: '#7C3AED', fontSize: 13, fontWeight: '700' },
   cardBtnAccept: { flex: 1, paddingVertical: 11, alignItems: 'center', justifyContent: 'center', backgroundColor: '#16A34A' },
   cardBtnAcceptText: { color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
+  cardBtnConfirm: { flex: 2, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 11, backgroundColor: '#7C3AED' },
+  cardBtnConfirmText: { color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
+  scheduledCardWrap: { borderColor: '#DDD6FE', borderWidth: 1.5 },
+  scheduledBanner: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#F5F0FF', paddingHorizontal: 12, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#EDE9FE' },
+  scheduledBannerText: { color: '#7C3AED', fontSize: 11, fontWeight: '700', flex: 1 },
+  scheduledBannerTime: { color: '#7C3AED', fontSize: 11, fontWeight: '600' },
+  apptTimeBadge: { backgroundColor: '#F5F0FF', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 3, marginTop: 4 },
+  apptTimeBadgeText: { color: '#7C3AED', fontSize: 10, fontWeight: '700' },
   activeListIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E6E8EB', alignItems: 'center', justifyContent: 'center' },
   activeListInfo: { flex: 1, minWidth: 0 },
   activeListTitle: { color: '#17191D', fontSize: 16, lineHeight: 19, fontWeight: '800' },

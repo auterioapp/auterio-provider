@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { loadPricing, savePricing, DEFAULT_PRICING } from '../utils/pricingStore';
+import { API_URL, PROVIDER } from '../constants';
 
 
 function Section({ icon, iconColor, title, children }) {
@@ -116,6 +117,14 @@ export default function PricingScreen({ visible, onClose }) {
 
   const handleSave = async () => {
     await savePricing(v);
+    const rate = parseFloat(v.laborRate);
+    if (!isNaN(rate)) {
+      fetch(`${API_URL}/profiles/${PROVIDER.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ laborRate: rate }),
+      }).catch(() => {});
+    }
     Alert.alert('Saved', 'Your pricing has been updated.');
     onClose();
   };

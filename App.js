@@ -15,7 +15,6 @@ import JobsScreen from './screens/JobsScreen';
 import JobDetailScreen, { JobStepper } from './screens/JobDetailScreen';
 import { getJobProgressIndex } from './utils/jobUtils';
 import { API_URL, PROVIDER, ACCEPT_BLUE, TAB_BAR_PADDING, TAB_INDICATOR_EXTRA_WIDTH, TAB_INDICATOR_DROP_SCALE, TABS, REQUEST_ROUTE, REQUEST_MAP_REGION, JOB_STEPS } from './constants';
-import { demoRequests, demoCompletedJobs } from './data';
 
 import { formatMoney, getServiceMeta, getServiceTitle, getOrderServiceType, getServiceFlowSchema, getDiagnosisSchema, getProviderIntakeItems, isTowingService, getDropoffAddress, getRequestLocation, getRequestDistance, getVehicleVin, normalizeComplaintItem, getCustomerComplaintItems, getAcceptedAtLabel, getVehicleLabel, getBackendStatusFromWorkflowStage } from './utils/serviceUtils';
 import { getRecommendedServicesFromDiagnosis, getDemoEstimate, getEstimateCatalog, getEstimatePriceCheck, sumAmounts, formatCurrency } from './utils/estimateUtils';
@@ -91,6 +90,9 @@ export default function App() {
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [selectedJob, setSelectedJob] = useState(null);
   const [providerType, setProviderType] = useState('mobile');
+  const providerTypeRef = useRef('mobile');
+  const [counterModalOrder, setCounterModalOrder] = useState(null);
+  const [declineModalOrder, setDeclineModalOrder] = useState(null);
   const [allowScheduling, setAllowScheduling] = useState(false);
   const [appointmentOrder, setAppointmentOrder] = useState(null);
   const [jobWorkflows, setJobWorkflows] = useState({});
@@ -105,26 +107,32 @@ export default function App() {
   const tabIndicatorTarget = useRef(0);
   const tabDragFrame = useRef(null);
 
-  const dashboardRequests = [...requests, ...demoRequests];
-  const providerJobs = useMemo(() => [...acceptedJobs, ...demoCompletedJobs], [acceptedJobs]);
+  const dashboardRequests = requests;
+  const providerJobs = useMemo(() => acceptedJobs, [acceptedJobs]);
   const activeJobs = useMemo(() => providerJobs.filter(job => job.status !== 'completed' && job.status !== 'scheduled').length, [providerJobs]);
   const pendingCount = dashboardRequests.length;
   const tabWidth = tabBarWidth ? (tabBarWidth - TAB_BAR_PADDING * 2) / TABS.length : 0;
   const isLightVisible = !!selectedRequest || (!selectedRequest && (activeScreen === 'home' || activeScreen === 'requests' || activeScreen === 'jobs' || activeScreen === 'earnings' || activeScreen === 'profile'));
 
   useEffect(() => {
-    loadRequests();
     loadPricing().then(p => {
-      setProviderType(p.providerType || 'mobile');
-      setAllowScheduling(p.allowScheduling ?? false);
+      const pt = p.providerType || 'mobile';
+      setProviderType(pt);
+      providerTypeRef.current = pt;
+      const scheduling = pt === 'shop' ? true : pt === 'mobile' ? false : (p.allowScheduling ?? false);
+      setAllowScheduling(scheduling);
+      loadRequests();
     });
   }, []);
 
   useEffect(() => {
     if (activeScreen !== 'profile') {
       loadPricing().then(p => {
-        setProviderType(p.providerType || 'mobile');
-        setAllowScheduling(p.allowScheduling ?? false);
+        const pt = p.providerType || 'mobile';
+        setProviderType(pt);
+        providerTypeRef.current = pt;
+        const scheduling = pt === 'shop' ? true : pt === 'mobile' ? false : (p.allowScheduling ?? false);
+        setAllowScheduling(scheduling);
       });
     }
   }, [activeScreen]);
@@ -136,18 +144,47 @@ export default function App() {
   }, [dashboardRequests.length > 0]);
 
   const loadRequests = async () => {
+    const type = providerTypeRef.current;
+    const isMobile = type === 'mobile' || type === 'both';
+    const isShop = type === 'shop' || type === 'both';
     try {
-      const data = await fetchJson(`${API_URL}/orders?status=pending`);
-      const pendingOrders = Array.isArray(data)
-        ? data
-          .filter(o => (!o.status || o.status === 'pending') && !acceptedRequestIds.includes(String(o.id || o._id)) && !dismissedRealIdsRef.current.includes(String(o.id || o._id)))
-          .sort((a, b) => {
-            const aTime = new Date(a.createdAt || a.date || 0).getTime() || 0;
-            const bTime = new Date(b.createdAt || b.date || 0).getTime() || 0;
-            return bTime - aTime;
-          })
+      const [availableData, scheduledPendingData, scheduledData] = await Promise.all([
+        isMobile ? fetchJson(`${API_URL}/orders/provider/available?providerId=${PROVIDER.id}`) : Promise.resolve([]),
+        isShop   ? fetchJson(`${API_URL}/orders?status=scheduled_pending`)                     : Promise.resolve([]),
+        isShop   ? fetchJson(`${API_URL}/orders?status=scheduled`)                             : Promise.resolve([]),
+      ]);
+
+      const dismissed = dismissedRealIdsRef.current;
+
+      const onDemandOrders = isMobile && Array.isArray(availableData)
+        ? availableData.filter(o =>
+            o.status === 'pending' &&
+            !acceptedRequestIds.includes(String(o.id || o._id)) &&
+            !dismissed.includes(String(o.id || o._id))
+          )
         : [];
-      setRequests(pendingOrders);
+
+      const bookingOrders = isShop && Array.isArray(scheduledPendingData)
+        ? scheduledPendingData.filter(o =>
+            o.status === 'scheduled_pending' &&
+            String(o.provider?.id) === String(PROVIDER.id) &&
+            !dismissed.includes(String(o.id || o._id))
+          )
+        : [];
+
+      const scheduledOrders = isShop && Array.isArray(scheduledData)
+        ? scheduledData.filter(o =>
+            o.status === 'scheduled' &&
+            !dismissed.includes(String(o.id || o._id))
+          ).map(o => ({ ...o, isScheduledRequest: true }))
+        : [];
+
+      const all = [...bookingOrders, ...scheduledOrders, ...onDemandOrders].sort((a, b) => {
+        const aTime = new Date(a.createdAt || a.date || 0).getTime() || 0;
+        const bTime = new Date(b.createdAt || b.date || 0).getTime() || 0;
+        return bTime - aTime;
+      });
+      setRequests(all);
     } catch (error) {
       console.log('Load requests error:', error.message);
     } finally {
@@ -174,7 +211,6 @@ export default function App() {
     try {
       setAcceptingId(order.id);
       const nextJob = addAcceptedJob(order, { status: 'accepted', acceptedAt: new Date().toISOString() });
-      if (order.demo) return nextJob;
       fetchJson(`${API_URL}/orders/${order.id}/accept`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -200,11 +236,90 @@ export default function App() {
     }
   };
 
+  const confirmScheduledOrder = async (order) => {
+    try {
+      setAcceptingId(order.id);
+      const realId = String(order.id || order._id);
+      dismissedRealIdsRef.current = [...dismissedRealIdsRef.current, realId];
+      setRequests(c => c.filter(item => String(item.id || item._id) !== realId));
+      const nextJob = addAcceptedJob(order, { status: 'scheduled', acceptedAt: new Date().toISOString() });
+      fetchJson(`${API_URL}/orders/${realId}/confirm-schedule`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          provider: {
+            id: PROVIDER.id, name: PROVIDER.company,
+            type: order.provider?.type || 'Auto Repair Shop',
+            phone: PROVIDER.phone, initials: PROVIDER.initials,
+            rating: PROVIDER.rating, eta: PROVIDER.eta, color: '#FF6B00',
+          },
+        }),
+      }).catch(e => console.log('Confirm order sync error:', e.message));
+      return nextJob;
+    } catch (error) {
+      console.log('Confirm order error:', error.message);
+    } finally {
+      setAcceptingId(null);
+    }
+  };
+
+  const acceptScheduledBooking = async (order) => {
+    try {
+      setAcceptingId(order.id);
+      const realId = String(order.id || order._id);
+      dismissedRealIdsRef.current = [...dismissedRealIdsRef.current, realId];
+      setRequests(c => c.filter(item => String(item.id || item._id) !== realId));
+      setSelectedRequest(null);
+      await fetchJson(`${API_URL}/orders/${realId}/schedule-accept`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+      });
+    } catch (e) {
+      console.log('Schedule accept error:', e.message);
+    } finally {
+      setAcceptingId(null);
+    }
+  };
+
+  const declineScheduledBooking = async (order, note) => {
+    try {
+      const realId = String(order.id || order._id);
+      dismissedRealIdsRef.current = [...dismissedRealIdsRef.current, realId];
+      setRequests(c => c.filter(item => String(item.id || item._id) !== realId));
+      setSelectedRequest(null);
+      setDeclineModalOrder(null);
+      await fetchJson(`${API_URL}/orders/${realId}/schedule-decline`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ providerNote: note || null }),
+      });
+    } catch (e) {
+      console.log('Schedule decline error:', e.message);
+    }
+  };
+
+  const counterScheduledBooking = async (order, counterDate, counterSlot, note) => {
+    try {
+      const realId = String(order.id || order._id);
+      dismissedRealIdsRef.current = [...dismissedRealIdsRef.current, realId];
+      setRequests(c => c.filter(item => String(item.id || item._id) !== realId));
+      setSelectedRequest(null);
+      setCounterModalOrder(null);
+      await fetchJson(`${API_URL}/orders/${realId}/schedule-counter`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ counterDate, counterSlot, providerNote: note || null }),
+      });
+    } catch (e) {
+      console.log('Schedule counter error:', e.message);
+    }
+  };
+
   const dismissRequest = (order) => {
     const realId = String(order.id || order._id || '');
     if (realId) dismissedRealIdsRef.current = [...dismissedRealIdsRef.current, realId];
     setRequests(c => c.filter(item => String(item.id || item._id) !== realId));
-    if (order.demo || !realId) return;
+    if (!realId) return;
     if (realId) {
       fetchJson(`${API_URL}/orders/${realId}/decline`, {
         method: 'PATCH',
@@ -218,7 +333,6 @@ export default function App() {
     try {
       setAcceptingId(order.id);
       const nextJob = addAcceptedJob(order, { status: 'scheduled', appointmentTime, acceptedAt: new Date().toISOString() });
-      if (order.demo) return nextJob;
       fetchJson(`${API_URL}/orders/${order.id}/accept`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -481,13 +595,17 @@ export default function App() {
               onFilterChange={setRequestFilter}
               onAccept={acceptOrder}
               onDecline={dismissRequest}
+              onConfirm={confirmScheduledOrder}
+              onScheduleAccept={acceptScheduledBooking}
+              onScheduleDecline={(order) => setDeclineModalOrder(order)}
+              onCounter={(order) => setCounterModalOrder(order)}
               onOpen={setSelectedRequest}
               allowScheduling={allowScheduling}
               refreshControl={refreshControl}
               scrollSignal={screenResetNonce}
             />
           ) : activeScreen === 'jobs' ? (
-          <JobsScreen jobs={providerJobs} jobWorkflows={jobWorkflows} onOpen={setSelectedJob} refreshControl={refreshControl} scrollSignal={screenResetNonce} />
+          <JobsScreen jobs={providerJobs} jobWorkflows={jobWorkflows} onOpen={setSelectedJob} refreshControl={refreshControl} scrollSignal={screenResetNonce} providerType={providerType} />
           ) : activeScreen === 'earnings' ? (
             <EarningsScreen refreshControl={refreshControl} scrollSignal={screenResetNonce} />
           ) : activeScreen === 'profile' ? (
@@ -576,9 +694,26 @@ export default function App() {
                   accepting={acceptingId === selectedRequest.id}
                   providerType={providerType}
                   onBack={() => setSelectedRequest(null)}
-                  onAccept={async (o) => { const job = await acceptOrder(o); setSelectedRequest(null); if (job) setSelectedJob(job); }}
+                  onAccept={async (o) => {
+                    if (o.status === 'scheduled_pending') {
+                      setSelectedRequest(null);
+                      await acceptScheduledBooking(o);
+                    } else {
+                      const job = await acceptOrder(o);
+                      setSelectedRequest(null);
+                      if (job) setSelectedJob(job);
+                    }
+                  }}
                   onSchedule={(o) => { setSelectedRequest(null); setAppointmentOrder(o); }}
-                  onDecline={(o) => { dismissRequest(o); setSelectedRequest(null); }}
+                  onDecline={(o) => {
+                    if (o.status === 'scheduled_pending') {
+                      setSelectedRequest(null);
+                      setDeclineModalOrder(o);
+                    } else {
+                      dismissRequest(o);
+                      setSelectedRequest(null);
+                    }
+                  }}
                   refreshControl={refreshControl}
                 />
               )}
@@ -611,6 +746,21 @@ export default function App() {
             </View>
           </View>
         </Modal>
+
+        {/* ── Decline Booking Modal ── */}
+        <DeclineBookingModal
+          order={declineModalOrder}
+          onClose={() => setDeclineModalOrder(null)}
+          onConfirm={(order, note) => declineScheduledBooking(order, note)}
+        />
+
+        {/* ── Counter Offer Modal ── */}
+        <CounterOfferModal
+          order={counterModalOrder}
+          onClose={() => setCounterModalOrder(null)}
+          onConfirm={(order, counterDate, counterSlot, note) => counterScheduledBooking(order, counterDate, counterSlot, note)}
+        />
+
       </SafeAreaView>
     </SafeAreaProvider>
   );
@@ -2761,6 +2911,127 @@ async function fetchJson(url, options) {
   return JSON.parse(text);
 }
 
+
+function DeclineBookingModal({ order, onClose, onConfirm }) {
+  const [note, setNote] = useState('');
+  if (!order) return null;
+  return (
+    <Modal visible={!!order} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' }}>
+        <View style={{ backgroundColor: '#FFFFFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40 }}>
+          <Text style={{ color: '#17191D', fontSize: 18, fontWeight: '800', marginBottom: 6 }}>Decline Booking</Text>
+          <Text style={{ color: '#6B7280', fontSize: 14, marginBottom: 20 }}>Let the client know why you can't accept this booking request.</Text>
+          <TextInput
+            style={{ backgroundColor: '#F5F6F8', borderRadius: 12, padding: 14, fontSize: 14, color: '#17191D', minHeight: 90, textAlignVertical: 'top', borderWidth: 1, borderColor: '#ECEEF0', marginBottom: 20 }}
+            placeholder="Reason for declining (optional)"
+            placeholderTextColor="#9CA3AF"
+            value={note}
+            onChangeText={setNote}
+            multiline
+            maxLength={300}
+          />
+          <TouchableOpacity
+            style={{ backgroundColor: '#EF4444', borderRadius: 14, paddingVertical: 15, alignItems: 'center', marginBottom: 10 }}
+            activeOpacity={0.84}
+            onPress={() => { onConfirm(order, note.trim()); setNote(''); }}
+          >
+            <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>Decline Booking</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={{ paddingVertical: 12, alignItems: 'center' }} onPress={() => { setNote(''); onClose(); }}>
+            <Text style={{ color: '#6B7280', fontSize: 15, fontWeight: '600' }}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+const COUNTER_SLOTS = ['8:00 AM','9:00 AM','10:00 AM','11:00 AM','12:00 PM','1:00 PM','2:00 PM','3:00 PM','4:00 PM','5:00 PM','6:00 PM'];
+const COUNTER_DAYS_AHEAD = 14;
+
+function CounterOfferModal({ order, onClose, onConfirm }) {
+  const [note, setNote] = useState('');
+  const [selectedDate, setSelectedDate] = useState(null);
+  const [selectedSlot, setSelectedSlot] = useState(null);
+  if (!order) return null;
+
+  const today = new Date(); today.setHours(0,0,0,0);
+  const days = Array.from({ length: COUNTER_DAYS_AHEAD }, (_, i) => {
+    const d = new Date(today); d.setDate(today.getDate() + i + 1); return d;
+  });
+  const DAY_NAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const MONTH_NAMES = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+  const canSend = selectedDate && selectedSlot;
+
+  return (
+    <Modal visible={!!order} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' }}>
+        <View style={{ backgroundColor: '#FFFFFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40, maxHeight: '85%' }}>
+          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            <Text style={{ color: '#17191D', fontSize: 18, fontWeight: '800', marginBottom: 6 }}>Suggest Another Time</Text>
+            <Text style={{ color: '#6B7280', fontSize: 14, marginBottom: 20 }}>Pick a date and time that works for you.</Text>
+
+            <Text style={{ color: '#9CA3AF', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 10 }}>Select Date</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 20 }} contentContainerStyle={{ gap: 8 }}>
+              {days.map((d, i) => {
+                const sel = selectedDate && d.toDateString() === selectedDate.toDateString();
+                return (
+                  <TouchableOpacity key={i} onPress={() => setSelectedDate(d)} activeOpacity={0.8}
+                    style={{ width: 56, alignItems: 'center', paddingVertical: 10, borderRadius: 12, borderWidth: 1.5, borderColor: sel ? '#7C3AED' : '#ECEEF0', backgroundColor: sel ? '#F5F0FF' : '#F9FAFB', gap: 3 }}>
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: sel ? '#7C3AED' : '#6B7280' }}>{DAY_NAMES[d.getDay()]}</Text>
+                    <Text style={{ fontSize: 18, fontWeight: '800', color: sel ? '#7C3AED' : '#17191D' }}>{d.getDate()}</Text>
+                    <Text style={{ fontSize: 10, fontWeight: '600', color: sel ? '#7C3AED' : '#9CA3AF' }}>{MONTH_NAMES[d.getMonth()]}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+
+            <Text style={{ color: '#9CA3AF', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 10 }}>Select Time</Text>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
+              {COUNTER_SLOTS.map(slot => {
+                const sel = selectedSlot === slot;
+                return (
+                  <TouchableOpacity key={slot} onPress={() => setSelectedSlot(slot)} activeOpacity={0.8}
+                    style={{ paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, borderWidth: 1.5, borderColor: sel ? '#7C3AED' : '#ECEEF0', backgroundColor: sel ? '#F5F0FF' : '#F9FAFB' }}>
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: sel ? '#7C3AED' : '#5E646D' }}>{slot}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <Text style={{ color: '#9CA3AF', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 10 }}>Message to Client (optional)</Text>
+            <TextInput
+              style={{ backgroundColor: '#F5F6F8', borderRadius: 12, padding: 14, fontSize: 14, color: '#17191D', minHeight: 72, textAlignVertical: 'top', borderWidth: 1, borderColor: '#ECEEF0', marginBottom: 20 }}
+              placeholder="e.g. We're fully booked on your selected date, but can fit you in on this day!"
+              placeholderTextColor="#9CA3AF"
+              value={note}
+              onChangeText={setNote}
+              multiline
+              maxLength={300}
+            />
+
+            <TouchableOpacity
+              style={{ backgroundColor: canSend ? '#7C3AED' : '#D1D5DB', borderRadius: 14, paddingVertical: 15, alignItems: 'center', marginBottom: 10 }}
+              activeOpacity={0.84}
+              disabled={!canSend}
+              onPress={() => {
+                if (!canSend) return;
+                onConfirm(order, selectedDate.toISOString(), selectedSlot, note.trim());
+                setNote(''); setSelectedDate(null); setSelectedSlot(null);
+              }}
+            >
+              <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>Send Suggestion</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={{ paddingVertical: 12, alignItems: 'center' }} onPress={() => { setNote(''); setSelectedDate(null); setSelectedSlot(null); onClose(); }}>
+              <Text style={{ color: '#6B7280', fontSize: 15, fontWeight: '600' }}>Cancel</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+}
 
 function AppointmentModal({ order, onClose, onConfirm }) {
   const today = new Date();

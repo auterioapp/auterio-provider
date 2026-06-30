@@ -1,4 +1,5 @@
 export const API_URL = 'https://auterio-backend-production.up.railway.app/api';
+export const GOOGLE_API_KEY = 'AIzaSyCHEGxUEXPk3622i3rttyVZEcT3XS9ssuI';
 
 export const PROVIDER = {
   id: 'provider-demo-001',

@@ -1,84 +1,242 @@
 import { useEffect, useState } from 'react';
-import { Alert, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import PricingScreen from './PricingScreen';
 import { loadPricing } from '../utils/pricingStore';
+import { API_URL, PROVIDER } from '../constants';
+
+// ── Mobile mechanic services ────────────────────────────────────────────────
+
+const MOBILE_SERVICES = [
+  { id: 'battery',     title: 'Battery Service',  subtitle: 'Jump starts, battery replacement and testing', icon: 'flash-outline' },
+  { id: 'tire',        title: 'Tire Service',      subtitle: 'Tire change, repair and replacement',          icon: 'disc-outline' },
+  { id: 'towing',      title: 'Towing',            subtitle: 'Vehicle towing and transport',                 icon: 'car-outline' },
+  { id: 'diagnostics', title: 'Diagnostics',       subtitle: 'On-site diagnostics and system scanning',      icon: 'speedometer-outline' },
+  { id: 'lockout',     title: 'Lockout Service',   subtitle: 'Vehicle lockout and key assistance',           icon: 'lock-closed-outline' },
+  { id: 'fuel',        title: 'Fuel Delivery',     subtitle: 'Fuel delivery to your location',               icon: 'flame-outline' },
+];
+
+// ── Shop services by category ────────────────────────────────────────────────
+
+const SHOP_CATEGORIES = [
+  {
+    id: 'oil',
+    label: 'Oil & Fluids',
+    icon: 'water-outline',
+    services: [
+      { id: 'oil_change',      title: 'Oil Change',           subtitle: 'Conventional, synthetic or blend' },
+      { id: 'trans_fluid',     title: 'Transmission Fluid',   subtitle: 'Flush and replacement' },
+      { id: 'coolant_flush',   title: 'Coolant Flush',        subtitle: 'Radiator flush and refill' },
+      { id: 'brake_fluid',     title: 'Brake Fluid',          subtitle: 'Fluid exchange and top-off' },
+    ],
+  },
+  {
+    id: 'brakes',
+    label: 'Brakes',
+    icon: 'radio-button-on-outline',
+    services: [
+      { id: 'brake_pads',      title: 'Brake Pads',           subtitle: 'Front, rear or full replacement' },
+      { id: 'brake_rotors',    title: 'Brake Rotors',         subtitle: 'Resurfacing or replacement' },
+      { id: 'brake_inspection',title: 'Brake Inspection',     subtitle: 'Full brake system check' },
+      { id: 'brake_calipers',  title: 'Brake Calipers',       subtitle: 'Caliper replacement or rebuild' },
+    ],
+  },
+  {
+    id: 'tires',
+    label: 'Tires',
+    icon: 'disc-outline',
+    services: [
+      { id: 'tire_rotation',   title: 'Tire Rotation',        subtitle: 'Front-to-rear rotation' },
+      { id: 'tire_replacement',title: 'Tire Replacement',     subtitle: 'Single or full set' },
+      { id: 'wheel_alignment', title: 'Wheel Alignment',      subtitle: '2-wheel or 4-wheel alignment' },
+      { id: 'wheel_balance',   title: 'Wheel Balancing',      subtitle: 'Balance and weights' },
+    ],
+  },
+  {
+    id: 'engine',
+    label: 'Engine',
+    icon: 'construct-outline',
+    services: [
+      { id: 'tune_up',         title: 'Tune-Up',              subtitle: 'Plugs, filters and inspection' },
+      { id: 'spark_plugs',     title: 'Spark Plugs',          subtitle: 'Replacement for all cylinders' },
+      { id: 'timing_belt',     title: 'Timing Belt/Chain',    subtitle: 'Belt or chain replacement' },
+      { id: 'air_filter',      title: 'Air Filter',           subtitle: 'Engine and cabin filters' },
+    ],
+  },
+  {
+    id: 'electrical',
+    label: 'Electrical',
+    icon: 'flash-outline',
+    services: [
+      { id: 'battery_shop',    title: 'Battery Replacement',  subtitle: 'Test, replace and recycle' },
+      { id: 'alternator',      title: 'Alternator',           subtitle: 'Replacement and testing' },
+      { id: 'starter',         title: 'Starter',              subtitle: 'Starter motor replacement' },
+      { id: 'electrical_diag', title: 'Electrical Diagnosis', subtitle: 'Wiring, fuses and sensors' },
+    ],
+  },
+  {
+    id: 'ac',
+    label: 'AC & Heating',
+    icon: 'thermometer-outline',
+    services: [
+      { id: 'ac_recharge',     title: 'AC Recharge',          subtitle: 'Refrigerant recharge' },
+      { id: 'ac_repair',       title: 'AC Repair',            subtitle: 'Compressor, condenser, evaporator' },
+      { id: 'heater_repair',   title: 'Heater Repair',        subtitle: 'Heater core and blower motor' },
+    ],
+  },
+  {
+    id: 'suspension',
+    label: 'Suspension & Steering',
+    icon: 'git-branch-outline',
+    services: [
+      { id: 'shocks_struts',   title: 'Shocks & Struts',      subtitle: 'Replacement and inspection' },
+      { id: 'wheel_bearing',   title: 'Wheel Bearing',        subtitle: 'Hub and bearing replacement' },
+      { id: 'tie_rod',         title: 'Tie Rods',             subtitle: 'Inner and outer tie rod ends' },
+      { id: 'power_steering',  title: 'Power Steering',       subtitle: 'Fluid, pump and rack' },
+    ],
+  },
+  {
+    id: 'exhaust',
+    label: 'Exhaust',
+    icon: 'cloud-outline',
+    services: [
+      { id: 'muffler',         title: 'Muffler',              subtitle: 'Repair or replacement' },
+      { id: 'catalytic',       title: 'Catalytic Converter',  subtitle: 'Replacement and testing' },
+      { id: 'exhaust_pipe',    title: 'Exhaust Pipe',         subtitle: 'Pipe repair and welding' },
+    ],
+  },
+  {
+    id: 'diagnostics_shop',
+    label: 'Diagnostics',
+    icon: 'speedometer-outline',
+    services: [
+      { id: 'check_engine',    title: 'Check Engine Light',   subtitle: 'OBD scan and diagnosis' },
+      { id: 'full_inspection', title: 'Full Inspection',      subtitle: 'Multi-point vehicle inspection' },
+      { id: 'pre_purchase',    title: 'Pre-Purchase Inspection', subtitle: 'Buying a used car?' },
+    ],
+  },
+];
 
 const WARRANTY_OPTIONS = [
-  { id: 'none', label: 'No Warranty',           days: null, miles: null },
-  { id: '30d',  label: '30 days / 1,000 miles', days: 30,   miles: 1000 },
-  { id: '90d',  label: '90 days / 4,000 miles', days: 90,   miles: 4000 },
-  { id: '1y',   label: '1 year / 12,000 miles', days: 365,  miles: 12000 },
-  { id: 'custom', label: 'Custom',              days: null, miles: null },
+  { id: 'none',   label: 'No Warranty',           days: null, miles: null },
+  { id: '30d',    label: '30 days / 1,000 miles', days: 30,   miles: 1000 },
+  { id: '90d',    label: '90 days / 4,000 miles', days: 90,   miles: 4000 },
+  { id: '1y',     label: '1 year / 12,000 miles', days: 365,  miles: 12000 },
+  { id: 'custom', label: 'Custom',                days: null, miles: null },
 ];
 
-const INITIAL_SERVICES = [
-  { id: 'battery',     title: 'Battery Service',  subtitle: 'Jump starts, battery replacement and testing', icon: 'flash-outline',         enabled: true },
-  { id: 'tire',        title: 'Tire Service',      subtitle: 'Tire change, repair and replacement',          icon: 'disc-outline',           enabled: true },
-  { id: 'towing',      title: 'Towing',            subtitle: 'Vehicle towing and transport',                 icon: 'car-outline',            enabled: true },
-  { id: 'diagnostics', title: 'Diagnostics',       subtitle: 'On-site diagnostics and system scanning',      icon: 'speedometer-outline',    enabled: true },
-  { id: 'lockout',     title: 'Lockout Service',   subtitle: 'Vehicle lockout and key assistance',           icon: 'lock-closed-outline',    enabled: true },
-  { id: 'fuel',        title: 'Fuel Delivery',     subtitle: 'Fuel delivery to your location',               icon: 'flame-outline',          enabled: true },
-];
+function getAllShopServiceIds() {
+  return SHOP_CATEGORIES.flatMap(c => c.services.map(s => s.id));
+}
 
-const MOBILE_ONLY_IDS = ['towing', 'fuel'];
+function getAllShopServiceTitles(enabledIds) {
+  return SHOP_CATEGORIES.flatMap(c => c.services.filter(s => enabledIds.has(s.id)).map(s => s.title));
+}
 
 export default function ServicesScreen({ visible, onClose }) {
-  const [services, setServices] = useState(INITIAL_SERVICES);
-  const [pricingOpen, setPricingOpen] = useState(false);
   const [providerType, setProviderType] = useState('mobile');
+  const [mobileEnabled, setMobileEnabled] = useState(new Set(MOBILE_SERVICES.map(s => s.id)));
+  const [shopEnabled, setShopEnabled] = useState(new Set());
+  const [pricingOpen, setPricingOpen] = useState(false);
   const [warrantyId, setWarrantyId] = useState('90d');
-  const [customDays, setCustomDays] = useState('');
-  const [customMiles, setCustomMiles] = useState('');
+  const [expandedCats, setExpandedCats] = useState(new Set());
 
   useEffect(() => {
     if (!visible) return;
-    loadPricing().then(p => setProviderType(p.providerType || 'mobile'));
+
+    Promise.all([
+      loadPricing(),
+      fetch(`${API_URL}/profiles/${PROVIDER.id}`).then(r => r.ok ? r.json() : null).catch(() => null),
+    ]).then(([pricing, data]) => {
+      const type = pricing.providerType || 'mobile';
+      setProviderType(type);
+
+      if (!data?.services?.length) return;
+      const saved = new Set(data.services);
+
+      const newMobileIds = new Set(
+        MOBILE_SERVICES.filter(s => saved.has(s.title)).map(s => s.id)
+      );
+      const newShopIds = new Set();
+      SHOP_CATEGORIES.forEach(cat => {
+        const hasLabel = saved.has(cat.label);
+        const hasSub = cat.services.some(s => saved.has(s.title));
+        if (hasLabel || hasSub) cat.services.forEach(s => newShopIds.add(s.id));
+      });
+
+      setMobileEnabled(newMobileIds);
+      setShopEnabled(newShopIds);
+      pushToApi(newMobileIds, newShopIds, type);
+    });
+
     AsyncStorage.getItem('@warranty_policy').then(val => {
       if (!val) return;
-      try {
-        const saved = JSON.parse(val);
-        setWarrantyId(saved.id || '90d');
-        if (saved.id === 'custom') {
-          setCustomDays(saved.days ? String(saved.days) : '');
-          setCustomMiles(saved.miles ? String(saved.miles) : '');
-        }
-      } catch { }
+      try { setWarrantyId(JSON.parse(val).id || '90d'); } catch {}
     });
   }, [visible]);
 
-  const saveWarranty = (id, days, miles) => {
-    AsyncStorage.setItem('@warranty_policy', JSON.stringify({ id, days, miles }));
+  const pushToApi = (mobileIds, shopIds, type = providerType) => {
+    const isMobile = type === 'mobile' || type === 'both';
+    const isShop = type === 'shop' || type === 'both';
+    const mobileTitles = isMobile
+      ? MOBILE_SERVICES.filter(s => mobileIds.has(s.id)).map(s => s.title)
+      : [];
+    const shopCategoryLabels = isShop
+      ? SHOP_CATEGORIES.filter(cat => cat.services.some(s => shopIds.has(s.id))).map(cat => cat.label)
+      : [];
+    const all = [...mobileTitles, ...shopCategoryLabels];
+    fetch(`${API_URL}/profiles/${PROVIDER.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ services: all }),
+    }).catch(() => {});
   };
 
-  const selectWarranty = (id) => {
-    setWarrantyId(id);
-    if (id !== 'custom') {
-      const opt = WARRANTY_OPTIONS.find(o => o.id === id);
-      saveWarranty(id, opt.days, opt.miles);
-    }
+  const toggleMobile = (id) => {
+    setMobileEnabled(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      pushToApi(next, shopEnabled);
+      return next;
+    });
   };
 
-  const onCustomDaysChange = (val) => {
-    const n = val.replace(/[^0-9]/g, '');
-    setCustomDays(n);
-    saveWarranty('custom', n ? parseInt(n) : null, customMiles ? parseInt(customMiles) : null);
+  const toggleShop = (id) => {
+    setShopEnabled(prev => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      pushToApi(mobileEnabled, next);
+      return next;
+    });
   };
 
-  const onCustomMilesChange = (val) => {
-    const n = val.replace(/[^0-9]/g, '');
-    setCustomMiles(n);
-    saveWarranty('custom', customDays ? parseInt(customDays) : null, n ? parseInt(n) : null);
+  const toggleCategory = (catId) => {
+    setExpandedCats(prev => {
+      const next = new Set(prev);
+      next.has(catId) ? next.delete(catId) : next.add(catId);
+      return next;
+    });
   };
 
-  const visibleServices = providerType === 'shop'
-    ? services.filter(s => !MOBILE_ONLY_IDS.includes(s.id))
-    : services;
-
-  const toggle = (id) => {
-    setServices(prev => prev.map(s => s.id === id ? { ...s, enabled: !s.enabled } : s));
+  const toggleAllInCategory = (cat) => {
+    const ids = cat.services.map(s => s.id);
+    const allOn = ids.every(id => shopEnabled.has(id));
+    setShopEnabled(prev => {
+      const next = new Set(prev);
+      ids.forEach(id => allOn ? next.delete(id) : next.add(id));
+      pushToApi(mobileEnabled, next);
+      return next;
+    });
   };
+
+  const saveWarranty = (id) => {
+    const opt = WARRANTY_OPTIONS.find(o => o.id === id);
+    AsyncStorage.setItem('@warranty_policy', JSON.stringify({ id, days: opt?.days, miles: opt?.miles }));
+  };
+
+  const showMobile = providerType === 'mobile' || providerType === 'both';
+  const showShop = providerType === 'shop' || providerType === 'both';
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
@@ -88,120 +246,133 @@ export default function ServicesScreen({ visible, onClose }) {
             <Ionicons name="arrow-back" size={22} color="#17191D" />
           </TouchableOpacity>
           <Text style={styles.headerTitle}>Services</Text>
-          <TouchableOpacity
-            style={styles.addBtn}
-            activeOpacity={0.7}
-            onPress={() => Alert.alert('Add Service', 'This feature is coming soon.')}
-          >
-            <Ionicons name="add" size={26} color="#7C3AED" />
-          </TouchableOpacity>
+          <View style={{ width: 36 }} />
         </View>
 
-        <Text style={styles.pageNote}>
-          Choose the services you offer to customers.{'\n'}Turn on or off any service anytime.
-        </Text>
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
 
-        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-          <View style={styles.card}>
-            {visibleServices.map((svc, index) => (
-              <TouchableOpacity
-                key={svc.id}
-                style={[styles.row, index > 0 && styles.rowBorder]}
-                activeOpacity={0.84}
-                onPress={() => Alert.alert(svc.title, svc.subtitle)}
-              >
-                <View style={styles.iconBox}>
-                  <Ionicons name={svc.icon} size={24} color="#17191D" />
-                </View>
-                <View style={styles.info}>
-                  <Text style={styles.svcTitle}>{svc.title}</Text>
-                  <Text style={styles.svcSub}>{svc.subtitle}</Text>
-                </View>
-                <View style={styles.rowRight}>
-                  {svc.enabled && (
-                    <View style={styles.activeBadge}>
-                      <Text style={styles.activeBadgeText}>Active</Text>
+          {/* ── Mobile Mechanic ── */}
+          {showMobile && (
+            <>
+              {showShop && <Text style={styles.sectionLabel}>Roadside & Mobile</Text>}
+              <View style={styles.card}>
+                {MOBILE_SERVICES.map((svc, index) => (
+                  <View key={svc.id} style={[styles.row, index > 0 && styles.rowBorder]}>
+                    <View style={styles.iconBox}>
+                      <Ionicons name={svc.icon} size={22} color="#17191D" />
                     </View>
-                  )}
-                  <Switch
-                    value={svc.enabled}
-                    onValueChange={() => toggle(svc.id)}
-                    trackColor={{ false: '#E6E8EB', true: '#16A34A' }}
-                    thumbColor="#FFFFFF"
-                    style={styles.switch}
-                  />
-                </View>
-              </TouchableOpacity>
-            ))}
-          </View>
+                    <View style={styles.info}>
+                      <Text style={styles.svcTitle}>{svc.title}</Text>
+                      <Text style={styles.svcSub}>{svc.subtitle}</Text>
+                    </View>
+                    <Switch
+                      value={mobileEnabled.has(svc.id)}
+                      onValueChange={() => toggleMobile(svc.id)}
+                      trackColor={{ false: '#E6E8EB', true: '#16A34A' }}
+                      thumbColor="#FFFFFF"
+                      style={styles.switch}
+                    />
+                  </View>
+                ))}
+              </View>
+            </>
+          )}
 
+          {/* ── Shop Services ── */}
+          {showShop && (
+            <>
+              {showMobile && <Text style={styles.sectionLabel}>Shop Services</Text>}
+              {!showMobile && <Text style={styles.pageNote}>Select the services your shop offers.</Text>}
+              {SHOP_CATEGORIES.map(cat => {
+                const expanded = expandedCats.has(cat.id);
+                const enabledCount = cat.services.filter(s => shopEnabled.has(s.id)).length;
+                const allOn = enabledCount === cat.services.length;
+                return (
+                  <View key={cat.id} style={styles.catCard}>
+                    {/* Category header */}
+                    <TouchableOpacity
+                      style={styles.catHeader}
+                      onPress={() => toggleCategory(cat.id)}
+                      activeOpacity={0.84}
+                    >
+                      <View style={styles.catIconBox}>
+                        <Ionicons name={cat.icon} size={18} color="#17191D" />
+                      </View>
+                      <Text style={styles.catLabel}>{cat.label}</Text>
+                      {enabledCount > 0 && (
+                        <View style={styles.catBadge}>
+                          <Text style={styles.catBadgeText}>{enabledCount}</Text>
+                        </View>
+                      )}
+                      <TouchableOpacity onPress={() => toggleAllInCategory(cat)} style={styles.catToggleBtn} activeOpacity={0.7}>
+                        <Text style={[styles.catToggleText, allOn && styles.catToggleTextOn]}>
+                          {allOn ? 'Deselect all' : 'Select all'}
+                        </Text>
+                      </TouchableOpacity>
+                      <Ionicons
+                        name={expanded ? 'chevron-up' : 'chevron-down'}
+                        size={16}
+                        color="#9CA3AF"
+                        style={{ marginLeft: 4 }}
+                      />
+                    </TouchableOpacity>
+
+                    {/* Services in category */}
+                    {expanded && cat.services.map((svc, index) => (
+                      <View key={svc.id} style={[styles.shopRow, styles.rowBorder]}>
+                        <View style={styles.info}>
+                          <Text style={styles.svcTitle}>{svc.title}</Text>
+                          <Text style={styles.svcSub}>{svc.subtitle}</Text>
+                        </View>
+                        <Switch
+                          value={shopEnabled.has(svc.id)}
+                          onValueChange={() => toggleShop(svc.id)}
+                          trackColor={{ false: '#E6E8EB', true: '#16A34A' }}
+                          thumbColor="#FFFFFF"
+                          style={styles.switch}
+                        />
+                      </View>
+                    ))}
+                  </View>
+                );
+              })}
+            </>
+          )}
+
+          {/* ── Warranty ── */}
           <Text style={styles.sectionLabel}>Warranty Policy</Text>
           <View style={styles.card}>
             {WARRANTY_OPTIONS.map((opt, index) => {
               const selected = warrantyId === opt.id;
               return (
-                <View key={opt.id}>
-                  <TouchableOpacity
-                    style={[styles.row, index > 0 && styles.rowBorder]}
-                    activeOpacity={0.84}
-                    onPress={() => selectWarranty(opt.id)}
-                  >
-                    <Ionicons
-                      name={opt.id === 'none' ? 'shield-outline' : opt.id === 'custom' ? 'create-outline' : 'shield-checkmark-outline'}
-                      size={20}
-                      color={selected ? '#16A34A' : '#8B9098'}
-                    />
-                    <Text style={[styles.warrantyLabel, selected && styles.warrantyLabelSelected]}>{opt.label}</Text>
-                    {selected && <Ionicons name="checkmark-circle" size={18} color="#16A34A" style={{ marginLeft: 'auto' }} />}
-                  </TouchableOpacity>
-
-                  {opt.id === 'custom' && selected && (
-                    <View style={styles.customInputRow}>
-                      <View style={styles.customInputWrap}>
-                        <TextInput
-                          style={styles.customInput}
-                          value={customDays}
-                          onChangeText={onCustomDaysChange}
-                          keyboardType="number-pad"
-                          placeholder="Days"
-                          placeholderTextColor="#B0B7C0"
-                        />
-                        <Text style={styles.customInputUnit}>days</Text>
-                      </View>
-                      <Text style={styles.customInputOr}>or</Text>
-                      <View style={styles.customInputWrap}>
-                        <TextInput
-                          style={styles.customInput}
-                          value={customMiles}
-                          onChangeText={onCustomMilesChange}
-                          keyboardType="number-pad"
-                          placeholder="Miles"
-                          placeholderTextColor="#B0B7C0"
-                        />
-                        <Text style={styles.customInputUnit}>miles</Text>
-                      </View>
-                    </View>
-                  )}
-                </View>
+                <TouchableOpacity
+                  key={opt.id}
+                  style={[styles.row, index > 0 && styles.rowBorder]}
+                  activeOpacity={0.84}
+                  onPress={() => { setWarrantyId(opt.id); saveWarranty(opt.id); }}
+                >
+                  <Ionicons
+                    name={opt.id === 'none' ? 'shield-outline' : opt.id === 'custom' ? 'create-outline' : 'shield-checkmark-outline'}
+                    size={20}
+                    color={selected ? '#16A34A' : '#8B9098'}
+                  />
+                  <Text style={[styles.warrantyLabel, selected && styles.warrantyLabelSelected]}>{opt.label}</Text>
+                  {selected && <Ionicons name="checkmark-circle" size={18} color="#16A34A" style={{ marginLeft: 'auto' }} />}
+                </TouchableOpacity>
               );
             })}
           </View>
 
-          <TouchableOpacity
-            style={styles.pricingBtn}
-            activeOpacity={0.88}
-            onPress={() => setPricingOpen(true)}
-          >
+          <TouchableOpacity style={styles.pricingBtn} activeOpacity={0.88} onPress={() => setPricingOpen(true)}>
             <Ionicons name="settings-outline" size={20} color="#FFFFFF" />
             <Text style={styles.pricingBtnText}>Pricing & Rates</Text>
           </TouchableOpacity>
 
           <View style={styles.infoCard}>
             <Ionicons name="information-circle-outline" size={16} color="#6B7280" />
-            <Text style={styles.infoText}>
-              Pricing & Rates are used to calculate estimates for all selected services.
-            </Text>
+            <Text style={styles.infoText}>Pricing & Rates are used to calculate estimates for all selected services.</Text>
           </View>
+
         </ScrollView>
 
         <PricingScreen visible={pricingOpen} onClose={() => setPricingOpen(false)} />
@@ -215,29 +386,34 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 72, paddingBottom: 10 },
   backBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { color: '#17191D', fontSize: 17, fontWeight: '700' },
-  addBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
-  pageNote: { color: '#6B7280', fontSize: 13, lineHeight: 20, paddingHorizontal: 16, marginBottom: 16 },
+  pageNote: { color: '#6B7280', fontSize: 13, lineHeight: 20, marginBottom: 12 },
   content: { paddingHorizontal: 16, paddingBottom: 48 },
-  card: { backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 1, borderColor: '#ECEEF0', paddingHorizontal: 14, marginBottom: 20 },
-  row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, gap: 12 },
+  sectionLabel: { color: '#17191D', fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 8, marginTop: 20 },
+
+  card: { backgroundColor: '#FFFFFF', borderRadius: 16, borderWidth: 1, borderColor: '#ECEEF0', paddingHorizontal: 14, marginBottom: 4 },
+  row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 13, gap: 12 },
+  shopRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, paddingHorizontal: 14, gap: 12 },
   rowBorder: { borderTopWidth: 1, borderTopColor: '#F0F1F3' },
-  iconBox: { width: 48, height: 48, borderRadius: 12, borderWidth: 1.5, borderColor: '#E5E7EB', backgroundColor: '#FAFAFA', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  iconBox: { width: 44, height: 44, borderRadius: 12, borderWidth: 1.5, borderColor: '#E5E7EB', backgroundColor: '#FAFAFA', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   info: { flex: 1 },
-  svcTitle: { color: '#17191D', fontSize: 15, fontWeight: '700', marginBottom: 3 },
-  svcSub: { color: '#6B7280', fontSize: 12, lineHeight: 17, fontWeight: '500' },
-  rowRight: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 0 },
-  activeBadge: { backgroundColor: '#ECFDF5', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
-  activeBadgeText: { color: '#16A34A', fontSize: 11, fontWeight: '700' },
+  svcTitle: { color: '#17191D', fontSize: 14, fontWeight: '700', marginBottom: 2 },
+  svcSub: { color: '#6B7280', fontSize: 12, lineHeight: 16 },
   switch: { transform: [{ scaleX: 0.85 }, { scaleY: 0.85 }] },
-  sectionLabel: { color: '#6B7280', fontSize: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8, marginTop: 4 },
-  warrantyLabel: { color: '#5E646D', fontSize: 14, fontWeight: '500', flex: 1 },
+
+  catCard: { backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 1, borderColor: '#ECEEF0', marginBottom: 8, overflow: 'hidden' },
+  catHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 13, gap: 10 },
+  catIconBox: { width: 34, height: 34, borderRadius: 10, backgroundColor: '#F3F4F5', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  catLabel: { flex: 1, color: '#17191D', fontSize: 14, fontWeight: '700' },
+  catBadge: { backgroundColor: '#16A34A', borderRadius: 10, paddingHorizontal: 7, paddingVertical: 2 },
+  catBadgeText: { color: '#fff', fontSize: 11, fontWeight: '700' },
+  catToggleBtn: { paddingHorizontal: 6 },
+  catToggleText: { color: '#9CA3AF', fontSize: 12 },
+  catToggleTextOn: { color: '#FF6B00' },
+
+  warrantyLabel: { color: '#5E646D', fontSize: 14, fontWeight: '500', flex: 1, marginLeft: 10 },
   warrantyLabelSelected: { color: '#17191D', fontWeight: '700' },
-  customInputRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingBottom: 14, paddingTop: 4 },
-  customInputWrap: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#F3F4F5', borderRadius: 10, borderWidth: 1, borderColor: '#ECEEF0', paddingHorizontal: 12, paddingVertical: 10, gap: 6 },
-  customInput: { flex: 1, color: '#17191D', fontSize: 15, fontWeight: '700', padding: 0 },
-  customInputUnit: { color: '#8B9098', fontSize: 13, fontWeight: '500' },
-  customInputOr: { color: '#8B9098', fontSize: 13, fontWeight: '500' },
-  pricingBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, backgroundColor: '#7C3AED', borderRadius: 16, paddingVertical: 18, marginBottom: 14 },
+
+  pricingBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, backgroundColor: '#7C3AED', borderRadius: 16, paddingVertical: 18, marginTop: 20, marginBottom: 14 },
   pricingBtnText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
   infoCard: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
   infoText: { flex: 1, color: '#6B7280', fontSize: 13, lineHeight: 19 },
