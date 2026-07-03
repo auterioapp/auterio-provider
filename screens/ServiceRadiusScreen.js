@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, Modal, PanResponder, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, Modal, PanResponder, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import MapView, { Circle, Marker } from 'react-native-maps';
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { API_URL, GOOGLE_API_KEY, PROVIDER } from '../constants';
 
 const MIN = 5;
 const MAX = 50;
@@ -21,9 +22,37 @@ export default function ServiceRadiusScreen({ visible, onClose, onSave }) {
   const [saved, setSaved] = useState(false);
   const [center, setCenter] = useState(null);
   const [locationError, setLocationError] = useState(null);
+  const [address, setAddress] = useState('');
+  const [suggestions, setSuggestions] = useState([]);
+  const addressRef = useRef('');
+  const debounceRef = useRef(null);
+
+  const onAddressChange = (text) => {
+    setAddress(text);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (text.length < 3) { setSuggestions([]); return; }
+    debounceRef.current = setTimeout(async () => {
+      try {
+        const url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(text)}&types=address&key=${GOOGLE_API_KEY}`;
+        const res = await fetch(url);
+        const json = await res.json();
+        if (json.predictions) setSuggestions(json.predictions);
+      } catch {}
+    }, 350);
+  };
+
+  const selectSuggestion = (prediction) => {
+    setAddress(prediction.description);
+    addressRef.current = prediction.description;
+    setSuggestions([]);
+  };
 
   useEffect(() => {
     if (!visible) return;
+    fetch(`${API_URL}/profiles/${PROVIDER.id}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => { if (data?.address) { setAddress(data.address); addressRef.current = data.address; } })
+      .catch(() => {});
     AsyncStorage.getItem(STORAGE_KEY).then(val => {
       const parsed = val ? parseInt(val, 10) : DEFAULT_RADIUS;
       const clamped = Math.max(MIN, Math.min(MAX, parsed));
@@ -83,6 +112,18 @@ export default function ServiceRadiusScreen({ visible, onClose, onSave }) {
 
   const handleSave = async () => {
     await AsyncStorage.setItem(STORAGE_KEY, String(radiusRef.current));
+    const addr = addressRef.current.trim();
+    if (addr) {
+      try {
+        await fetch(`${API_URL}/profiles/${PROVIDER.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ address: addr }),
+        });
+      } catch {
+        Alert.alert('Error', 'Could not save address');
+      }
+    }
     onSave?.(radiusRef.current);
     setSaved(true);
     setTimeout(() => {
@@ -109,6 +150,41 @@ export default function ServiceRadiusScreen({ visible, onClose, onSave }) {
         </View>
 
         <Text style={styles.subtitle}>Set the area where you want to receive service requests.</Text>
+
+        <View style={styles.addressCard}>
+          <Ionicons name="location-outline" size={18} color="#6B7280" />
+          <TextInput
+            style={styles.addressInput}
+            placeholder="Enter your shop / base address"
+            placeholderTextColor="#9CA3AF"
+            value={address}
+            onChangeText={onAddressChange}
+            returnKeyType="done"
+            onSubmitEditing={() => setSuggestions([])}
+          />
+        </View>
+        {suggestions.length > 0 && (
+          <View style={styles.suggestionsBox}>
+            {suggestions.map((p, i) => (
+              <TouchableOpacity
+                key={p.place_id}
+                style={[styles.suggestionRow, i > 0 && styles.suggestionBorder]}
+                onPress={() => selectSuggestion(p)}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="location-outline" size={14} color="#9CA3AF" />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.suggestionMain} numberOfLines={1}>
+                    {p.structured_formatting?.main_text || p.description}
+                  </Text>
+                  <Text style={styles.suggestionSub} numberOfLines={1}>
+                    {p.structured_formatting?.secondary_text || ''}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
 
         <View style={styles.sliderCard}>
           <View style={styles.sliderTop}>
@@ -188,8 +264,15 @@ const styles = StyleSheet.create({
   backBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { color: '#17191D', fontSize: 17, fontWeight: '700' },
   headerRight: { width: 36 },
-  subtitle: { color: '#6B7280', fontSize: 14, lineHeight: 20, fontWeight: '400', paddingHorizontal: 16, marginBottom: 14 },
-  sliderCard: { backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 1, borderColor: '#ECEEF0', marginHorizontal: 16, padding: 16, marginBottom: 14 },
+  subtitle: { color: '#6B7280', fontSize: 14, lineHeight: 20, fontWeight: '400', paddingHorizontal: 16, marginBottom: 10 },
+  addressCard: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 1, borderColor: '#ECEEF0', marginHorizontal: 16, paddingHorizontal: 14, paddingVertical: 12, marginBottom: 4 },
+  addressInput: { flex: 1, color: '#17191D', fontSize: 15 },
+  suggestionsBox: { backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', marginHorizontal: 16, marginBottom: 8, overflow: 'hidden' },
+  suggestionRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 11, paddingHorizontal: 14 },
+  suggestionBorder: { borderTopWidth: 1, borderTopColor: '#F0F1F3' },
+  suggestionMain: { color: '#17191D', fontSize: 14, fontWeight: '500' },
+  suggestionSub: { color: '#9CA3AF', fontSize: 12, marginTop: 1 },
+  sliderCard: { backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 1, borderColor: '#ECEEF0', marginHorizontal: 16, padding: 16, marginTop: 6, marginBottom: 14 },
   sliderTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
   sliderLabel: { color: '#17191D', fontSize: 15, fontWeight: '700' },
   sliderValue: { color: '#16A34A', fontSize: 15, fontWeight: '700' },
