@@ -169,7 +169,7 @@ export default function ProfileScreen({ online, setOnline, refreshControl, scrol
   const completionSteps = [
     { label: 'Add at least one service', done: hasServices, action: () => setServicesOpen(true) },
     { label: 'Set your working hours', done: !!hasHours, action: () => setHoursOpen(true) },
-    ...(needsAddress ? [{ label: 'Add your shop address', done: hasAddress, action: () => setSettingsOpen(true) }] : []),
+    ...(needsAddress ? [{ label: 'Add your shop address', done: hasAddress, action: () => setRadiusOpen(true) }] : []),
   ];
   const doneCount = completionSteps.filter(s => s.done).length;
 
