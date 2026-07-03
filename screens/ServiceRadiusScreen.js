@@ -33,7 +33,7 @@ export default function ServiceRadiusScreen({ visible, onClose, onSave }) {
     if (text.length < 3) { setSuggestions([]); return; }
     debounceRef.current = setTimeout(async () => {
       try {
-        const url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(text)}&types=address&key=${GOOGLE_API_KEY}`;
+        const url = `https://maps.googleapis.com/maps/api/place/autocomplete/json?input=${encodeURIComponent(text)}&types=address&language=en&key=${GOOGLE_API_KEY}`;
         const res = await fetch(url);
         const json = await res.json();
         if (json.predictions) setSuggestions(json.predictions);
