@@ -145,7 +145,7 @@ export default function ServiceRadiusScreen({ visible, onClose, onSave }) {
           <TouchableOpacity onPress={handleClose} style={styles.backBtn} activeOpacity={0.7}>
             <Ionicons name="arrow-back" size={22} color="#17191D" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Service Radius</Text>
+          <Text style={styles.headerTitle}>Location</Text>
           <View style={styles.headerRight} />
         </View>
 

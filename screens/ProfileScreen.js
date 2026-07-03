@@ -120,8 +120,8 @@ export default function ProfileScreen({ online, setOnline, refreshControl, scrol
     },
     {
       id: 'radius',
-      title: 'Service Radius',
-      subtitle: 'Set your service area',
+      title: 'Location',
+      subtitle: 'Set your address and service area',
       icon: 'location-outline',
       iconBg: '#ECFDF5',
       iconColor: '#16A34A',
