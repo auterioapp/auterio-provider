@@ -7,7 +7,7 @@ import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-import MapView, { Marker, Polyline } from 'react-native-maps';
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import WelcomeScreen from './screens/WelcomeScreen';
 import AuthScreen from './screens/AuthScreen';
 import BusinessTypeScreen from './screens/BusinessTypeScreen';
@@ -2566,6 +2566,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
         <ScrollView style={[styles.container, styles.requestDetailScroll]} contentContainerStyle={styles.jobRouteContent} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
           <View style={styles.jobRouteMap}>
             <MapView
+              provider={PROVIDER_GOOGLE}
               style={styles.mapView}
               initialRegion={REQUEST_MAP_REGION}
               scrollEnabled={false}
@@ -2755,6 +2756,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
         ) : (
           <View style={styles.mapPreview}>
             <MapView
+              provider={PROVIDER_GOOGLE}
               style={styles.mapView}
               initialRegion={REQUEST_MAP_REGION}
               scrollEnabled={false}

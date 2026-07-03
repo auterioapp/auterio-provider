@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import MapView, { Marker, Polyline } from 'react-native-maps';
+import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import { getServiceMeta, getVehicleLabel, getDropoffAddress, isTowingService, getProviderIntakeItems } from '../utils/serviceUtils';
 import { REQUEST_MAP_REGION, REQUEST_ROUTE } from '../constants';
 
@@ -118,6 +118,7 @@ export default function RequestDetailScreen({ order, accepting, providerType = '
 
         <View style={styles.mapPreview}>
           <MapView
+            provider={PROVIDER_GOOGLE}
             style={styles.mapView}
             initialRegion={REQUEST_MAP_REGION}
             scrollEnabled={false}
