@@ -70,12 +70,6 @@ export default function AppSettingsScreen({ visible, onClose, onLogout }) {
     await savePricing({ ...current, allowScheduling: val });
   };
 
-  const changeProviderType = async (type) => {
-    setProviderTypeState(type);
-    const current = await loadPricing();
-    await savePricing({ ...current, providerType: type });
-  };
-
   const handleLogout = () => {
     Alert.alert('Logout', 'Are you sure you want to log out?', [
       { text: 'Cancel', style: 'cancel' },
@@ -111,53 +105,6 @@ export default function AppSettingsScreen({ visible, onClose, onLogout }) {
         </View>
 
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-
-          {/* Business Type */}
-          <Text style={styles.sectionLabel}>Business Type</Text>
-          <View style={styles.card}>
-            <TouchableOpacity
-              style={[styles.typeRow, providerType === 'mobile' && styles.typeRowActive]}
-              activeOpacity={0.84}
-              onPress={() => changeProviderType('mobile')}
-            >
-              <View style={[styles.typeIcon, providerType === 'mobile' && styles.typeIconActive]}>
-                <Ionicons name="car-outline" size={20} color={providerType === 'mobile' ? '#FFFFFF' : '#6B7280'} />
-              </View>
-              <View style={styles.typeInfo}>
-                <Text style={[styles.typeTitle, providerType === 'mobile' && styles.typeTitleActive]}>Mobile Provider</Text>
-                <Text style={styles.typeSub}>You drive to the customer's location</Text>
-              </View>
-              {providerType === 'mobile' && <Ionicons name="checkmark-circle" size={22} color="#16A34A" />}
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.typeRow, styles.rowBorder, providerType === 'shop' && styles.typeRowActive]}
-              activeOpacity={0.84}
-              onPress={() => changeProviderType('shop')}
-            >
-              <View style={[styles.typeIcon, providerType === 'shop' && styles.typeIconActive]}>
-                <Ionicons name="business-outline" size={20} color={providerType === 'shop' ? '#FFFFFF' : '#6B7280'} />
-              </View>
-              <View style={styles.typeInfo}>
-                <Text style={[styles.typeTitle, providerType === 'shop' && styles.typeTitleActive]}>Shop / Service Center</Text>
-                <Text style={styles.typeSub}>Customers bring their vehicle to you</Text>
-              </View>
-              {providerType === 'shop' && <Ionicons name="checkmark-circle" size={22} color="#16A34A" />}
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.typeRow, styles.rowBorder, providerType === 'both' && styles.typeRowActive]}
-              activeOpacity={0.84}
-              onPress={() => changeProviderType('both')}
-            >
-              <View style={[styles.typeIcon, providerType === 'both' && styles.typeIconActive]}>
-                <Ionicons name="git-merge-outline" size={20} color={providerType === 'both' ? '#FFFFFF' : '#6B7280'} />
-              </View>
-              <View style={styles.typeInfo}>
-                <Text style={[styles.typeTitle, providerType === 'both' && styles.typeTitleActive]}>Mobile + Shop</Text>
-                <Text style={styles.typeSub}>You offer both on-site and in-shop service</Text>
-              </View>
-              {providerType === 'both' && <Ionicons name="checkmark-circle" size={22} color="#16A34A" />}
-            </TouchableOpacity>
-          </View>
 
           {/* Location */}
           <Text style={styles.sectionLabel}>Location</Text>
@@ -316,14 +263,6 @@ const styles = StyleSheet.create({
   rowSublabel: { color: '#6B7280', fontSize: 12, marginTop: 2 },
   selectRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   selectValue: { color: '#6B7280', fontSize: 14, fontWeight: '500' },
-  typeRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, gap: 12 },
-  typeRowActive: { },
-  typeIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F3F4F5', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  typeIconActive: { backgroundColor: '#17191D' },
-  typeInfo: { flex: 1 },
-  typeTitle: { color: '#17191D', fontSize: 15, fontWeight: '600' },
-  typeTitleActive: { fontWeight: '700' },
-  typeSub: { color: '#6B7280', fontSize: 12, marginTop: 2 },
   addressRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12, gap: 8 },
   addressInput: { flex: 1, color: '#17191D', fontSize: 15 },
   addressSaveBtn: { backgroundColor: '#17191D', borderRadius: 8, paddingHorizontal: 12, paddingVertical: 6 },
