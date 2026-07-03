@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { loadPricing, savePricing } from '../utils/pricingStore';
 import { API_URL, GOOGLE_API_KEY, PROVIDER } from '../constants';
 
-export default function AppSettingsScreen({ visible, onClose }) {
+export default function AppSettingsScreen({ visible, onClose, onLogout }) {
   const [pushEnabled, setPushEnabled] = useState(true);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [vibrationEnabled, setVibrationEnabled] = useState(true);
@@ -79,7 +79,7 @@ export default function AppSettingsScreen({ visible, onClose }) {
   const handleLogout = () => {
     Alert.alert('Logout', 'Are you sure you want to log out?', [
       { text: 'Cancel', style: 'cancel' },
-      { text: 'Logout', style: 'destructive', onPress: () => onClose() },
+      { text: 'Logout', style: 'destructive', onPress: () => { onClose(); onLogout?.(); } },
     ]);
   };
 

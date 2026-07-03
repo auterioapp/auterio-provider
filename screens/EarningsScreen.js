@@ -55,30 +55,73 @@ const CHART_DATA = {
   },
 };
 
-export default function EarningsScreen({ refreshControl, scrollSignal }) {
+function buildRealData(completedOrders) {
+  const now = new Date();
+  const startOfToday = new Date(now); startOfToday.setHours(0, 0, 0, 0);
+  const startOfWeek = new Date(now); startOfWeek.setDate(now.getDate() - now.getDay()); startOfWeek.setHours(0, 0, 0, 0);
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+
+  const filterByPeriod = (orders, start) =>
+    orders.filter(o => new Date(o.completedAt || o.updatedAt || o.createdAt) >= start);
+
+  const sumTotal = (orders) =>
+    orders.reduce((acc, o) => acc + Number(o.payment?.total || o.payment?.totalHeld || o.payment?.priceMax || 0), 0);
+
+  const todayOrders = filterByPeriod(completedOrders, startOfToday);
+  const weekOrders = filterByPeriod(completedOrders, startOfWeek);
+  const monthOrders = filterByPeriod(completedOrders, startOfMonth);
+
+  const fmt = (n) => n >= 1000 ? `$${(n / 1000).toFixed(1)}K` : `$${n.toFixed(0)}`;
+
+  const makeKpis = (orders, total) => [
+    { label: 'Completed Jobs', value: String(orders.length), icon: 'briefcase-outline', color: '#F04416', bg: 'rgba(240,68,22,0.10)' },
+    { label: 'Avg Ticket', value: orders.length ? `$${(total / orders.length).toFixed(0)}` : '$0', icon: 'ticket-outline', color: '#2F80FF', bg: 'rgba(47,128,255,0.10)' },
+    { label: 'Total Earned', value: fmt(total), icon: 'cash-outline', color: '#16A34A', bg: 'rgba(22,163,74,0.10)' },
+  ];
+
+  return {
+    Today:       { total: `$${sumTotal(todayOrders).toFixed(2)}`,  trend: `${todayOrders.length} jobs today`,      trendUp: todayOrders.length > 0,  kpis: makeKpis(todayOrders,  sumTotal(todayOrders)),  values: [0,0,0,0,0,0,0], labels: ['9AM','10AM','11AM','12PM','1PM','2PM','3PM'], chartMax: 1, axisLabels: ['—','—','—','$0'], activeLabel: '' },
+    'This Week': { total: `$${sumTotal(weekOrders).toFixed(2)}`,   trend: `${weekOrders.length} jobs this week`,   trendUp: weekOrders.length > 0,   kpis: makeKpis(weekOrders,   sumTotal(weekOrders)),   values: [0,0,0,0,0,0,0], labels: ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],  chartMax: 1, axisLabels: ['—','—','—','$0'], activeLabel: '' },
+    'This Month': { total: `$${sumTotal(monthOrders).toFixed(2)}`, trend: `${monthOrders.length} jobs this month`, trendUp: monthOrders.length > 0,  kpis: makeKpis(monthOrders,  sumTotal(monthOrders)),  values: [0,0,0,0,0,0,0], labels: ['Jun 1','5','9','13','17','21','25'],         chartMax: 1, axisLabels: ['—','—','—','$0'], activeLabel: '' },
+  };
+}
+
+export default function EarningsScreen({ refreshControl, scrollSignal, isDemo = true, completedOrders = [] }) {
   const scrollRef = useScrollToTop(scrollSignal);
   const [payoutsOpen, setPayoutsOpen] = useState(false);
   const [revenueOpen, setRevenueOpen] = useState(false);
   const [period, setPeriod] = useState('This Week');
   const [showPeriodDrop, setShowPeriodDrop] = useState(false);
-  const chartData = CHART_DATA[period];
+
+  const activeData = isDemo ? CHART_DATA : buildRealData(completedOrders);
+  const chartData = activeData[period] || activeData['This Week'];
+
   const periodRevData = DATA_BY_PERIOD[period] || DATA_BY_PERIOD['This Week'];
   const METRIC_ICONS = ['construct-outline', 'settings-outline', 'car-outline', 'gift-outline'];
   const METRIC_COLORS = [['#16A34A', 'rgba(22,163,74,0.10)'], ['#2563EB', 'rgba(37,99,235,0.10)'], ['#7C3AED', 'rgba(124,58,237,0.10)'], ['#F97316', 'rgba(249,115,22,0.10)']];
-  const revenueCards = periodRevData.slice(0, 4).map((seg, i) => ({
-    title: seg.label,
-    value: `$${seg.amount.toLocaleString('en-US')}.00`,
-    meta: `${seg.pct}% of revenue`,
-    icon: METRIC_ICONS[i],
-    color: METRIC_COLORS[i][0],
-    bg: METRIC_COLORS[i][1],
-  }));
-  const transactions = [
+  const revenueCards = isDemo
+    ? periodRevData.slice(0, 4).map((seg, i) => ({
+        title: seg.label,
+        value: `$${seg.amount.toLocaleString('en-US')}.00`,
+        meta: `${seg.pct}% of revenue`,
+        icon: METRIC_ICONS[i],
+        color: METRIC_COLORS[i][0],
+        bg: METRIC_COLORS[i][1],
+      }))
+    : [];
+
+  const transactions = isDemo ? [
     { icon: 'car-outline', title: 'Toyota Camry - Jump Start', meta: 'Today, 10:30 AM', amount: '+$85.00' },
     { icon: 'disc-outline', title: 'Honda Accord - Tire Change', meta: 'Today, 12:15 PM', amount: '+$140.00' },
     { icon: 'settings-outline', title: 'BMW X5 - Diagnostics', meta: 'Today, 2:00 PM', amount: '+$220.00' },
     { icon: 'car-sport-outline', title: 'Ford F-150 - Towing', meta: 'Yesterday, 4:45 PM', amount: '+$310.00' },
-  ];
+  ] : completedOrders.slice(0, 10).map(o => ({
+    icon: 'briefcase-outline',
+    title: `${o.vehicle?.make || ''} ${o.vehicle?.model || ''} - ${o.service?.type || 'Service'}`.trim(),
+    meta: new Date(o.completedAt || o.updatedAt || o.createdAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }),
+    amount: `+$${Number(o.payment?.total || o.payment?.totalHeld || o.payment?.priceMax || 0).toFixed(2)}`,
+  }));
+
   const payouts = [
     { date: 'Jun 18, 2024', meta: 'Bank Deposit', amount: '$1,750.00' },
     { date: 'Jun 11, 2024', meta: 'Bank Deposit', amount: '$2,040.00' },
@@ -113,8 +156,8 @@ export default function EarningsScreen({ refreshControl, scrollSignal }) {
             </TouchableOpacity>
           </View>
           <View style={styles.earningsChartArea}>
-            {chartData.axisLabels.map(label => (
-              <View key={label} style={styles.earningsChartGridRow}>
+            {chartData.axisLabels.map((label, i) => (
+              <View key={`axis-${i}`} style={styles.earningsChartGridRow}>
                 <Text style={styles.earningsChartAxis}>{label}</Text>
                 <View style={styles.earningsChartGridLine} />
               </View>
@@ -131,8 +174,8 @@ export default function EarningsScreen({ refreshControl, scrollSignal }) {
             </View>
           </View>
           <View style={styles.earningsDaysRow}>
-            {chartData.labels.map(label => (
-              <Text key={label} style={[styles.earningsDayText, label === chartData.activeLabel && styles.earningsDayActive]}>{label}</Text>
+            {chartData.labels.map((label, i) => (
+              <Text key={`day-${i}`} style={[styles.earningsDayText, label === chartData.activeLabel && styles.earningsDayActive]}>{label}</Text>
             ))}
           </View>
         </TouchableOpacity>
@@ -194,7 +237,10 @@ export default function EarningsScreen({ refreshControl, scrollSignal }) {
 
 
 <EarningsListSection title="Recent Transactions">
-        {transactions.map(item => <EarningsTransaction key={item.title} {...item} />)}
+        {transactions.length > 0
+          ? transactions.map(item => <EarningsTransaction key={item.title + item.meta} {...item} />)
+          : <View style={styles.emptyTransactions}><Ionicons name="receipt-outline" size={22} color="#C4C9D1" /><Text style={styles.emptyTransactionsText}>No completed jobs yet</Text></View>
+        }
       </EarningsListSection>
 
       <EarningsListSection title="Payout History">
@@ -273,6 +319,8 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FFFFFF' },
   flex1: { flex: 1 },
   earningsContent: { paddingHorizontal: 15, paddingTop: 18, paddingBottom: 112, backgroundColor: '#FFFFFF' },
+  emptyTransactions: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 16, paddingHorizontal: 4 },
+  emptyTransactionsText: { color: '#8B9098', fontSize: 13, fontWeight: '500' },
   earningsHeader: { minHeight: 42, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 14 },
   earningsTitle: { color: '#17191D', fontSize: 27, lineHeight: 32, fontWeight: '700' },
   earningsChartWrapper: { position: 'relative', zIndex: 20, marginBottom: 8 },

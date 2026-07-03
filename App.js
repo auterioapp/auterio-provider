@@ -3,9 +3,16 @@ import { Animated, Easing, KeyboardAvoidingView, Linking, Modal, PanResponder, P
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import * as Notifications from 'expo-notifications';
+import * as Device from 'expo-device';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import MapView, { Marker, Polyline } from 'react-native-maps';
+import WelcomeScreen from './screens/WelcomeScreen';
+import AuthScreen from './screens/AuthScreen';
+import BusinessTypeScreen from './screens/BusinessTypeScreen';
+import BusinessInfoScreen from './screens/BusinessInfoScreen';
+import ProviderSetupScreen from './screens/ProviderSetupScreen';
 import HomeScreen from './screens/HomeScreen';
 import EarningsScreen from './screens/EarningsScreen';
 import ProfileScreen from './screens/ProfileScreen';
@@ -18,9 +25,43 @@ import { API_URL, PROVIDER, ACCEPT_BLUE, TAB_BAR_PADDING, TAB_INDICATOR_EXTRA_WI
 
 import { formatMoney, getServiceMeta, getServiceTitle, getOrderServiceType, getServiceFlowSchema, getDiagnosisSchema, getProviderIntakeItems, isTowingService, getDropoffAddress, getRequestLocation, getRequestDistance, getVehicleVin, normalizeComplaintItem, getCustomerComplaintItems, getAcceptedAtLabel, getVehicleLabel, getBackendStatusFromWorkflowStage } from './utils/serviceUtils';
 import { getRecommendedServicesFromDiagnosis, getDemoEstimate, getEstimateCatalog, getEstimatePriceCheck, sumAmounts, formatCurrency } from './utils/estimateUtils';
-import { loadPricing } from './utils/pricingStore';
+import { loadPricing, savePricing } from './utils/pricingStore';
+
+const DEMO_EMAIL = 'auterioapp@gmail.com';
+
+function applyProviderUser(user) {
+  if (!user) return;
+  if ((user.email || '').toLowerCase() === DEMO_EMAIL) return;
+  if (user._id) PROVIDER.id = user._id;
+  if (user.companyName) { PROVIDER.company = user.companyName; }
+  if (user.name) PROVIDER.name = user.name;
+  PROVIDER.initials = ((user.companyName || user.name) || 'P').slice(0, 2).toUpperCase();
+  if (user.phone) PROVIDER.phone = user.phone;
+}
+
 Text.defaultProps = Text.defaultProps || {};
 Text.defaultProps.allowFontScaling = false;
+
+async function registerPushToken(providerId) {
+  if (!Device.isDevice) return;
+  try {
+    const { status: existing } = await Notifications.getPermissionsAsync();
+    let finalStatus = existing;
+    if (existing !== 'granted') {
+      const { status } = await Notifications.requestPermissionsAsync();
+      finalStatus = status;
+    }
+    if (finalStatus !== 'granted') return;
+    const tokenData = await Notifications.getExpoPushTokenAsync();
+    const pushToken = tokenData.data;
+    await fetchJson(`${API_URL}/profiles/${providerId}/push-token`, {
+      method: 'PATCH',
+      body: JSON.stringify({ pushToken }),
+    });
+  } catch (e) {
+    console.log('Push token registration failed:', e.message);
+  }
+}
 
 
 function normalizeOrderToJob(order) {
@@ -73,6 +114,10 @@ function normalizeOrderToJob(order) {
 }
 
 export default function App() {
+  const [authState, setAuthState] = useState('loading');
+  const pendingBusinessType = useRef('mobile');
+  const pendingCredentials = useRef(null);
+  const [businessInfoLoading, setBusinessInfoLoading] = useState(false);
   const [online, setOnline] = useState(true);
   const [activeScreen, setActiveScreen] = useState('home');
   const [activeTab, setActiveTab] = useState('home');
@@ -114,7 +159,88 @@ export default function App() {
   const tabWidth = tabBarWidth ? (tabBarWidth - TAB_BAR_PADDING * 2) / TABS.length : 0;
   const isLightVisible = !!selectedRequest || (!selectedRequest && (activeScreen === 'home' || activeScreen === 'requests' || activeScreen === 'jobs' || activeScreen === 'earnings' || activeScreen === 'profile'));
 
+  const [isDemo, setIsDemo] = useState(false);
+  const [completedOrders, setCompletedOrders] = useState([]);
+  const [verificationStatus, setVerificationStatus] = useState('unverified');
+
+  const loadProviderJobsFromBackend = async (providerId) => {
+    try {
+      const data = await fetchJson(`${API_URL}/orders/provider/${providerId}`);
+      if (!Array.isArray(data)) return;
+      const active = data.filter(o =>
+        ['accepted', 'en_route', 'arrived', 'estimate_sent', 'estimate_approved', 'in_progress'].includes(o.status)
+      );
+      const done = data.filter(o => o.status === 'completed');
+      if (active.length > 0) {
+        setAcceptedJobs(active.map(o => normalizeOrderToJob(o)));
+        setAcceptedRequestIds(active.map(o => String(o.id || o._id)));
+      }
+      setCompletedOrders(done);
+    } catch (e) {
+      console.log('Load provider jobs error:', e.message);
+    }
+  };
+
   useEffect(() => {
+    AsyncStorage.multiGet(['providerToken', 'providerUser', '@setup_completed_v1', '@provider_verification_status']).then(entries => {
+      const token = entries[0][1];
+      const user = entries[1][1] ? JSON.parse(entries[1][1]) : null;
+      const setupDone = entries[2][1] === 'true';
+      const savedStatus = entries[3][1] || 'unverified';
+      if (token) {
+        _authToken = token;
+        applyProviderUser(user);
+        const demo = PROVIDER.id === 'provider-demo-001';
+        setIsDemo(demo);
+        setVerificationStatus(demo ? 'verified' : savedStatus);
+        if (!demo) {
+          loadProviderJobsFromBackend(PROVIDER.id);
+          registerPushToken(PROVIDER.id);
+        }
+        setAuthState(demo || setupDone ? 'app' : 'setup');
+      } else {
+        setAuthState('welcome');
+      }
+    });
+  }, []);
+
+  const handleLogin = async (token, user, isRegister) => {
+    _authToken = token || 'logged_in';
+    await AsyncStorage.setItem('providerToken', _authToken);
+    if (user) await AsyncStorage.setItem('providerUser', JSON.stringify(user));
+    applyProviderUser(user);
+    const demo = PROVIDER.id === 'provider-demo-001';
+    setIsDemo(demo);
+    setVerificationStatus(demo ? 'verified' : 'unverified');
+    if (isRegister && pendingBusinessType.current) {
+      const current = await loadPricing();
+      await savePricing({ ...current, providerType: pendingBusinessType.current });
+    }
+    if (!demo) {
+      loadProviderJobsFromBackend(PROVIDER.id);
+      registerPushToken(PROVIDER.id);
+    }
+    if (demo) {
+      setAuthState('app');
+    } else {
+      const setupDone = await AsyncStorage.getItem('@setup_completed_v1');
+      setAuthState(isRegister || setupDone !== 'true' ? 'setup' : 'app');
+    }
+  };
+
+  const handleLogout = async () => {
+    _authToken = null;
+    setIsDemo(false);
+    setVerificationStatus('unverified');
+    setCompletedOrders([]);
+    setAcceptedJobs([]);
+    setAcceptedRequestIds([]);
+    await AsyncStorage.multiRemove(['providerToken', 'providerUser']);
+    setAuthState('welcome');
+  };
+
+  useEffect(() => {
+    if (authState !== 'app') return;
     loadPricing().then(p => {
       const pt = p.providerType || 'mobile';
       setProviderType(pt);
@@ -123,7 +249,7 @@ export default function App() {
       setAllowScheduling(scheduling);
       loadRequests();
     });
-  }, []);
+  }, [authState]);
 
   useEffect(() => {
     if (activeScreen !== 'profile') {
@@ -581,6 +707,47 @@ export default function App() {
     onShouldBlockNativeResponder: () => true,
   }), [activeTab, tabWidth]);
 
+  if (authState === 'loading') return null;
+
+  if (authState === 'welcome') {
+    return (
+      <SafeAreaProvider>
+        <WelcomeScreen onSignIn={() => setAuthState('login')} onSignUp={() => setAuthState('register')} />
+      </SafeAreaProvider>
+    );
+  }
+
+  if (authState === 'login' || authState === 'register') {
+    return (
+      <SafeAreaProvider>
+        <AuthScreen
+          mode={authState}
+          onLogin={(token, user) => handleLogin(token, user, authState === 'register')}
+          onBack={() => setAuthState('welcome')}
+        />
+      </SafeAreaProvider>
+    );
+  }
+
+  if (authState === 'setup') {
+    return (
+      <SafeAreaProvider>
+        <ProviderSetupScreen
+          onComplete={async () => {
+            await AsyncStorage.setItem('@setup_completed_v1', 'true');
+            await AsyncStorage.setItem('@provider_verification_status', 'unverified');
+            // Tell backend setup is complete so cron job stops reminding
+            fetchJson(`${API_URL}/profiles/${PROVIDER.id}`, {
+              method: 'PUT',
+              body: JSON.stringify({ profileCompletion: 100, lastActivityAt: new Date().toISOString() }),
+            }).catch(() => {});
+            setAuthState('app');
+          }}
+        />
+      </SafeAreaProvider>
+    );
+  }
+
   return (
     <SafeAreaProvider>
       <SafeAreaView style={[styles.safe, isLightVisible && styles.homeSafe]} edges={['top', 'left', 'right']}>
@@ -601,15 +768,16 @@ export default function App() {
               onCounter={(order) => setCounterModalOrder(order)}
               onOpen={setSelectedRequest}
               allowScheduling={allowScheduling}
+              verificationStatus={verificationStatus}
               refreshControl={refreshControl}
               scrollSignal={screenResetNonce}
             />
           ) : activeScreen === 'jobs' ? (
           <JobsScreen jobs={providerJobs} jobWorkflows={jobWorkflows} onOpen={setSelectedJob} refreshControl={refreshControl} scrollSignal={screenResetNonce} providerType={providerType} />
           ) : activeScreen === 'earnings' ? (
-            <EarningsScreen refreshControl={refreshControl} scrollSignal={screenResetNonce} />
+            <EarningsScreen refreshControl={refreshControl} scrollSignal={screenResetNonce} isDemo={isDemo} completedOrders={completedOrders} />
           ) : activeScreen === 'profile' ? (
-            <ProfileScreen online={online} setOnline={setOnline} refreshControl={refreshControl} scrollSignal={screenResetNonce} />
+            <ProfileScreen online={online} setOnline={setOnline} refreshControl={refreshControl} scrollSignal={screenResetNonce} onLogout={handleLogout} />
           ) : (
             <HomeScreen
               online={online}
@@ -2892,8 +3060,14 @@ function Tab({ icon, label, active, badge }) {
   );
 }
 
-async function fetchJson(url, options) {
-  const response = await fetch(url, options);
+let _authToken = null;
+
+async function fetchJson(url, options = {}) {
+  const headers = { ...(options.headers || {}) };
+  if (_authToken && _authToken !== 'logged_in') {
+    headers['Authorization'] = `Bearer ${_authToken}`;
+  }
+  const response = await fetch(url, { ...options, headers });
   const text = await response.text();
   const contentType = response.headers.get('content-type') || '';
   if (!response.ok) {

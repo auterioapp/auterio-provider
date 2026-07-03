@@ -4,7 +4,7 @@ import useScrollToTop from '../hooks/useScrollToTop';
 import SwipePager from '../components/SwipePager';
 import { getServiceMeta, formatMoney, getVehicleLabel, getRequestLocation } from '../utils/serviceUtils';
 
-export default function RequestsScreen({ requests, acceptingId, filter, onFilterChange, onAccept, onDecline, onConfirm, onCounter, onScheduleAccept, onScheduleDecline, onOpen, allowScheduling, refreshControl, scrollSignal }) {
+export default function RequestsScreen({ requests, acceptingId, filter, onFilterChange, onAccept, onDecline, onConfirm, onCounter, onScheduleAccept, onScheduleDecline, onOpen, allowScheduling, verificationStatus, refreshControl, scrollSignal }) {
   const scrollRef = useScrollToTop(scrollSignal);
   const acceptedCount = 2;
   const tabs = [
@@ -54,6 +54,7 @@ export default function RequestsScreen({ requests, acceptingId, filter, onFilter
                 onScheduleDecline={onScheduleDecline}
                 onOpen={onOpen}
                 allowScheduling={allowScheduling}
+                verificationStatus={verificationStatus}
               />
             ))}
           </View>
@@ -82,7 +83,7 @@ function fmtScheduledTime(isoStr) {
   return `${months[d.getMonth()]} ${d.getDate()} · ${displayH}:${String(m).padStart(2,'0')} ${p}`;
 }
 
-function RequestCard({ order, accepting, onAccept, onDecline, onConfirm, onCounter, onScheduleAccept, onScheduleDecline, onOpen, allowScheduling }) {
+function RequestCard({ order, accepting, onAccept, onDecline, onConfirm, onCounter, onScheduleAccept, onScheduleDecline, onOpen, allowScheduling, verificationStatus }) {
   const serviceMeta = getServiceMeta(order);
   const icon = serviceMeta.icon;
   const title = serviceMeta.title;
@@ -167,12 +168,25 @@ function RequestCard({ order, accepting, onAccept, onDecline, onConfirm, onCount
                 <Text style={styles.cardBtnScheduleText}>Schedule</Text>
               </TouchableOpacity>
             )}
-            <TouchableOpacity style={styles.cardBtnAccept} activeOpacity={0.82} onPress={(e) => { e.stopPropagation(); onAccept && onAccept(order); }}>
-              <Text style={styles.cardBtnAcceptText}>{accepting ? 'Accepting…' : 'Accept'}</Text>
-            </TouchableOpacity>
+            {verificationStatus === 'unverified' ? (
+              <View style={styles.cardBtnLocked}>
+                <Ionicons name="lock-closed" size={13} color="#9CA3AF" />
+                <Text style={styles.cardBtnLockedText}>Accept</Text>
+              </View>
+            ) : (
+              <TouchableOpacity style={styles.cardBtnAccept} activeOpacity={0.82} onPress={(e) => { e.stopPropagation(); onAccept && onAccept(order); }}>
+                <Text style={styles.cardBtnAcceptText}>{accepting ? 'Accepting…' : 'Accept'}</Text>
+              </TouchableOpacity>
+            )}
           </>
         )}
       </View>
+      {verificationStatus === 'unverified' && (
+        <View style={styles.verificationBanner}>
+          <Ionicons name="shield-outline" size={12} color="#D97706" />
+          <Text style={styles.verificationBannerText}>Upload documents to accept orders</Text>
+        </View>
+      )}
     </TouchableOpacity>
   );
 }
@@ -204,6 +218,10 @@ const styles = StyleSheet.create({
   cardBtnScheduleText: { color: '#7C3AED', fontSize: 13, fontWeight: '700' },
   cardBtnAccept: { flex: 1, paddingVertical: 11, alignItems: 'center', justifyContent: 'center', backgroundColor: '#16A34A' },
   cardBtnAcceptText: { color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
+  cardBtnLocked: { flex: 1, paddingVertical: 11, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F3F4F5', flexDirection: 'row', gap: 5 },
+  cardBtnLockedText: { color: '#9CA3AF', fontSize: 13, fontWeight: '700' },
+  verificationBanner: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 7, backgroundColor: 'rgba(217,119,6,0.06)', borderTopWidth: 1, borderTopColor: 'rgba(217,119,6,0.12)' },
+  verificationBannerText: { flex: 1, color: '#D97706', fontSize: 11, fontWeight: '600' },
   cardBtnConfirm: { flex: 2, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 11, backgroundColor: '#7C3AED' },
   cardBtnConfirmText: { color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
   scheduledCardWrap: { borderColor: '#DDD6FE', borderWidth: 1.5 },
