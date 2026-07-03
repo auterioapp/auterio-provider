@@ -6,10 +6,10 @@ export function formatMoney(order) {
 }
 
 export const SERVICE_TYPES = [
-  { title: 'Towing',              icon: 'car-sport-outline',          color: '#374151', matches: ['tow', 'towing', 'transport', 'flatbed', 'эваку'] },
+  { title: 'Towing',              icon: 'car-sport-outline',          color: '#374151', matches: ['tow', 'towing', 'transport', 'flatbed'] },
   { title: 'Jump Start',          icon: 'battery-charging-outline',   color: '#F97316', matches: ['jump', 'jump start', 'battery jump', 'boost', 'start car', 'dead battery'] },
   { title: 'Battery Replacement', icon: 'battery-full-outline',       color: '#F97316', matches: ['battery replacement', 'replace battery', 'new battery'] },
-  { title: 'Tire Change',         icon: 'disc-outline',               color: '#2563EB', matches: ['tire', 'tyre', 'flat', 'wheel', 'колес', 'шина'] },
+  { title: 'Tire Change',         icon: 'disc-outline',               color: '#2563EB', matches: ['tire', 'tyre', 'flat', 'wheel'] },
   { title: 'Diagnostics',         icon: 'speedometer-outline',        color: '#7C3AED', matches: ['diagnostic', 'diagnostics', 'check engine', 'scan'] },
   { title: 'Mobile Mechanic',     icon: 'construct-outline',          color: '#2563EB', matches: ['mechanic', 'repair', 'mobile service', 'fix', 'engine'] },
   { title: 'Lockout',             icon: 'lock-open-outline',          color: '#16A34A', matches: ['lockout', 'locked', 'keys'] },
@@ -308,7 +308,7 @@ export function getProviderIntakeItems(order) {
 
 export function isTowingService(order) {
   const serviceText = getServiceTypeText(order);
-  return serviceText.includes('tow') || serviceText.includes('эваку') || serviceText.includes('буксир');
+  return serviceText.includes('tow');
 }
 
 export function getDropoffAddress(order) {
