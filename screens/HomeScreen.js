@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Modal, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Modal, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import useScrollToTop from '../hooks/useScrollToTop';
 import { getServiceMeta, formatMoney } from '../utils/serviceUtils';
@@ -26,7 +26,7 @@ const activity = [
   { icon: 'checkmark-done', color: '#2F80FF', title: 'Job completed', meta: 'Battery Replacement - Job #12341', value: '$125.00' },
 ];
 
-export default function HomeScreen({ online, setOnline, requests = [], requestAnim, acceptingId, pendingCount, activeJobs, onOpenRequest, onViewAll, allowScheduling, onAccept, onDecline, refreshControl, scrollSignal }) {
+export default function HomeScreen({ online, setOnline, requests = [], requestAnim, acceptingId, pendingCount, activeJobs, onOpenRequest, onViewAll, allowScheduling, onAccept, onDecline, refreshControl, scrollSignal, verificationStatus }) {
   const scrollRef = useScrollToTop(scrollSignal);
   const [showAllRequests, setShowAllRequests] = useState(false);
   const featuredRequest = requests[0] || null;
@@ -38,10 +38,25 @@ export default function HomeScreen({ online, setOnline, requests = [], requestAn
       <View style={styles.header}>
         <View><Text style={[styles.title, styles.homeTitle]}>Dashboard</Text></View>
         <View style={styles.headerActions}>
-          <View style={[styles.onlinePill, online && styles.onlinePillActive]}>
-            <Text style={[styles.onlineText, online && styles.onlineTextActive]}>{online ? 'Online' : 'Offline'}</Text>
-            <Switch value={online} onValueChange={setOnline} trackColor={{ false: '#E6E8EB', true: '#DEE0E3' }} thumbColor={online ? '#17191D' : '#8B9098'} style={styles.onlineSwitch} />
-          </View>
+          <TouchableOpacity
+            activeOpacity={verificationStatus === 'unverified' ? 0.6 : 1}
+            onPress={verificationStatus === 'unverified' ? () => Alert.alert('Account not verified', 'Upload your documents in Profile to activate your account and go online.') : undefined}
+          >
+            <View style={[styles.onlinePill, online && verificationStatus !== 'unverified' && styles.onlinePillActive, verificationStatus === 'unverified' && styles.onlinePillLocked]}>
+              {verificationStatus === 'unverified'
+                ? <Ionicons name="lock-closed" size={12} color="#9CA3AF" style={{ marginRight: 4 }} />
+                : null}
+              <Text style={[styles.onlineText, online && verificationStatus !== 'unverified' && styles.onlineTextActive]}>{verificationStatus === 'unverified' ? 'Locked' : online ? 'Online' : 'Offline'}</Text>
+              <Switch
+                value={online && verificationStatus !== 'unverified'}
+                onValueChange={verificationStatus === 'unverified' ? undefined : setOnline}
+                disabled={verificationStatus === 'unverified'}
+                trackColor={{ false: '#E6E8EB', true: '#DEE0E3' }}
+                thumbColor={online && verificationStatus !== 'unverified' ? '#17191D' : '#8B9098'}
+                style={styles.onlineSwitch}
+              />
+            </View>
+          </TouchableOpacity>
           <TouchableOpacity style={styles.bellBtn} activeOpacity={0.84}>
             <Ionicons name="notifications-outline" size={22} color="#17191D" />
             {!!pendingCount && <View style={styles.badge}><Text style={styles.badgeText}>{pendingCount}</Text></View>}
@@ -230,6 +245,7 @@ const styles = StyleSheet.create({
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   onlinePill: { height: 34, borderRadius: 17, backgroundColor: '#F5F6F7', borderWidth: 1, borderColor: '#E6E8EB', flexDirection: 'row', alignItems: 'center', paddingLeft: 11, paddingRight: 0 },
   onlinePillActive: { backgroundColor: '#F5F6F7', borderColor: '#DEE0E3' },
+  onlinePillLocked: { backgroundColor: '#F9FAFB', borderColor: '#E5E7EB' },
   onlineText: { color: '#8B9098', fontSize: 11, fontWeight: '700' },
   onlineTextActive: { color: '#16A34A' },
   onlineSwitch: { transform: [{ scaleX: 0.62 }, { scaleY: 0.62 }], marginLeft: -5 },

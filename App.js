@@ -794,6 +794,7 @@ export default function App() {
               onDecline={dismissRequest}
               refreshControl={refreshControl}
               scrollSignal={screenResetNonce}
+              verificationStatus={verificationStatus}
             />
           )}
         </View>
