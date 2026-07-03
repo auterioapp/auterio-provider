@@ -46,8 +46,9 @@ export default function ProfileScreen({ online, setOnline, refreshControl, scrol
       if (profileRes) setProfileData(profileRes);
       if (scheduleRes) {
         setScheduleData(scheduleRes);
-        const summary = getHoursSummary(scheduleRes);
-        if (summary) setHoursSummary(summary);
+        const apiDays = scheduleRes.days || {};
+        const enabledDays = Object.keys(apiDays).filter(k => apiDays[k]?.enabled);
+        if (enabledDays.length) setHoursSummary(`${enabledDays.length} day${enabledDays.length !== 1 ? 's' : ''} active`);
       }
       if (pricing?.providerType) setProviderType(pricing.providerType);
       if (pricing?.businessName) setBusinessName(pricing.businessName);
@@ -68,7 +69,7 @@ export default function ProfileScreen({ online, setOnline, refreshControl, scrol
 
   const servicesCount = profileData?.services?.length || 0;
   const hasServices = isDemoAccount || servicesCount > 0;
-  const hasHours = isDemoAccount || (scheduleData && Object.values(scheduleData).some(day => day?.enabled));
+  const hasHours = isDemoAccount || (scheduleData?.days && Object.values(scheduleData.days).some(day => day?.enabled));
   const needsAddress = !isDemoAccount && (providerType === 'shop' || providerType === 'both');
   const hasAddress = !needsAddress || !!profileData?.address;
   const profileComplete = isDemoAccount || (hasServices && hasHours && hasAddress);
