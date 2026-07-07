@@ -2,35 +2,75 @@ import { useState } from 'react';
 import { Alert, Modal, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import useScrollToTop from '../hooks/useScrollToTop';
-import { getServiceMeta, formatMoney } from '../utils/serviceUtils';
+import { getServiceMeta, formatMoney, getServiceMode, getRequestDistance } from '../utils/serviceUtils';
+import { PROVIDER } from '../constants';
 
-const PROVIDER = {
-  id: 'provider-demo-001',
-  name: 'Alex',
-  company: 'Auterio Provider',
-  initials: 'AP',
-  phone: '+15551234567',
-  rating: 4.9,
-  eta: '18-25 min',
+const DEMO_INCOMING_REQUEST = {
+  id: 'demo-request-001',
+  status: 'pending',
+  service: { issueName: 'Jump Start', serviceType: 'jump_start' },
+  vehicle: { year: '2020', make: 'Honda', model: 'Civic', plate: 'ABC1234' },
+  pickup: { address: '456 Oak Ave, San Francisco, CA 94102' },
+  distance: '3.2 mi',
+  eta: 'Est. 15 min',
+  payment: { totalHeld: 89, dispatchFee: 0 },
+  tracking: { mode: 'mobile' },
+  customer: { name: 'Alex M.' },
+  orderContext: { customerNote: 'Car won\'t start, battery seems dead.' },
 };
 
-const schedule = [
+const DEMO_BOOKING_REQUEST = {
+  id: 'demo-request-002',
+  status: 'pending',
+  service: { issueName: 'Battery Replacement', serviceType: 'battery_replacement' },
+  vehicle: { year: '2019', make: 'Toyota', model: 'Camry', plate: 'XYZ5678' },
+  pickup: { address: '789 Pine St, San Francisco, CA 94103' },
+  payment: { totalHeld: 145, dispatchFee: 0 },
+  tracking: { mode: 'shop' },
+  customer: { name: 'Sarah K.' },
+  orderContext: { customerNote: 'Battery completely dead, needs full replacement.' },
+  scheduledSlotLabel: 'Tomorrow, 10:00 AM',
+};
+
+const DEMO_SCHEDULE = [
   { time: '10:30 AM', title: 'Battery Jump', vehicle: 'Toyota Camry', eta: 'In 15 min' },
   { time: '12:15 PM', title: 'Tire Change', vehicle: 'Honda Accord', eta: 'In 2h' },
   { time: '2:00 PM', title: 'Diagnostics', vehicle: 'BMW X5', eta: 'In 3h 45m' },
 ];
 
-const activity = [
+const DEMO_ACTIVITY = [
   { icon: 'wallet-outline', color: '#22C55E', title: 'Payment received', meta: 'Today, 8:45 AM', value: '$89.00' },
   { icon: 'star', color: '#FFC107', title: 'New 5-star review', meta: 'Great service! Very professional.', value: '5.0' },
   { icon: 'checkmark-done', color: '#2F80FF', title: 'Job completed', meta: 'Battery Replacement - Job #12341', value: '$125.00' },
 ];
 
-export default function HomeScreen({ online, setOnline, requests = [], requestAnim, acceptingId, pendingCount, activeJobs, onOpenRequest, onViewAll, allowScheduling, onAccept, onDecline, refreshControl, scrollSignal, verificationStatus }) {
+function ProfileSetupBanner({ onGoToProfile }) {
+  return (
+    <TouchableOpacity style={styles.setupBanner} activeOpacity={0.88} onPress={onGoToProfile}>
+      <View style={styles.setupBannerIcon}>
+        <Ionicons name="rocket-outline" size={20} color="#2563EB" />
+      </View>
+      <View style={styles.setupBannerBody}>
+        <Text style={styles.setupBannerTitle}>Finish setting up your profile</Text>
+        <Text style={styles.setupBannerSub}>Add services & hours to start receiving orders</Text>
+      </View>
+      <View style={styles.setupBannerBtn}>
+        <Text style={styles.setupBannerBtnText}>Set up</Text>
+        <Ionicons name="chevron-forward" size={14} color="#2563EB" />
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+export default function HomeScreen({ online, setOnline, requests = [], requestAnim, acceptingId, pendingCount, activeJobs, onOpenRequest, onViewAll, allowScheduling, onAccept, onDecline, refreshControl, scrollSignal, verificationStatus, isDemo, profileComplete, onGoToProfile }) {
   const scrollRef = useScrollToTop(scrollSignal);
   const [showAllRequests, setShowAllRequests] = useState(false);
+  const [showDemoRequest, setShowDemoRequest] = useState(true);
+  const [showDemoBooking, setShowDemoBooking] = useState(true);
   const featuredRequest = requests[0] || null;
   const extraCount = requests.length - 1;
+  const hasRealRequests = requests.length > 0;
+  const showDemoPromo = !hasRealRequests && !showDemoRequest && !showDemoBooking;
 
   return (
     <>
@@ -68,11 +108,13 @@ export default function HomeScreen({ online, setOnline, requests = [], requestAn
       <Text style={styles.subGreeting}>Here's what's happening with your business today.</Text>
 
       <View style={styles.metricsGrid}>
-        <Metric title="Today's Revenue" value="$1,240.00" meta="12% vs yesterday" icon="cash-outline" color="#17191D" />
+        <Metric title="Today's Revenue" value={isDemo ? '$1,240.00' : '$0.00'} meta={isDemo ? '12% vs yesterday' : 'No jobs yet'} icon="cash-outline" color="#17191D" />
         <Metric title="Active Jobs" value={String(activeJobs)} meta="View ongoing jobs" icon="briefcase-outline" color="#F04416" />
         <Metric title="Pending Requests" value={String(pendingCount)} meta="View new requests" icon="receipt-outline" color="#17191D" />
-        <Metric title="Jobs Completed" value="8" meta="2 vs yesterday" icon="checkmark-done" color="#F04416" />
+        <Metric title="Jobs Completed" value={isDemo ? '8' : '0'} meta={isDemo ? '2 vs yesterday' : 'No jobs yet'} icon="checkmark-done" color="#F04416" />
       </View>
+
+      {!profileComplete && !isDemo && <ProfileSetupBanner onGoToProfile={onGoToProfile} />}
 
       {!!featuredRequest && (
         <>
@@ -93,13 +135,73 @@ export default function HomeScreen({ online, setOnline, requests = [], requestAn
         </>
       )}
 
+      {showDemoPromo && (
+        <View style={styles.demoPromoWrap}>
+          <Text style={styles.demoPromoHeading}>Preview incoming requests</Text>
+          <TouchableOpacity style={styles.demoPromoCard} activeOpacity={0.86} onPress={() => setShowDemoRequest(true)}>
+            <View style={[styles.demoPromoIcon, { backgroundColor: '#FFF0E6' }]}>
+              <Ionicons name="navigate-outline" size={20} color="#F97316" />
+            </View>
+            <View style={styles.demoPromoInfo}>
+              <Text style={styles.demoPromoTitle}>Mobile request</Text>
+              <Text style={styles.demoPromoSub}>Provider goes to the customer</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color="#F97316" />
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.demoPromoCard, styles.demoPromoCardBlue]} activeOpacity={0.86} onPress={() => setShowDemoBooking(true)}>
+            <View style={[styles.demoPromoIcon, { backgroundColor: '#DBEAFE' }]}>
+              <Ionicons name="business-outline" size={20} color="#2563EB" />
+            </View>
+            <View style={styles.demoPromoInfo}>
+              <Text style={[styles.demoPromoTitle, { color: '#1D4ED8' }]}>Booking request</Text>
+              <Text style={styles.demoPromoSub}>Customer brings car to shop</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color="#2563EB" />
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {!hasRealRequests && showDemoRequest && (
+        <>
+          <IncomingRequest
+            order={DEMO_INCOMING_REQUEST}
+            accepting={false}
+            onOpen={() => onOpenRequest && onOpenRequest(DEMO_INCOMING_REQUEST)}
+            onAccept={() => setShowDemoRequest(false)}
+            onDecline={() => setShowDemoRequest(false)}
+            allowScheduling={false}
+          />
+          <TouchableOpacity style={styles.dismissDemoBtn} onPress={() => setShowDemoRequest(false)} activeOpacity={0.8}>
+            <Ionicons name="close-circle-outline" size={15} color="#9CA3AF" />
+            <Text style={styles.dismissDemoText}>Dismiss demo</Text>
+          </TouchableOpacity>
+        </>
+      )}
+
+      {!hasRealRequests && showDemoBooking && (
+        <>
+          <IncomingRequest
+            order={DEMO_BOOKING_REQUEST}
+            accepting={false}
+            onOpen={() => onOpenRequest && onOpenRequest(DEMO_BOOKING_REQUEST)}
+            onAccept={() => setShowDemoBooking(false)}
+            onDecline={() => setShowDemoBooking(false)}
+            allowScheduling={false}
+          />
+          <TouchableOpacity style={styles.dismissDemoBtn} onPress={() => setShowDemoBooking(false)} activeOpacity={0.8}>
+            <Ionicons name="close-circle-outline" size={15} color="#9CA3AF" />
+            <Text style={styles.dismissDemoText}>Dismiss demo</Text>
+          </TouchableOpacity>
+        </>
+      )}
+
       <View style={styles.sectionCard}>
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Today's Schedule</Text>
-          <Text style={styles.linkText}>View all</Text>
+          {isDemo && <Text style={styles.linkText}>View all</Text>}
         </View>
-        {schedule.map((item, index) => (
-          <View key={item.time} style={[styles.scheduleRow, index < schedule.length - 1 && styles.rowBorder]}>
+        {isDemo ? DEMO_SCHEDULE.map((item, index) => (
+          <View key={item.time} style={[styles.scheduleRow, index < DEMO_SCHEDULE.length - 1 && styles.rowBorder]}>
             <Text style={styles.timeText}>{item.time}</Text>
             <View style={styles.timelineDot} />
             <View style={styles.scheduleInfo}>
@@ -108,12 +210,17 @@ export default function HomeScreen({ online, setOnline, requests = [], requestAn
             </View>
             <Text style={styles.etaText}>{item.eta}</Text>
           </View>
-        ))}
+        )) : (
+          <View style={styles.emptyState}>
+            <Ionicons name="calendar-outline" size={28} color="#C8CDD4" />
+            <Text style={styles.emptyStateText}>No scheduled jobs yet</Text>
+          </View>
+        )}
       </View>
 
       <View style={styles.sectionCard}>
         <Text style={[styles.sectionTitle, { marginBottom: 12 }]}>Recent Activity</Text>
-        {activity.map(item => (
+        {isDemo ? DEMO_ACTIVITY.map(item => (
           <View key={item.title} style={styles.activityRow}>
             <View style={[styles.activityIcon, { backgroundColor: item.color + '20' }]}>
               <Ionicons name={item.icon} size={18} color={item.color} />
@@ -124,7 +231,12 @@ export default function HomeScreen({ online, setOnline, requests = [], requestAn
             </View>
             <Text style={[styles.activityValue, item.valueColor && { color: item.valueColor }]}>{item.value}</Text>
           </View>
-        ))}
+        )) : (
+          <View style={styles.emptyState}>
+            <Ionicons name="time-outline" size={28} color="#C8CDD4" />
+            <Text style={styles.emptyStateText}>No activity yet</Text>
+          </View>
+        )}
       </View>
     </ScrollView>
 
@@ -142,7 +254,7 @@ export default function HomeScreen({ online, setOnline, requests = [], requestAn
           <ScrollView style={styles.sheetScroll} showsVerticalScrollIndicator={false}>
             {requests.map((order, i) => {
               const meta = getServiceMeta(order);
-              const vehicle = [order.vehicle?.make, order.vehicle?.model].filter(Boolean).join(' ');
+              const vehicle = [order.vehicle?.year, order.vehicle?.make, order.vehicle?.model].filter(Boolean).join(' ');
               const addr = order.pickup?.address || 'Location pending';
               return (
                 <TouchableOpacity
@@ -176,46 +288,76 @@ export default function HomeScreen({ online, setOnline, requests = [], requestAn
 }
 
 
+const INCOMING_MODE = {
+  mobile: { color: '#F97316', borderColor: 'rgba(240,68,22,0.42)', icon: 'navigate-outline',  label: 'Mobile',  sub: 'Comes to you',   locIcon: 'location-outline'  },
+  shop:   { color: '#2563EB', borderColor: 'rgba(37,99,235,0.35)',  icon: 'business-outline', label: 'Shop',    sub: 'Drop off',       locIcon: 'storefront-outline' },
+};
+
 function IncomingRequest({ order, accepting, onOpen, onAccept, onDecline, allowScheduling }) {
   const serviceMeta = getServiceMeta(order);
-  const iconColor = serviceMeta.color || '#F97316';
-  const address = order.pickup?.address || 'Location pending';
-  const vehicle = [order.vehicle?.make, order.vehicle?.model].filter(Boolean).join(' ');
+  const serviceMode = getServiceMode(order);
+  const mode = INCOMING_MODE[serviceMode] || INCOMING_MODE.mobile;
+  const address = (() => {
+    const full = order.pickup?.address || '';
+    const parts = full.split(',').map(p => p.trim()).filter(Boolean);
+    if (parts.length >= 3) {
+      const city = parts[parts.length - 2];
+      const state = parts[parts.length - 1].split(' ')[0];
+      return `${city}, ${state}`;
+    }
+    return full || 'Location pending';
+  })();
+  const distance = getRequestDistance(order);
+  const vehicle = [order.vehicle?.year, order.vehicle?.make, order.vehicle?.model].filter(Boolean).join(' ');
+  const isShop = serviceMode === 'shop';
 
   return (
-    <TouchableOpacity style={styles.incomingCard} onPress={() => onOpen && onOpen(order)} activeOpacity={0.88}>
+    <TouchableOpacity
+      style={[styles.incomingCard, { borderColor: mode.borderColor }]}
+      onPress={() => onOpen && onOpen(order)}
+      activeOpacity={0.88}
+    >
+      {/* Left mode stripe */}
+      <View style={[styles.incomingStripe, { backgroundColor: mode.color }]} />
+
       <View style={styles.incomingTop}>
         <View style={styles.incomingLabelWrap}>
-          <View style={styles.newBadge}><Text style={styles.newBadgeText}>NEW</Text></View>
+          <View style={[styles.newBadge, { backgroundColor: mode.color }]}>
+            <Text style={styles.newBadgeText}>{mode.label.toUpperCase()}</Text>
+          </View>
           <Text style={styles.incomingLabel}>New Request</Text>
         </View>
         <View style={styles.liveWrap}>
           <Text style={styles.justNow}>Just now</Text>
-          <Ionicons name="radio-outline" size={18} color="#F04416" />
+          <Ionicons name="radio-outline" size={18} color={mode.color} />
         </View>
       </View>
+
       <View style={styles.incomingBody}>
-        <View style={[styles.incomingIcon, { backgroundColor: iconColor + '18' }]}>
-          <Ionicons name={serviceMeta.icon} size={25} color={iconColor} />
+        <View style={[styles.incomingIcon, { backgroundColor: mode.color + '18' }]}>
+          <Ionicons name={serviceMeta.icon} size={25} color={mode.color} />
         </View>
         <View style={styles.incomingInfo}>
           <Text style={styles.incomingTitle} numberOfLines={1}>{serviceMeta.title}</Text>
           {!!vehicle && <Text style={styles.incomingVehicle} numberOfLines={1}>{vehicle}</Text>}
           <View style={styles.incomingMetaRow}>
-            <Ionicons name="location-outline" size={15} color="#B7C1D7" />
-            <Text style={styles.incomingMeta} numberOfLines={1}>{address}</Text>
+            <Ionicons name={mode.locIcon} size={15} color="#B7C1D7" />
+            <Text style={styles.incomingMeta} numberOfLines={1}>
+              {address}
+            </Text>
           </View>
-          <View style={styles.incomingMetaRow}>
-            <Ionicons name="navigate-outline" size={15} color="#B7C1D7" />
-            <Text style={styles.incomingMeta}>{order.distance || '5.2 mi away'}</Text>
-          </View>
+          {!isShop && (
+            <View style={styles.incomingMetaRow}>
+              <Ionicons name="navigate-outline" size={15} color="#B7C1D7" />
+              <Text style={styles.incomingMeta}>{distance || '5.2 mi away'}</Text>
+            </View>
+          )}
         </View>
         <View style={styles.incomingPriceBox}>
-          <Text style={styles.incomingPrice}>{formatMoney(order)}</Text>
+          <Text style={[styles.incomingPrice, { color: mode.color }]}>{formatMoney(order)}</Text>
           <Text style={styles.incomingEta}>{order.eta || 'Est. 25 min'}</Text>
         </View>
       </View>
-
     </TouchableOpacity>
   );
 }
@@ -262,7 +404,9 @@ const styles = StyleSheet.create({
   metricIcon: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   metricValue: { fontSize: 20, lineHeight: 24, fontWeight: '800', marginBottom: 1 },
   metricMeta: { color: '#5E646D', fontSize: 9, lineHeight: 12, fontWeight: '600' },
-  incomingCard: { borderRadius: 8, backgroundColor: '#F3F4F5', borderWidth: 1.6, borderColor: 'rgba(240,68,22,0.42)', padding: 12, marginBottom: 10, shadowColor: '#F04416', shadowOpacity: 0.08, shadowRadius: 14, shadowOffset: { width: 0, height: 7 }, elevation: 4 },
+  incomingCard: { borderRadius: 8, backgroundColor: '#F3F4F5', borderWidth: 1.6, padding: 12, paddingLeft: 15, marginBottom: 10, shadowOpacity: 0.08, shadowRadius: 14, shadowOffset: { width: 0, height: 7 }, elevation: 4, overflow: 'hidden' },
+  incomingStripe: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 3 },
+  incomingModeText: { fontSize: 11, fontWeight: '700' },
   incomingBtnRow: { flexDirection: 'row', marginHorizontal: -12, marginTop: 12, borderTopWidth: 1, borderTopColor: 'rgba(240,68,22,0.15)' },
   incomingBtnDecline: { flex: 1, paddingVertical: 11, alignItems: 'center', justifyContent: 'center', borderRightWidth: 1, borderRightColor: 'rgba(240,68,22,0.15)' },
   incomingBtnDeclineText: { color: '#EF4444', fontSize: 13, fontWeight: '700' },
@@ -271,9 +415,9 @@ const styles = StyleSheet.create({
   incomingBtnAccept: { flex: 1, paddingVertical: 11, alignItems: 'center', justifyContent: 'center', backgroundColor: '#16A34A' },
   incomingBtnAcceptText: { color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
   incomingTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
-  incomingLabelWrap: { flexDirection: 'row', alignItems: 'center', gap: 9, minWidth: 0, flex: 1 },
-  newBadge: { height: 21, borderRadius: 11, backgroundColor: '#17191D', paddingHorizontal: 9, alignItems: 'center', justifyContent: 'center' },
-  newBadgeText: { color: '#FFFFFF', fontSize: 11, fontWeight: '700' },
+  incomingLabelWrap: { flexDirection: 'row', alignItems: 'center', gap: 9, flex: 1, minWidth: 0 },
+  newBadge: { height: 17, borderRadius: 8, backgroundColor: '#17191D', paddingHorizontal: 6, alignItems: 'center', justifyContent: 'center' },
+  newBadgeText: { color: '#FFFFFF', fontSize: 9, fontWeight: '700' },
   incomingLabel: { color: '#17191D', fontSize: 14, fontWeight: '700' },
   liveWrap: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   justNow: { color: '#5E646D', fontSize: 12, fontWeight: '700' },
@@ -281,7 +425,7 @@ const styles = StyleSheet.create({
   incomingIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
   incomingInfo: { flex: 1, minWidth: 0 },
   incomingTitle: { color: '#17191D', fontSize: 16, lineHeight: 20, fontWeight: '700', marginBottom: 1 },
-  incomingVehicle: { color: '#5E646D', fontSize: 11, fontWeight: '600', marginBottom: 3 },
+  incomingVehicle: { color: '#5E646D', fontSize: 13, fontWeight: '600', marginBottom: 3 },
   incomingMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
   incomingMeta: { color: '#5E646D', fontSize: 10, lineHeight: 14, fontWeight: '600', flex: 1 },
   incomingPriceBox: { width: 58, alignItems: 'flex-end' },
@@ -311,6 +455,16 @@ const styles = StyleSheet.create({
   sheetRowRight: { alignItems: 'flex-end', gap: 2 },
   sheetRowPrice: { color: '#17191D', fontSize: 14, fontWeight: '800' },
   sheetRowEta: { color: '#8B9098', fontSize: 11 },
+  demoPromoWrap: { gap: 8, marginBottom: 10 },
+  demoPromoHeading: { color: '#9CA3AF', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginLeft: 2, marginBottom: 2 },
+  demoPromoCard: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#FFF7F0', borderRadius: 10, borderWidth: 1.5, borderColor: '#FDCBA6', paddingHorizontal: 14, paddingVertical: 13 },
+  demoPromoCardBlue: { backgroundColor: '#EFF6FF', borderColor: '#BFDBFE' },
+  demoPromoIcon: { width: 38, height: 38, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  demoPromoInfo: { flex: 1 },
+  demoPromoTitle: { color: '#17191D', fontSize: 14, fontWeight: '700', marginBottom: 2 },
+  demoPromoSub: { color: '#9CA3AF', fontSize: 12, fontWeight: '500' },
+  dismissDemoBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingVertical: 6, marginBottom: 4, marginTop: -4 },
+  dismissDemoText: { color: '#9CA3AF', fontSize: 12, fontWeight: '600' },
   sectionCard: { borderRadius: 8, backgroundColor: '#F3F4F5', borderWidth: 1, borderColor: '#ECEEF0', padding: 12, marginBottom: 11 },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
   sectionTitle: { color: '#17191D', fontSize: 16, lineHeight: 20, fontWeight: '700' },
@@ -329,4 +483,13 @@ const styles = StyleSheet.create({
   activityTitle: { color: '#17191D', fontSize: 13, fontWeight: '600' },
   activityMeta: { color: '#5E646D', fontSize: 11, marginTop: 3 },
   activityValue: { color: '#17191D', fontSize: 13, fontWeight: '700' },
+  emptyState: { alignItems: 'center', justifyContent: 'center', paddingVertical: 20, gap: 8 },
+  emptyStateText: { color: '#8B9098', fontSize: 13, fontWeight: '500' },
+  setupBanner: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#EFF6FF', borderRadius: 10, borderWidth: 1, borderColor: '#BFDBFE', paddingHorizontal: 14, paddingVertical: 12, marginBottom: 12 },
+  setupBannerIcon: { width: 38, height: 38, borderRadius: 10, backgroundColor: '#DBEAFE', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  setupBannerBody: { flex: 1, minWidth: 0 },
+  setupBannerTitle: { color: '#1D4ED8', fontSize: 13, fontWeight: '800', marginBottom: 2 },
+  setupBannerSub: { color: '#3B82F6', fontSize: 11, fontWeight: '600' },
+  setupBannerBtn: { flexDirection: 'row', alignItems: 'center', gap: 2, flexShrink: 0 },
+  setupBannerBtnText: { color: '#2563EB', fontSize: 13, fontWeight: '800' },
 });

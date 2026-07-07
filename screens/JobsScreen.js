@@ -4,10 +4,11 @@ import { Ionicons } from '@expo/vector-icons';
 import useScrollToTop from '../hooks/useScrollToTop';
 import SwipePager from '../components/SwipePager';
 import { getJobStatusMeta, getJobStatusNote, getJobProgressIndex, getWorkflowJobStatus } from '../utils/jobUtils';
-import { JOB_STEPS } from '../constants';
+import { getServiceMeta } from '../utils/serviceUtils';
+import { JOB_STEPS, ACTIVE_SHOP_STATUSES } from '../constants';
 import CalendarScreen from './CalendarScreen';
 
-export default function JobsScreen({ jobs, jobWorkflows = {}, onOpen, refreshControl, scrollSignal, providerType = 'mobile' }) {
+export default function JobsScreen({ jobs, jobWorkflows = {}, onOpen, refreshControl, scrollSignal, providerType = 'mobile', isDemo = false }) {
   const hasAppointments = providerType === 'shop' || providerType === 'both';
   const scrollRef = useScrollToTop(scrollSignal);
   const [activeTab, setActiveTab] = useState('active');
@@ -15,7 +16,9 @@ export default function JobsScreen({ jobs, jobWorkflows = {}, onOpen, refreshCon
   const [searchQuery, setSearchQuery] = useState('');
   const jobsWithStatus = jobs.map(job => ({
     ...job,
-    displayStatus: getWorkflowJobStatus(job.status, jobWorkflows[job.id]),
+    displayStatus: ACTIVE_SHOP_STATUSES.includes(job.shopStatus)
+      ? job.shopStatus
+      : getWorkflowJobStatus(job.status, jobWorkflows[job.id]),
   }));
   const q = searchQuery.toLowerCase().trim();
   const matchesSearch = (job) => !q
@@ -23,8 +26,8 @@ export default function JobsScreen({ jobs, jobWorkflows = {}, onOpen, refreshCon
     || (job.customer?.name || '').toLowerCase().includes(q)
     || (job.pickup?.address || '').toLowerCase().includes(q)
     || String(job.number || '').includes(q);
-  const activeJobsList = jobsWithStatus.filter(job => job.displayStatus !== 'completed' && job.displayStatus !== 'scheduled' && matchesSearch(job));
-  const scheduledJobsList = jobsWithStatus.filter(job => job.displayStatus === 'scheduled' && matchesSearch(job));
+  const activeJobsList = jobsWithStatus.filter(job => job.displayStatus !== 'completed' && job.displayStatus !== 'scheduled' && job.displayStatus !== 'proposed' && matchesSearch(job));
+  const scheduledJobsList = jobsWithStatus.filter(job => (job.displayStatus === 'scheduled' || job.displayStatus === 'proposed') && matchesSearch(job));
   const completedJobs = jobsWithStatus.filter(job => job.displayStatus === 'completed' && matchesSearch(job));
   const tabs = [
     { key: 'active', label: 'Active', icon: 'time-outline', color: '#2F80FF' },
@@ -37,9 +40,9 @@ export default function JobsScreen({ jobs, jobWorkflows = {}, onOpen, refreshCon
     return (
       <View>
         <View style={styles.jobsStatsRow}>
-          <JobMetric title="Today's Earnings" value="$423" meta="4 completed jobs" icon="wallet-outline" color="#F04416" />
-          <JobMetric title="This Week" value="$1,247" meta="12 completed jobs" icon="stats-chart-outline" color="#17191D" />
-          <JobMetric title="Rating" value="4.9" meta="Based on 128 reviews" icon="star" color="#FFC107" star />
+          <JobMetric title="Today's Earnings" value={isDemo ? '$423' : '$0'} meta={isDemo ? '4 completed jobs' : 'No jobs yet'} icon="wallet-outline" color="#F04416" />
+          <JobMetric title="This Week" value={isDemo ? '$1,247' : '$0'} meta={isDemo ? '12 completed jobs' : 'No jobs yet'} icon="stats-chart-outline" color="#17191D" />
+          <JobMetric title="Rating" value={isDemo ? '4.9' : '—'} meta={isDemo ? 'Based on 128 reviews' : 'No reviews yet'} icon="star" color="#FFC107" star={isDemo} />
         </View>
 
         <View style={styles.jobsSectionHeader}>
@@ -133,36 +136,59 @@ export default function JobsScreen({ jobs, jobWorkflows = {}, onOpen, refreshCon
   );
 }
 
+function cityState(full = '') {
+  const parts = full.split(',').map(p => p.trim()).filter(Boolean);
+  if (parts.length >= 3) return `${parts[parts.length - 2]}, ${parts[parts.length - 1].split(' ')[0]}`;
+  return full || '—';
+}
+
+const SHOP_STATUS_BADGE = {
+  checked_in:       { label: 'CHECKED IN',      color: '#2563EB' },
+  inspection:       { label: 'WORKING',          color: '#F04416' },
+  estimate:         { label: 'BUILD ESTIMATE',   color: '#F04416' },
+  waiting_approval: { label: 'WAITING APPROVAL', color: '#1F6BFF' },
+  in_progress:      { label: 'IN PROGRESS',      color: '#2563EB' },
+  completed:        { label: 'COMPLETED',         color: '#22C55E' },
+};
+
 function ActiveJobCard({ job, onOpen, completed }) {
   const status = job.displayStatus || job.status;
   const meta = getJobStatusMeta(status);
-  const isInProgress = !completed;
-  const accent = isInProgress ? (meta.color || '#F04416') : '#F04416';
+
+  const isShopJob = ACTIVE_SHOP_STATUSES.includes(job.shopStatus);
+  const cardAccent = isShopJob ? '#2563EB' : '#F04416';
+
+  const badge = isShopJob && job.shopStatus
+    ? (SHOP_STATUS_BADGE[job.shopStatus] || { label: status.toUpperCase().replace(/_/g, ' '), color: '#2563EB' })
+    : { label: completed ? 'COMPLETED' : meta.label, color: completed ? '#16A34A' : (meta.color || '#F04416') };
+
   const vehicle = job.vehicle
     ? [job.vehicle.year, job.vehicle.make, job.vehicle.model].filter(Boolean).join(' ') || job.vehicle.make || 'Vehicle'
     : job.vehicleType || 'Vehicle';
   const note = getJobStatusNote(status, job);
-  const distance = job.distance || (status === 'waiting_approval' ? '' : '6.2 mi');
+  const distance = job.distance || '';
   const payout = job.payment?.total ?? job.payment?.totalHeld ?? job.payment?.priceMin ?? 0;
   const priceLabel = payout ? `$${payout}` : 'TBD';
 
   return (
-    <TouchableOpacity style={[styles.activeListCard, !isInProgress && styles.neutralListCard]} onPress={() => onOpen(job)} activeOpacity={0.86}>
-      {isInProgress && <View style={[styles.activeListAccent, { backgroundColor: accent }]} />}
+    <TouchableOpacity style={[styles.activeListCard, completed && styles.neutralListCard]} onPress={() => onOpen(job)} activeOpacity={0.86}>
+      {!completed && <View style={[styles.activeListAccent, { backgroundColor: cardAccent }]} />}
       <View style={styles.activeListIcon}>
-        <Ionicons name={job.icon || job.service?.icon || 'briefcase-outline'} size={20} color={accent} />
+        <Ionicons name={job.icon || job.service?.icon || 'briefcase-outline'} size={20} color={cardAccent} />
       </View>
       <View style={styles.activeListInfo}>
-        <Text style={[styles.activeListStatus, { color: accent }]}>{completed ? 'COMPLETED' : meta.label}</Text>
+        <View style={[styles.activeListBadgePill, { backgroundColor: badge.color + '18', borderColor: badge.color + '44' }]}>
+          <Text style={[styles.activeListBadgeText, { color: badge.color }]}>{badge.label}</Text>
+        </View>
         <Text style={styles.activeListTitle} numberOfLines={1}>{job.service?.type || job.issue?.name || 'Service'}</Text>
         <Text style={styles.activeListVehicle} numberOfLines={1}>{vehicle}</Text>
-        <Text style={styles.activeListAddress} numberOfLines={1}>{job.pickup?.address || job.selectedAddress || '—'}</Text>
+        <Text style={styles.activeListAddress} numberOfLines={1}>{cityState(job.pickup?.address || job.selectedAddress)}</Text>
       </View>
       <View style={styles.activeListAside}>
-        <Text style={[styles.activeListPrice, { color: accent }]} numberOfLines={1}>{priceLabel}</Text>
+        <Text style={[styles.activeListPrice, { color: cardAccent }]} numberOfLines={1}>{priceLabel}</Text>
         <View style={styles.activeListEtaRow}>
-          <Ionicons name="time-outline" size={10} color={accent} style={styles.activeListEtaIcon} />
-          <Text style={[styles.activeListEta, { color: accent }]} numberOfLines={1}>{completed ? 'Receipt ready' : note}</Text>
+          {job.shopStatus === 'waiting_approval' && <Ionicons name="time-outline" size={10} color={cardAccent} style={styles.activeListEtaIcon} />}
+          <Text style={[styles.activeListEta, { color: cardAccent }]}>{completed ? 'Receipt ready' : note}</Text>
         </View>
         {!!distance && <Text style={styles.activeListDistance} numberOfLines={1}>{distance}</Text>}
       </View>
@@ -201,22 +227,46 @@ export function JobAction({ label, icon, color, onPress, filled }) {
 
 function ScheduledJobCard({ job, onOpen }) {
   const payout = job.payment?.total ?? job.payment?.totalHeld ?? job.payment?.priceMin ?? 0;
+  const serviceMeta = getServiceMeta(job);
+  const vehicle = [job.vehicle?.year, job.vehicle?.make, job.vehicle?.model].filter(Boolean).join(' ') || job.vehicle?.make || 'Vehicle';
+  const address = cityState(job.pickup?.address) || 'Address pending';
+  const apptTime = job.appointmentTime || job.time || job.scheduledSlotLabel || null;
+
   return (
-    <TouchableOpacity style={[styles.activeListCard, styles.neutralListCard]} onPress={() => onOpen(job)} activeOpacity={0.86}>
-      <View style={styles.activeListIcon}>
-        <Ionicons name={job.icon || job.service?.icon || 'calendar-outline'} size={20} color="#F04416" />
+    <TouchableOpacity style={[styles.scheduledCard, job.status === 'proposed' && styles.scheduledCardProposed]} onPress={() => onOpen(job)} activeOpacity={0.88}>
+      <View style={[styles.scheduledStripe, job.status === 'proposed' && { backgroundColor: '#D97706' }]} />
+
+      <View style={styles.scheduledTop}>
+        <View style={styles.scheduledBadgeRow}>
+          <View style={[styles.scheduledBadge, job.status === 'proposed' && styles.scheduledBadgeProposed]}>
+            <Text style={styles.scheduledBadgeText}>{job.status === 'proposed' ? 'PROPOSED' : 'SHOP'}</Text>
+          </View>
+          <Text style={[styles.scheduledBadgeLabel, job.status === 'proposed' && { color: '#D97706' }]}>
+            {job.status === 'proposed' ? 'Awaiting customer' : 'Confirmed Booking'}
+          </Text>
+        </View>
+        {!!apptTime && (
+          <View style={styles.scheduledTimeWrap}>
+            <Ionicons name="calendar-outline" size={12} color={job.status === 'proposed' ? '#D97706' : '#2563EB'} />
+            <Text style={[styles.scheduledTimeText, job.status === 'proposed' && { color: '#D97706' }]}>{apptTime}</Text>
+          </View>
+        )}
       </View>
-      <View style={styles.activeListInfo}>
-        <Text style={styles.neutralListStatus}>{job.time || 'SCHEDULED'}</Text>
-        <Text style={styles.activeListTitle} numberOfLines={1}>{job.service?.type || 'Service'}</Text>
-        <Text style={styles.activeListVehicle} numberOfLines={1}>{job.vehicle?.make || ''}{job.vehicle?.year ? ` - ${job.vehicle.year}` : ''}</Text>
-        <Text style={styles.activeListAddress} numberOfLines={1}>{job.pickup?.address || '—'}</Text>
-      </View>
-      <View style={styles.activeListAside}>
-        <Text style={styles.neutralListPrice} numberOfLines={1}>{payout ? `$${payout}` : 'TBD'}</Text>
-        <View style={styles.activeListEtaRow}>
-          <Ionicons name="time-outline" size={10} color="#F04416" style={styles.activeListEtaIcon} />
-          <Text style={styles.neutralListEta} numberOfLines={1}>{job.eta || 'Scheduled'}</Text>
+
+      <View style={styles.scheduledBody}>
+        <View style={styles.scheduledIconWrap}>
+          <Ionicons name={serviceMeta.icon} size={24} color="#2563EB" />
+        </View>
+        <View style={styles.scheduledInfo}>
+          <Text style={styles.scheduledTitle} numberOfLines={1}>{serviceMeta.title || job.service?.type || 'Service'}</Text>
+          {!!vehicle && <Text style={styles.scheduledVehicle} numberOfLines={1}>{vehicle}</Text>}
+          <View style={styles.scheduledMetaRow}>
+            <Ionicons name="storefront-outline" size={13} color="#8B9098" />
+            <Text style={styles.scheduledMeta} numberOfLines={1}>{address}</Text>
+          </View>
+        </View>
+        <View style={styles.scheduledPriceBox}>
+          <Text style={styles.scheduledPrice}>{payout ? `$${payout}` : 'TBD'}</Text>
         </View>
       </View>
     </TouchableOpacity>
@@ -265,7 +315,7 @@ const styles = StyleSheet.create({
   jobsStatCard: { flex: 1, height: 82, borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', padding: 9, justifyContent: 'space-between' },
   jobsStatTop: { minHeight: 24, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 5 },
   jobsStatIcon: { width: 24, height: 24, borderRadius: 12, backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  jobsStatTitle: { color: '#5E646D', fontSize: 8, lineHeight: 10, fontWeight: '700', flex: 1, minWidth: 0 },
+  jobsStatTitle: { color: '#5E646D', fontSize: 11, lineHeight: 14, fontWeight: '700', flex: 1, minWidth: 0 },
   jobsStatValueRow: { minHeight: 25, flexDirection: 'row', alignItems: 'center', gap: 4 },
   jobsStatValue: { fontSize: 20, lineHeight: 24, fontWeight: '800' },
   jobsStatMeta: { color: '#5E646D', fontSize: 8, lineHeight: 11, fontWeight: '600' },
@@ -281,19 +331,40 @@ const styles = StyleSheet.create({
   activeListAccent: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 5 },
   activeListIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E6E8EB', alignItems: 'center', justifyContent: 'center' },
   activeListInfo: { flex: 1, minWidth: 0, overflow: 'hidden' },
-  activeListStatus: { fontSize: 10, lineHeight: 13, fontWeight: '800', marginBottom: 2 },
+  activeListBadgePill: { alignSelf: 'flex-start', borderRadius: 5, borderWidth: 1, paddingHorizontal: 6, paddingVertical: 2, marginBottom: 4 },
+  activeListBadgeText: { fontSize: 9, fontWeight: '800', letterSpacing: 0.4 },
   activeListTitle: { color: '#17191D', fontSize: 16, lineHeight: 19, fontWeight: '800' },
   activeListVehicle: { color: '#5E646D', fontSize: 11, lineHeight: 15, fontWeight: '600', marginTop: 1 },
   activeListAddress: { color: '#5E646D', fontSize: 11, lineHeight: 15, fontWeight: '500', marginTop: 1 },
-  activeListAside: { width: 80, flexShrink: 0, alignItems: 'flex-end' },
+  activeListAside: { width: 95, flexShrink: 0, alignItems: 'flex-end' },
   activeListPrice: { fontSize: 17, lineHeight: 21, fontWeight: '800', marginBottom: 6, textAlign: 'right' },
   activeListEtaRow: { width: '100%', flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 3, marginBottom: 4 },
   activeListEtaIcon: { flexShrink: 0 },
-  activeListEta: { fontSize: 9, lineHeight: 12, fontWeight: '700', textAlign: 'right', flexShrink: 1, minWidth: 0 },
+  activeListEta: { fontSize: 9, lineHeight: 12, fontWeight: '700', textAlign: 'right', flexShrink: 1, minWidth: 0, flexWrap: 'wrap' },
   activeListDistance: { color: '#5E646D', fontSize: 11, lineHeight: 14, fontWeight: '600', textAlign: 'right' },
   neutralListStatus: { color: '#F04416', fontSize: 10, lineHeight: 13, fontWeight: '800', marginBottom: 2 },
   neutralListPrice: { color: '#F04416', fontSize: 17, lineHeight: 21, fontWeight: '800', marginBottom: 6, textAlign: 'right' },
   neutralListEta: { color: '#F04416', fontSize: 9, lineHeight: 12, fontWeight: '700', textAlign: 'right', flexShrink: 1, minWidth: 0, maxWidth: 88 },
+  scheduledCard: { borderRadius: 8, backgroundColor: '#F3F4F5', borderWidth: 1.6, borderColor: 'rgba(37,99,235,0.35)', padding: 12, paddingLeft: 15, overflow: 'hidden' },
+  scheduledCardProposed: { borderColor: 'rgba(217,119,6,0.4)' },
+  scheduledStripe: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, backgroundColor: '#2563EB' },
+  scheduledTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
+  scheduledBadgeRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  scheduledBadge: { backgroundColor: '#2563EB', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 },
+  scheduledBadgeProposed: { backgroundColor: '#D97706' },
+  scheduledBadgeText: { color: '#FFF', fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
+  scheduledBadgeLabel: { color: '#5E646D', fontSize: 11, fontWeight: '600' },
+  scheduledTimeWrap: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  scheduledTimeText: { color: '#2563EB', fontSize: 11, fontWeight: '700' },
+  scheduledBody: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  scheduledIconWrap: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#EFF6FF', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  scheduledInfo: { flex: 1, minWidth: 0 },
+  scheduledTitle: { color: '#17191D', fontSize: 16, fontWeight: '800', lineHeight: 20, marginBottom: 2 },
+  scheduledVehicle: { color: '#5E646D', fontSize: 11, fontWeight: '600', lineHeight: 15, marginBottom: 3 },
+  scheduledMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  scheduledMeta: { color: '#8B9098', fontSize: 11, fontWeight: '500', flex: 1 },
+  scheduledPriceBox: { alignItems: 'flex-end', flexShrink: 0 },
+  scheduledPrice: { color: '#2563EB', fontSize: 17, fontWeight: '800' },
   miniProgressRow: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 8, position: 'relative', paddingTop: 1 },
   miniProgressTrack: { position: 'absolute', left: 25, right: 25, top: 7, height: 1, backgroundColor: '#E1E4E8' },
   miniProgressItem: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 2 },

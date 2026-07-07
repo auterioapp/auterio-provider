@@ -1,123 +1,221 @@
-import { useState } from 'react';
-import { Alert, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, AppState, Linking, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import PayoutHistoryScreen from './PayoutHistoryScreen';
+import { API_URL, PROVIDER } from '../constants';
 
-const TRANSFER_OPTIONS = [
-  {
-    id: 'instant',
-    icon: 'flash-outline',
-    iconBg: '#F3EEFF',
-    iconColor: '#7C3AED',
-    title: 'Instant Transfer',
-    titleSuffix: ' (Fee: 1.5%)',
-    subtitle: 'Get your money in minutes',
-  },
-  {
-    id: 'standard',
-    icon: 'calendar-outline',
-    iconBg: '#EFF6FF',
-    iconColor: '#2563EB',
-    title: 'Standard Transfer',
-    subtitle: 'Free  •  1-3 business days',
-  },
-];
+export default function PayoutsScreen({ visible, onClose, isDemo }) {
+  const [account, setAccount] = useState(null); // { connected, payoutsEnabled, bankAccount }
+  const [loading, setLoading] = useState(false);
+  const [connecting, setConnecting] = useState(false);
+  const appState = useRef(AppState.currentState);
 
-export default function PayoutsScreen({ visible, onClose }) {
-  const [historyOpen, setHistoryOpen] = useState(false);
+  const fetchAccount = useCallback(async () => {
+    if (isDemo) return;
+    try {
+      const res = await fetch(`${API_URL}/stripe/connect/account/${PROVIDER.id}`);
+      const data = await res.json();
+      setAccount(data);
+    } catch {}
+  }, [isDemo]);
+
+  useEffect(() => {
+    if (visible) fetchAccount();
+  }, [visible, fetchAccount]);
+
+  // Refresh when user comes back from browser (Stripe onboarding)
+  useEffect(() => {
+    if (!visible || isDemo) return;
+    const sub = AppState.addEventListener('change', next => {
+      if (appState.current.match(/inactive|background/) && next === 'active') {
+        fetchAccount();
+      }
+      appState.current = next;
+    });
+    return () => sub.remove();
+  }, [visible, isDemo, fetchAccount]);
+
+  const handleAddAccount = async () => {
+    setConnecting(true);
+    try {
+      const res = await fetch(`${API_URL}/stripe/connect/create-account`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ providerId: PROVIDER.id }),
+      });
+      const data = await res.json();
+      if (data.url) {
+        await Linking.openURL(data.url);
+      } else {
+        Alert.alert('Error', data.error || 'Could not start setup');
+      }
+    } catch (e) {
+      Alert.alert('Error', 'Could not connect to server');
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  const handleManageDashboard = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/stripe/connect/dashboard-link`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ providerId: PROVIDER.id }),
+      });
+      const data = await res.json();
+      if (data.url) await Linking.openURL(data.url);
+    } catch {}
+    setLoading(false);
+  };
+
+  const demoBank = isDemo ? { bankName: 'Chase', last4: '4821' } : null;
+  const realBank = account?.bankAccount ?? null;
+  const bank = isDemo ? demoBank : realBank;
+  const isConnected = isDemo || account?.connected;
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
       <View style={styles.container}>
+
         <View style={styles.header}>
           <TouchableOpacity onPress={onClose} style={styles.backBtn} activeOpacity={0.7}>
             <Ionicons name="arrow-back" size={22} color="#17191D" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Payouts & Transfers</Text>
+          <Text style={styles.headerTitle}>Payout & Banking</Text>
           <View style={styles.headerRight} />
         </View>
 
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
 
-          {/* Balance card */}
-          <View style={styles.card}>
-            <View style={styles.balanceRow}>
-              <View style={styles.balanceInfo}>
-                <Text style={styles.balanceLabel}>Available Balance</Text>
-                <Text style={styles.balanceAmount}>$2,180.00</Text>
-                <Text style={styles.balanceSub}>Will be paid out on Jun 25</Text>
+          {/* Payout destination */}
+          <View style={styles.section}>
+            <Text style={styles.sectionLabel}>Payout destination</Text>
+
+            {bank ? (
+              <View style={styles.accountCard}>
+                <View style={styles.accountIconWrap}>
+                  <Ionicons name="card-outline" size={20} color="#2563EB" />
+                </View>
+                <View style={styles.accountInfo}>
+                  <Text style={styles.accountName}>{bank.bankName} Checking</Text>
+                  <Text style={styles.accountNumber}>•••• •••• •••• {bank.last4}</Text>
+                </View>
+                <View style={styles.accountRight}>
+                  <View style={styles.defaultBadge}>
+                    <Text style={styles.defaultBadgeText}>Default</Text>
+                  </View>
+                  {!isDemo && (
+                    <TouchableOpacity activeOpacity={0.7} onPress={handleManageDashboard} style={styles.editBtn}>
+                      {loading
+                        ? <ActivityIndicator size="small" color="#F97316" />
+                        : <Text style={styles.editBtnText}>Edit</Text>
+                      }
+                    </TouchableOpacity>
+                  )}
+                </View>
               </View>
-              <View style={styles.walletIcon}>
-                <Ionicons name="wallet-outline" size={22} color="#16A34A" />
+            ) : (
+              <View style={styles.emptyAccountCard}>
+                <View style={styles.emptyIconWrap}>
+                  <Ionicons name="card-outline" size={24} color="#9CA3AF" />
+                </View>
+                <Text style={styles.emptyAccountTitle}>No bank account linked</Text>
+                <Text style={styles.emptyAccountSub}>Add a bank account to receive payouts</Text>
               </View>
-            </View>
+            )}
+
+            {!isDemo && (
+              <TouchableOpacity
+                style={[styles.addAccountBtn, connecting && styles.addAccountBtnDisabled]}
+                activeOpacity={0.8}
+                onPress={handleAddAccount}
+                disabled={connecting}
+              >
+                {connecting
+                  ? <ActivityIndicator size="small" color="#F97316" />
+                  : <Ionicons name="add-circle-outline" size={17} color="#F97316" />
+                }
+                <Text style={styles.addAccountText}>
+                  {connecting ? 'Opening setup...' : bank ? 'Add another account' : 'Add bank account'}
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
 
-          {/* Transfer options */}
-          <View style={styles.card}>
-            {TRANSFER_OPTIONS.map((opt, index) => (
+          {/* Transfer speed */}
+          <View style={styles.section}>
+            <Text style={styles.sectionLabel}>Transfer speed</Text>
+            <View style={styles.card}>
+
               <TouchableOpacity
-                key={opt.id}
-                style={[styles.transferRow, index > 0 && styles.transferRowBorder]}
+                style={styles.optionRow}
                 activeOpacity={0.84}
-                onPress={() => Alert.alert(opt.title, 'This feature is coming soon.')}
+                onPress={() => Alert.alert('Instant Transfer', 'Available once your account is verified.')}
               >
-                <View style={[styles.transferIcon, { backgroundColor: opt.iconBg }]}>
-                  <Ionicons name={opt.icon} size={20} color={opt.iconColor} />
+                <View style={[styles.optionIcon, { backgroundColor: '#F3EEFF' }]}>
+                  <Ionicons name="flash" size={19} color="#7C3AED" />
                 </View>
-                <View style={styles.transferInfo}>
-                  <Text style={styles.transferTitle}>
-                    {opt.title}
-                    {opt.titleSuffix && <Text style={styles.transferTitleSuffix}>{opt.titleSuffix}</Text>}
-                  </Text>
-                  <Text style={styles.transferSubtitle}>{opt.subtitle}</Text>
+                <View style={styles.optionInfo}>
+                  <View style={styles.optionTitleRow}>
+                    <Text style={styles.optionTitle}>Instant Transfer</Text>
+                    <View style={styles.feeChip}>
+                      <Text style={styles.feeChipText}>1.5% fee</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.optionSub}>Arrives in minutes</Text>
                 </View>
                 <Ionicons name="chevron-forward" size={18} color="#C8CDD4" />
               </TouchableOpacity>
-            ))}
-          </View>
 
-          {/* Bank Account */}
-          <View style={styles.card}>
-            <View style={styles.bankHeader}>
-              <Text style={styles.sectionTitle}>Bank Account</Text>
+              <View style={styles.rowDivider} />
+
               <TouchableOpacity
-                activeOpacity={0.7}
-                onPress={() => Alert.alert('Edit Bank Account', 'This feature is coming soon.')}
+                style={styles.optionRow}
+                activeOpacity={0.84}
+                onPress={() => Alert.alert('Standard Transfer', 'Available once your account is verified.')}
               >
-                <Text style={styles.editLink}>Edit</Text>
+                <View style={[styles.optionIcon, { backgroundColor: '#EFF6FF' }]}>
+                  <Ionicons name="calendar-outline" size={19} color="#2563EB" />
+                </View>
+                <View style={styles.optionInfo}>
+                  <View style={styles.optionTitleRow}>
+                    <Text style={styles.optionTitle}>Standard Transfer</Text>
+                    <View style={styles.freeChip}>
+                      <Text style={styles.freeChipText}>Free</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.optionSub}>1–3 business days</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={18} color="#C8CDD4" />
               </TouchableOpacity>
-            </View>
-            <View style={styles.bankRow}>
-              <Text style={styles.bankName}>Chase Checking (•••• 4821)</Text>
-              <Text style={styles.defaultBadge}>Default</Text>
+
             </View>
           </View>
 
-          {/* Payout History */}
-          <TouchableOpacity
-            style={styles.card}
-            activeOpacity={0.84}
-            onPress={() => setHistoryOpen(true)}
-          >
-            <View style={styles.historyRow}>
-              <Text style={styles.sectionTitle}>Payout History</Text>
-              <Ionicons name="chevron-forward" size={18} color="#C8CDD4" />
+          {/* Account status */}
+          {!isDemo && account?.connected && !account?.payoutsEnabled && (
+            <View style={styles.warningCard}>
+              <Ionicons name="time-outline" size={20} color="#D97706" />
+              <View style={styles.warningInfo}>
+                <Text style={styles.warningTitle}>Verification in progress</Text>
+                <Text style={styles.warningSub}>Stripe is reviewing your account. Payouts will be enabled shortly.</Text>
+              </View>
             </View>
-          </TouchableOpacity>
+          )}
 
-          {/* Security notice */}
+          {/* Security */}
           <View style={styles.securityCard}>
-            <Ionicons name="shield-checkmark-outline" size={22} color="#2563EB" style={{ marginTop: 1 }} />
+            <View style={styles.securityIconWrap}>
+              <Ionicons name="shield-checkmark" size={20} color="#2563EB" />
+            </View>
             <View style={styles.securityInfo}>
-              <Text style={styles.securityTitle}>Your earnings are secure</Text>
-              <Text style={styles.securitySub}>Your payouts are encrypted and protected.</Text>
+              <Text style={styles.securityTitle}>Your earnings are protected</Text>
+              <Text style={styles.securitySub}>All transfers are encrypted with bank-level security.</Text>
             </View>
           </View>
 
         </ScrollView>
-
-        <PayoutHistoryScreen visible={historyOpen} onClose={() => setHistoryOpen(false)} />
       </View>
     </Modal>
   );
@@ -125,34 +223,87 @@ export default function PayoutsScreen({ visible, onClose }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F5F6F8' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 72, paddingBottom: 14, backgroundColor: '#F5F6F8' },
+  header: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 16, paddingTop: 72, paddingBottom: 14, backgroundColor: '#F5F6F8',
+  },
   backBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { color: '#17191D', fontSize: 17, fontWeight: '700' },
   headerRight: { width: 36 },
-  content: { paddingHorizontal: 16, paddingBottom: 40, gap: 12 },
-  card: { backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 1, borderColor: '#ECEEF0', paddingHorizontal: 16, paddingVertical: 16 },
-  balanceRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  balanceInfo: { flex: 1 },
-  balanceLabel: { color: '#6B7280', fontSize: 13, fontWeight: '500', marginBottom: 4 },
-  balanceAmount: { color: '#F97316', fontSize: 32, fontWeight: '800', lineHeight: 38 },
-  balanceSub: { color: '#6B7280', fontSize: 13, fontWeight: '500', marginTop: 4 },
-  walletIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#ECFDF5', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  transferRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, gap: 12 },
-  transferRowBorder: { borderTopWidth: 1, borderTopColor: '#F0F1F3' },
-  transferIcon: { width: 42, height: 42, borderRadius: 10, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  transferInfo: { flex: 1 },
-  transferTitle: { color: '#17191D', fontSize: 15, fontWeight: '700' },
-  transferTitleSuffix: { color: '#6B7280', fontSize: 13, fontWeight: '500' },
-  transferSubtitle: { color: '#6B7280', fontSize: 13, fontWeight: '500', marginTop: 2 },
-  bankHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
-  sectionTitle: { color: '#17191D', fontSize: 15, fontWeight: '700' },
-  editLink: { color: '#F97316', fontSize: 14, fontWeight: '700' },
-  bankRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  bankName: { color: '#374151', fontSize: 14, fontWeight: '500' },
-  defaultBadge: { color: '#16A34A', fontSize: 13, fontWeight: '700' },
-  historyRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  securityCard: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, backgroundColor: '#EFF6FF', borderRadius: 14, borderWidth: 1, borderColor: '#DBEAFE', paddingHorizontal: 16, paddingVertical: 14 },
+  content: { paddingHorizontal: 16, paddingBottom: 48, gap: 24 },
+
+  section: { gap: 10 },
+  sectionLabel: { color: '#6B7280', fontSize: 12, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.6, marginLeft: 2 },
+
+  accountCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 14,
+    backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 1, borderColor: '#ECEEF0',
+    paddingHorizontal: 16, paddingVertical: 16,
+  },
+  accountIconWrap: {
+    width: 46, height: 46, borderRadius: 12, backgroundColor: '#EFF6FF',
+    alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+  },
+  accountInfo: { flex: 1 },
+  accountName: { color: '#17191D', fontSize: 15, fontWeight: '700', marginBottom: 3 },
+  accountNumber: { color: '#6B7280', fontSize: 13, fontWeight: '500', letterSpacing: 1 },
+  accountRight: { alignItems: 'flex-end', gap: 8 },
+  defaultBadge: { backgroundColor: '#ECFDF5', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
+  defaultBadgeText: { color: '#16A34A', fontSize: 11, fontWeight: '700' },
+  editBtn: { paddingVertical: 2, minWidth: 28, alignItems: 'center' },
+  editBtnText: { color: '#F97316', fontSize: 13, fontWeight: '700' },
+
+  emptyAccountCard: {
+    backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 1, borderColor: '#ECEEF0',
+    paddingVertical: 32, alignItems: 'center', gap: 8,
+  },
+  emptyIconWrap: {
+    width: 52, height: 52, borderRadius: 14, backgroundColor: '#F5F6F8',
+    alignItems: 'center', justifyContent: 'center', marginBottom: 4,
+  },
+  emptyAccountTitle: { color: '#374151', fontSize: 15, fontWeight: '700' },
+  emptyAccountSub: { color: '#9CA3AF', fontSize: 13, fontWeight: '400' },
+
+  addAccountBtn: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
+    backgroundColor: '#FFF7F0', borderRadius: 12, borderWidth: 1, borderColor: '#FDCBA6',
+    paddingVertical: 13,
+  },
+  addAccountBtnDisabled: { opacity: 0.6 },
+  addAccountText: { color: '#F97316', fontSize: 14, fontWeight: '600' },
+
+  card: { backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 1, borderColor: '#ECEEF0', overflow: 'hidden' },
+  optionRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 16, gap: 14 },
+  optionIcon: { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  optionInfo: { flex: 1 },
+  optionTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 3 },
+  optionTitle: { color: '#17191D', fontSize: 15, fontWeight: '700' },
+  feeChip: { backgroundColor: '#FEF3C7', borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 },
+  feeChipText: { color: '#D97706', fontSize: 11, fontWeight: '700' },
+  freeChip: { backgroundColor: '#ECFDF5', borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 },
+  freeChipText: { color: '#16A34A', fontSize: 11, fontWeight: '700' },
+  optionSub: { color: '#6B7280', fontSize: 13, fontWeight: '500' },
+  rowDivider: { height: 1, backgroundColor: '#F0F1F3', marginHorizontal: 16 },
+
+  warningCard: {
+    flexDirection: 'row', alignItems: 'flex-start', gap: 12,
+    backgroundColor: '#FFFBEB', borderRadius: 14, borderWidth: 1, borderColor: '#FDE68A',
+    paddingHorizontal: 16, paddingVertical: 14,
+  },
+  warningInfo: { flex: 1 },
+  warningTitle: { color: '#92400E', fontSize: 14, fontWeight: '700', marginBottom: 3 },
+  warningSub: { color: '#6B7280', fontSize: 13, lineHeight: 18 },
+
+  securityCard: {
+    flexDirection: 'row', alignItems: 'center', gap: 14,
+    backgroundColor: '#EFF6FF', borderRadius: 14, borderWidth: 1, borderColor: '#DBEAFE',
+    paddingHorizontal: 16, paddingVertical: 16,
+  },
+  securityIconWrap: {
+    width: 42, height: 42, borderRadius: 12, backgroundColor: '#DBEAFE',
+    alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+  },
   securityInfo: { flex: 1 },
-  securityTitle: { color: '#2563EB', fontSize: 14, fontWeight: '700', marginBottom: 2 },
-  securitySub: { color: '#6B7280', fontSize: 13, fontWeight: '400' },
+  securityTitle: { color: '#1D4ED8', fontSize: 14, fontWeight: '700', marginBottom: 3 },
+  securitySub: { color: '#6B7280', fontSize: 13, lineHeight: 18 },
 });

@@ -32,10 +32,11 @@ function groupByMonth(list) {
   return Object.entries(map);
 }
 
-export default function PayoutHistoryScreen({ visible, onClose }) {
+export default function PayoutHistoryScreen({ visible, onClose, isDemo }) {
   const [tab, setTab] = useState('All');
 
-  const filtered = tab === 'All' ? PAYOUTS : PAYOUTS.filter(p => p.status === tab);
+  const source = isDemo ? PAYOUTS : [];
+  const filtered = tab === 'All' ? source : source.filter(p => p.status === tab);
   const groups = groupByMonth(filtered);
 
   return (
@@ -66,7 +67,11 @@ export default function PayoutHistoryScreen({ visible, onClose }) {
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
 
           {groups.length === 0 && (
-            <Text style={styles.emptyText}>No payouts found.</Text>
+            <View style={styles.emptyState}>
+              <Ionicons name="wallet-outline" size={40} color="#C8CDD4" />
+              <Text style={styles.emptyTitle}>No payout history</Text>
+              <Text style={styles.emptyText}>Your payouts will appear here after your first completed job.</Text>
+            </View>
           )}
 
           {groups.map(([month, items]) => (
@@ -109,6 +114,8 @@ export default function PayoutHistoryScreen({ visible, onClose }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#FFFFFF' },
+  emptyState: { alignItems: 'center', justifyContent: 'center', paddingTop: 80, paddingHorizontal: 40, gap: 12 },
+  emptyTitle: { color: '#17191D', fontSize: 16, fontWeight: '700', textAlign: 'center' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 72, paddingBottom: 10, backgroundColor: '#FFFFFF' },
   backBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { color: '#17191D', fontSize: 17, fontWeight: '700' },

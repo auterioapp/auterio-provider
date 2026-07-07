@@ -44,3 +44,13 @@ export const JOB_STEPS = [
   { key: 'inspection', label: 'Working', icon: 'construct-outline' },
   { key: 'completed', label: 'Complete', icon: 'checkmark-done-outline' },
 ];
+
+export const SHOP_JOB_STEPS = [
+  { key: 'scheduled',   label: 'Scheduled' },
+  { key: 'checked_in',  label: 'Checked In' },
+  { key: 'inspection',  label: 'Inspection' },
+  { key: 'in_progress', label: 'In Progress' },
+  { key: 'completed',   label: 'Completed' },
+];
+
+export const ACTIVE_SHOP_STATUSES = ['checked_in', 'inspection', 'estimate', 'waiting_approval', 'in_progress'];

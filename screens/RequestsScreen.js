@@ -2,14 +2,13 @@ import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-nati
 import { Ionicons } from '@expo/vector-icons';
 import useScrollToTop from '../hooks/useScrollToTop';
 import SwipePager from '../components/SwipePager';
-import { getServiceMeta, formatMoney, getVehicleLabel, getRequestLocation } from '../utils/serviceUtils';
+import { getServiceMeta, formatMoney, getVehicleLabel, getRequestLocation, getRequestDistance, getServiceMode } from '../utils/serviceUtils';
 
 export default function RequestsScreen({ requests, acceptingId, filter, onFilterChange, onAccept, onDecline, onConfirm, onCounter, onScheduleAccept, onScheduleDecline, onOpen, allowScheduling, verificationStatus, refreshControl, scrollSignal }) {
   const scrollRef = useScrollToTop(scrollSignal);
-  const acceptedCount = 2;
   const tabs = [
     { key: 'new', label: `New (${requests.length})` },
-    { key: 'accepted', label: `Accepted (${acceptedCount})` },
+    { key: 'accepted', label: 'Accepted' },
     { key: 'declined', label: 'Declined' },
   ];
 
@@ -83,12 +82,20 @@ function fmtScheduledTime(isoStr) {
   return `${months[d.getMonth()]} ${d.getDate()} · ${displayH}:${String(m).padStart(2,'0')} ${p}`;
 }
 
+const MODE_CONFIG = {
+  mobile: { color: '#F97316', bg: '#FFF7F0', icon: 'navigate-outline', label: 'Mobile', sub: 'Comes to you' },
+  shop:   { color: '#2563EB', bg: '#EFF6FF', icon: 'business-outline',  label: 'Shop',   sub: 'Drop off'     },
+};
+
 function RequestCard({ order, accepting, onAccept, onDecline, onConfirm, onCounter, onScheduleAccept, onScheduleDecline, onOpen, allowScheduling, verificationStatus }) {
   const serviceMeta = getServiceMeta(order);
   const icon = serviceMeta.icon;
   const title = serviceMeta.title;
   const vehicle = getVehicleLabel(order);
   const location = getRequestLocation(order);
+  const distance = getRequestDistance(order);
+  const serviceMode = getServiceMode(order);
+  const mode = MODE_CONFIG[serviceMode] || MODE_CONFIG.mobile;
   const isScheduledPending = order.status === 'scheduled_pending';
   const isScheduled = isScheduledPending || order.isScheduledRequest || order.status === 'scheduled';
 
@@ -98,6 +105,9 @@ function RequestCard({ order, accepting, onAccept, onDecline, onConfirm, onCount
       onPress={() => onOpen && onOpen(order)}
       activeOpacity={0.86}
     >
+      {/* Left mode stripe */}
+      {!isScheduled && <View style={[styles.modeStripe, { backgroundColor: mode.color }]} />}
+
       {isScheduled && (
         <View style={styles.scheduledBanner}>
           <Ionicons name="calendar-outline" size={12} color="#7C3AED" />
@@ -105,17 +115,27 @@ function RequestCard({ order, accepting, onAccept, onDecline, onConfirm, onCount
           <Text style={styles.scheduledBannerTime}>{fmtScheduledTime(order.scheduledAt)}</Text>
         </View>
       )}
-      <View style={styles.requestCardTop}>
-        <View style={styles.activeListIcon}>
-          <Ionicons name={icon} size={20} color={isScheduled ? '#7C3AED' : '#F04416'} />
+      <View style={[styles.requestCardTop, !isScheduled && styles.requestCardTopStripe]}>
+        <View style={[styles.activeListIcon, !isScheduled && { borderColor: mode.bg, backgroundColor: mode.bg }]}>
+          <Ionicons name={icon} size={20} color={isScheduled ? '#7C3AED' : mode.color} />
         </View>
         <View style={styles.activeListInfo}>
-          <Text style={[styles.neutralListStatus, isScheduled && { color: '#7C3AED' }]}>
-            {isScheduled ? 'APPOINTMENT' : 'NEW REQUEST'}
-          </Text>
+          <View style={styles.statusRow}>
+            <Text style={[styles.neutralListStatus, isScheduled && { color: '#7C3AED' }]}>
+              {isScheduled ? 'APPOINTMENT' : 'NEW REQUEST'}
+            </Text>
+            {!isScheduled && (
+              <View style={[styles.modeBadge, { backgroundColor: mode.bg }]}>
+                <Ionicons name={mode.icon} size={9} color={mode.color} />
+                <Text style={[styles.modeBadgeText, { color: mode.color }]}>{mode.label} · {mode.sub}</Text>
+              </View>
+            )}
+          </View>
           <Text style={styles.activeListTitle} numberOfLines={1}>{title}</Text>
           {!!vehicle && <Text style={styles.activeListVehicle} numberOfLines={1}>{vehicle}</Text>}
-          <Text style={styles.activeListAddress} numberOfLines={1}>{location}</Text>
+          <Text style={[styles.activeListAddress, serviceMode === 'shop' && { color: '#2563EB' }]} numberOfLines={1}>
+            {location}{serviceMode !== 'shop' && distance ? ` · ${distance}` : ''}
+          </Text>
         </View>
         <View style={styles.activeListAside}>
           <Text style={styles.neutralListPrice}>{formatMoney(order)}</Text>
@@ -230,6 +250,11 @@ const styles = StyleSheet.create({
   scheduledBannerTime: { color: '#7C3AED', fontSize: 11, fontWeight: '600' },
   apptTimeBadge: { backgroundColor: '#F5F0FF', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 3, marginTop: 4 },
   apptTimeBadgeText: { color: '#7C3AED', fontSize: 10, fontWeight: '700' },
+  modeStripe: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 3 },
+  requestCardTopStripe: { paddingLeft: 13 },
+  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 1 },
+  modeBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, borderRadius: 5, paddingHorizontal: 5, paddingVertical: 2 },
+  modeBadgeText: { fontSize: 9, fontWeight: '700' },
   activeListIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E6E8EB', alignItems: 'center', justifyContent: 'center' },
   activeListInfo: { flex: 1, minWidth: 0 },
   activeListTitle: { color: '#17191D', fontSize: 16, lineHeight: 19, fontWeight: '800' },
@@ -238,7 +263,7 @@ const styles = StyleSheet.create({
   activeListAside: { width: 98, maxWidth: 98, alignItems: 'flex-end', flexShrink: 0, overflow: 'hidden' },
   activeListEtaRow: { maxWidth: 98, alignSelf: 'flex-end', flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 3, marginBottom: 4, overflow: 'hidden' },
   activeListEtaIcon: { flexShrink: 0 },
-  neutralListStatus: { color: '#F04416', fontSize: 10, lineHeight: 13, fontWeight: '800', marginBottom: 2 },
+  neutralListStatus: { color: '#F04416', fontSize: 10, lineHeight: 13, fontWeight: '800' },
   neutralListPrice: { color: '#F04416', fontSize: 20, lineHeight: 24, fontWeight: '800', marginBottom: 6, maxWidth: 98, textAlign: 'right' },
   neutralListEta: { color: '#F04416', fontSize: 9, lineHeight: 12, fontWeight: '700', textAlign: 'right', flexShrink: 1, minWidth: 0, maxWidth: 82 },
 });

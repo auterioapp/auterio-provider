@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import useScrollToTop from '../hooks/useScrollToTop';
-import PayoutsScreen from './PayoutsScreen';
+import EarningsPayoutScreen from './EarningsPayoutScreen';
 import RevenueBreakdownScreen, { DATA_BY_PERIOD } from './RevenueBreakdownScreen';
 
 const EARN_PERIODS = ['Today', 'This Week', 'This Month'];
@@ -225,8 +225,8 @@ export default function EarningsScreen({ refreshControl, scrollSignal, isDemo = 
             <Text style={styles.balanceLabel}>Available Balance</Text>
             <Ionicons name="information-circle-outline" size={14} color="#8B9098" />
           </View>
-          <Text style={styles.balanceAmount}>$2,180.00</Text>
-          <Text style={styles.balanceMeta}>Will be paid out on Jun 25</Text>
+          <Text style={styles.balanceAmount}>{isDemo ? '$2,180.00' : '$0.00'}</Text>
+          <Text style={styles.balanceMeta}>{isDemo ? 'Will be paid out on Jun 25' : 'No payouts scheduled'}</Text>
         </View>
         <View style={styles.balanceActionBlock}>
           <TouchableOpacity style={styles.withdrawBtn} activeOpacity={0.86} onPress={() => setPayoutsOpen(true)}>
@@ -244,12 +244,15 @@ export default function EarningsScreen({ refreshControl, scrollSignal, isDemo = 
       </EarningsListSection>
 
       <EarningsListSection title="Payout History">
-        {payouts.map(item => <PayoutRow key={item.date} {...item} />)}
+        {isDemo
+          ? payouts.map(item => <PayoutRow key={item.date} {...item} />)
+          : <View style={styles.emptyTransactions}><Ionicons name="wallet-outline" size={22} color="#C4C9D1" /><Text style={styles.emptyTransactionsText}>No payouts yet</Text></View>
+        }
       </EarningsListSection>
 
     </ScrollView>
-      <PayoutsScreen visible={payoutsOpen} onClose={() => setPayoutsOpen(false)} />
-      <RevenueBreakdownScreen visible={revenueOpen} onClose={() => setRevenueOpen(false)} />
+      <EarningsPayoutScreen visible={payoutsOpen} onClose={() => setPayoutsOpen(false)} isDemo={isDemo} />
+      <RevenueBreakdownScreen visible={revenueOpen} onClose={() => setRevenueOpen(false)} isDemo={isDemo} />
     </View>
   );
 }

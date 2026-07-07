@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Alert, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, Linking, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import Constants from 'expo-constants';
 import { Ionicons } from '@expo/vector-icons';
 import useScrollToTop from '../hooks/useScrollToTop';
 import ReviewsScreen from './ReviewsScreen';
@@ -11,10 +12,13 @@ import AppSettingsScreen from './AppSettingsScreen';
 import PricingScreen from './PricingScreen';
 import WorkingHoursScreen, { getHoursSummary } from './WorkingHoursScreen';
 import BusinessProfileScreen from './BusinessProfileScreen';
+import AccountInfoScreen from './AccountInfoScreen';
+import CalendarScreen from './CalendarScreen';
+import PayoutsScreen from './PayoutsScreen';
 import { API_URL, PROVIDER } from '../constants';
 import { loadPricing, savePricing } from '../utils/pricingStore';
 
-export default function ProfileScreen({ online, setOnline, refreshControl, scrollSignal, onLogout }) {
+export default function ProfileScreen({ online, setOnline, refreshControl, scrollSignal, onLogout, verificationStatus, setVerificationStatus, onProfileComplete }) {
   const scrollRef = useScrollToTop(scrollSignal);
   const [reviewsOpen, setReviewsOpen] = useState(false);
   const [servicesOpen, setServicesOpen] = useState(false);
@@ -25,6 +29,9 @@ export default function ProfileScreen({ online, setOnline, refreshControl, scrol
   const [hoursOpen, setHoursOpen] = useState(false);
   const [hoursSummary, setHoursSummary] = useState(null);
   const [businessOpen, setBusinessOpen] = useState(false);
+  const [payoutsOpen, setPayoutsOpen] = useState(false);
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const [accountInfoOpen, setAccountInfoOpen] = useState(false);
   const [businessName, setBusinessName] = useState('');
   const [savedRadius, setSavedRadius] = useState(18);
 
@@ -32,9 +39,11 @@ export default function ProfileScreen({ online, setOnline, refreshControl, scrol
   const [scheduleData, setScheduleData] = useState(null);
   const [providerType, setProviderType] = useState('mobile');
   const [isDemoAccount, setIsDemoAccount] = useState(PROVIDER.id === 'provider-demo-001');
-  const [verificationStatus, setVerificationStatus] = useState('unverified');
+  const [loading, setLoading] = useState(true);
+  const [networkError, setNetworkError] = useState(false);
 
   const loadProfileData = useCallback(async () => {
+    setLoading(true);
     try {
       const [profileRes, scheduleRes, pricing, radius, storedUser] = await Promise.all([
         fetch(`${API_URL}/profiles/${PROVIDER.id}`).then(r => r.ok ? r.json() : null).catch(() => null),
@@ -43,7 +52,14 @@ export default function ProfileScreen({ online, setOnline, refreshControl, scrol
         AsyncStorage.getItem('@service_radius'),
         AsyncStorage.getItem('providerUser'),
       ]);
-      if (profileRes) setProfileData(profileRes);
+      setNetworkError(!profileRes && !scheduleRes);
+      if (profileRes) {
+        setProfileData(profileRes);
+        if (profileRes.verificationStatus) {
+          setVerificationStatus?.(profileRes.verificationStatus);
+          AsyncStorage.setItem('@provider_verification_status', profileRes.verificationStatus);
+        }
+      }
       if (scheduleRes) {
         setScheduleData(scheduleRes);
         const apiDays = scheduleRes.days || {};
@@ -52,15 +68,14 @@ export default function ProfileScreen({ online, setOnline, refreshControl, scrol
       }
       if (pricing?.providerType) setProviderType(pricing.providerType);
       if (pricing?.businessName) setBusinessName(pricing.businessName);
-      const savedStatus = await AsyncStorage.getItem('@provider_verification_status');
-      if (savedStatus) setVerificationStatus(savedStatus);
-      else if (PROVIDER.id === 'provider-demo-001') setVerificationStatus('verified');
+      if (PROVIDER.id === 'provider-demo-001') setVerificationStatus?.('verified');
       if (radius) setSavedRadius(parseInt(radius, 10));
       if (storedUser) {
         const user = JSON.parse(storedUser);
         setIsDemoAccount((user.email || '').toLowerCase() === 'auterioapp@gmail.com');
       }
     } catch {}
+    setLoading(false);
   }, []);
 
   useEffect(() => {
@@ -74,6 +89,29 @@ export default function ProfileScreen({ online, setOnline, refreshControl, scrol
   const hasAddress = !needsAddress || !!profileData?.address;
   const profileComplete = isDemoAccount || (hasServices && hasHours && hasAddress);
 
+  useEffect(() => {
+    onProfileComplete?.(profileComplete);
+  }, [profileComplete]);
+
+  useEffect(() => {
+    if (!profileData) return;
+    if (profileComplete && verificationStatus === 'unverified' && !isDemoAccount) {
+      fetch(`${API_URL}/profiles/${PROVIDER.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ verificationStatus: 'pending_review' }),
+      })
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+          if (data?.verificationStatus) {
+            setVerificationStatus?.(data.verificationStatus);
+            AsyncStorage.setItem('@provider_verification_status', data.verificationStatus);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [profileComplete, verificationStatus, isDemoAccount, profileData]);
+
   const handleSetOnline = (val) => {
     if (val && !profileComplete) {
       Alert.alert(
@@ -86,83 +124,148 @@ export default function ProfileScreen({ online, setOnline, refreshControl, scrol
     setOnline(val);
   };
 
-  const menuItems = [
+  const menuSections = [
     {
-      id: 'performance',
-      title: 'Performance',
-      subtitle: 'View your performance insights',
-      icon: 'trending-up-outline',
-      iconBg: '#F3EEFF',
-      iconColor: '#7C3AED',
-      value: '98%',
-      valueColor: '#16A34A',
+      title: 'Business',
+      items: [
+        {
+          id: 'services',
+          title: 'Services',
+          subtitle: hasServices ? 'Manage your services and pricing' : 'Add the services you offer',
+          icon: 'construct-outline',
+          iconBg: hasServices ? '#EFF6FF' : '#FFF7ED',
+          iconColor: hasServices ? '#2563EB' : '#F97316',
+          value: hasServices ? String(isDemoAccount ? 6 : servicesCount) : null,
+          valueSub: hasServices ? 'Active' : null,
+          required: !hasServices,
+        },
+        {
+          id: 'hours',
+          title: 'Working Hours',
+          subtitle: hoursSummary || 'Set your working schedule',
+          icon: 'time-outline',
+          iconBg: hasHours ? '#FFF3E8' : '#FFF7ED',
+          iconColor: '#F97316',
+          required: !hasHours,
+        },
+        {
+          id: 'calendar',
+          title: 'Calendar',
+          subtitle: 'View and manage appointments',
+          icon: 'calendar-outline',
+          iconBg: '#F3EEFF',
+          iconColor: '#7C3AED',
+        },
+        {
+          id: 'radius',
+          title: 'Location',
+          subtitle: providerType === 'shop' || providerType === 'both'
+            ? (profileData?.address || 'Shop address not set')
+            : 'Set your address and service area',
+          icon: 'location-outline',
+          iconBg: '#ECFDF5',
+          iconColor: '#16A34A',
+          value: providerType === 'shop' ? null : `${savedRadius} mi`,
+          valueColor: '#16A34A',
+        },
+        {
+          id: 'business',
+          title: 'Business Information',
+          subtitle: businessName || (providerType === 'mobile' ? 'Mobile Service Provider' : providerType === 'shop' ? 'Service Shop' : 'Mobile & Shop'),
+          icon: 'briefcase-outline',
+          iconBg: '#F0F4FF',
+          iconColor: '#2563EB',
+        },
+        {
+          id: 'pricing',
+          title: 'Pricing',
+          subtitle: 'Set your rates and service fees',
+          icon: 'pricetag-outline',
+          iconBg: '#FFF7ED',
+          iconColor: '#F97316',
+        },
+      ],
     },
     {
-      id: 'reviews',
-      title: 'Reviews',
-      subtitle: 'See what your customers say',
-      icon: 'chatbubble-outline',
-      iconBg: '#FFF3E8',
-      iconColor: '#F97316',
-      value: '4.9',
-      valueSub: '128 reviews',
-      valueStar: true,
+      title: 'Account',
+      items: [
+        {
+          id: 'trust',
+          title: 'Trust & Compliance',
+          subtitle: 'View your verification status',
+          icon: 'shield-checkmark-outline',
+          iconBg: verificationStatus === 'verified' ? '#ECFDF5' : '#F5F6F7',
+          iconColor: verificationStatus === 'verified' ? '#16A34A' : '#8B9098',
+          value: verificationStatus === 'verified' ? 'Verified' : verificationStatus === 'pending_review' ? 'Under Review' : null,
+          valueColor: verificationStatus === 'verified' ? '#16A34A' : '#D97706',
+        },
+        {
+          id: 'payouts',
+          title: 'Payout & Banking',
+          subtitle: 'Manage your bank account and withdrawals',
+          icon: 'wallet-outline',
+          iconBg: '#ECFDF5',
+          iconColor: '#16A34A',
+        },
+        {
+          id: 'performance',
+          title: 'Performance',
+          subtitle: 'View your performance insights',
+          icon: 'trending-up-outline',
+          iconBg: '#F3EEFF',
+          iconColor: '#7C3AED',
+          value: isDemoAccount ? '98%' : null,
+          valueColor: '#16A34A',
+        },
+        {
+          id: 'reviews',
+          title: 'Reviews',
+          subtitle: 'See what your customers say',
+          icon: 'chatbubble-outline',
+          iconBg: '#FFF3E8',
+          iconColor: '#F97316',
+          value: isDemoAccount ? '4.9' : null,
+          valueSub: isDemoAccount ? '128 reviews' : null,
+          valueStar: isDemoAccount,
+        },
+      ],
     },
     {
-      id: 'services',
-      title: 'Services',
-      subtitle: hasServices ? 'Manage your services and pricing' : 'Add the services you offer',
-      icon: 'construct-outline',
-      iconBg: hasServices ? '#EFF6FF' : '#FFF7ED',
-      iconColor: hasServices ? '#2563EB' : '#F97316',
-      value: hasServices ? String(servicesCount) : null,
-      valueSub: hasServices ? 'Active' : null,
-      required: !hasServices,
-    },
-    {
-      id: 'radius',
-      title: 'Location',
-      subtitle: 'Set your address and service area',
-      icon: 'location-outline',
-      iconBg: '#ECFDF5',
-      iconColor: '#16A34A',
-      value: `${savedRadius} mi`,
-      valueColor: '#16A34A',
-    },
-    {
-      id: 'hours',
-      title: 'Working Hours',
-      subtitle: hoursSummary || 'Set your working schedule',
-      icon: 'time-outline',
-      iconBg: hasHours ? '#FFF3E8' : '#FFF7ED',
-      iconColor: hasHours ? '#F97316' : '#F97316',
-      required: !hasHours,
-    },
-    {
-      id: 'business',
-      title: 'Business Information',
-      subtitle: businessName || (providerType === 'mobile' ? 'Mobile Service Provider' : providerType === 'shop' ? 'Service Shop' : 'Mobile & Shop'),
-      icon: 'briefcase-outline',
-      iconBg: '#F0F4FF',
-      iconColor: '#2563EB',
-    },
-    {
-      id: 'trust',
-      title: 'Trust & Compliance',
-      subtitle: 'View your verification status',
-      icon: 'shield-checkmark-outline',
-      iconBg: '#ECFDF5',
-      iconColor: '#16A34A',
-      value: 'All Verified',
-      valueColor: '#16A34A',
-    },
-    {
-      id: 'support',
       title: 'Support',
-      subtitle: 'Help center and contact support',
-      icon: 'headset-outline',
-      iconBg: '#F5F6F7',
-      iconColor: '#374151',
+      items: [
+        {
+          id: 'support',
+          title: 'Support',
+          subtitle: 'Help center and contact support',
+          icon: 'headset-outline',
+          iconBg: '#F5F6F7',
+          iconColor: '#374151',
+        },
+        {
+          id: 'settings',
+          title: 'App Settings',
+          subtitle: 'Notifications, language and more',
+          icon: 'settings-outline',
+          iconBg: '#F5F6F7',
+          iconColor: '#374151',
+        },
+        {
+          id: 'privacy',
+          title: 'Privacy Policy',
+          subtitle: 'How we handle your data',
+          icon: 'lock-closed-outline',
+          iconBg: '#F5F6F7',
+          iconColor: '#374151',
+        },
+        {
+          id: 'terms',
+          title: 'Terms of Service',
+          subtitle: 'Rules and conditions of use',
+          icon: 'document-text-outline',
+          iconBg: '#F5F6F7',
+          iconColor: '#374151',
+        },
+      ],
     },
   ];
 
@@ -184,26 +287,48 @@ export default function ProfileScreen({ online, setOnline, refreshControl, scrol
       >
         <View style={styles.profileHeader}>
           <Text style={styles.profileTitle}>Profile</Text>
-          <TouchableOpacity onPress={() => setSettingsOpen(true)} activeOpacity={0.7}>
-            <Ionicons name="settings-outline" size={24} color="#17191D" />
-          </TouchableOpacity>
         </View>
+
+        {networkError && (
+          <TouchableOpacity style={styles.networkErrorBanner} activeOpacity={0.8} onPress={loadProfileData}>
+            <Ionicons name="cloud-offline-outline" size={15} color="#B45309" />
+            <Text style={styles.networkErrorText}>Could not connect to server. Tap to retry.</Text>
+          </TouchableOpacity>
+        )}
 
         <View style={styles.profileHeroCard}>
           <View style={styles.profileAvatar}>
-            <Text style={styles.profileAvatarText}>{PROVIDER.initials}</Text>
+            <Text style={styles.profileAvatarText}>
+              {businessName ? businessName.trim().slice(0, 2).toUpperCase() : PROVIDER.initials}
+            </Text>
           </View>
           <View style={styles.profileHeroInfo}>
-            <Text style={styles.profileName}>{PROVIDER.company}</Text>
-            <Text style={styles.profileSub}>
-              {providerType === 'mobile' ? 'Mobile Service Provider' : providerType === 'shop' ? 'Service Shop' : 'Mobile & Shop'}
-            </Text>
-            <View style={styles.profileRatingRow}>
-              <Ionicons name="star" size={13} color="#F5B301" />
-              <Text style={styles.profileRatingText}>{PROVIDER.rating} rating</Text>
-              <View style={styles.profileDot} />
-              <Text style={styles.profileRatingText}>128 reviews</Text>
-            </View>
+            {loading
+              ? <View style={styles.skeletonName} />
+              : <Text style={styles.profileName}>{businessName || PROVIDER.company}</Text>
+            }
+            {loading
+              ? <View style={styles.skeletonSub} />
+              : <Text style={styles.profileSub}>
+                  {providerType === 'mobile' ? 'Mobile Service Provider' : providerType === 'shop' ? 'Service Shop' : 'Mobile & Shop'}
+                </Text>
+            }
+            {isDemoAccount && (
+              <View style={styles.profileRatingRow}>
+                <Ionicons name="star" size={13} color="#F5B301" />
+                <Text style={styles.profileRatingText}>{PROVIDER.rating} rating</Text>
+                <View style={styles.profileDot} />
+                <Text style={styles.profileRatingText}>128 reviews</Text>
+              </View>
+            )}
+            {!isDemoAccount && profileData?.reviews > 0 && (
+              <View style={styles.profileRatingRow}>
+                <Ionicons name="star" size={13} color="#F5B301" />
+                <Text style={styles.profileRatingText}>{profileData.rating?.toFixed(1)} rating</Text>
+                <View style={styles.profileDot} />
+                <Text style={styles.profileRatingText}>{profileData.reviews} {profileData.reviews === 1 ? 'review' : 'reviews'}</Text>
+              </View>
+            )}
             <View style={[
               styles.verifBadge,
               verificationStatus === 'verified' && styles.verifBadgeVerified,
@@ -223,6 +348,9 @@ export default function ProfileScreen({ online, setOnline, refreshControl, scrol
               </Text>
             </View>
           </View>
+          <TouchableOpacity style={styles.heroEditBtn} activeOpacity={0.7} onPress={() => setAccountInfoOpen(true)}>
+            <Ionicons name="pencil-outline" size={16} color="#5E646D" />
+          </TouchableOpacity>
         </View>
 
         {/* Completion banner */}
@@ -273,33 +401,54 @@ export default function ProfileScreen({ online, setOnline, refreshControl, scrol
               value={online && profileComplete}
               onValueChange={handleSetOnline}
               disabled={!profileComplete}
-              trackColor={{ false: '#E6E8EB', true: '#D9DDE2' }}
-              thumbColor={online && profileComplete ? '#128A3A' : '#8B9098'}
+              trackColor={{ false: '#E6E8EB', true: '#16A34A' }}
+              thumbColor={online && profileComplete ? '#FFFFFF' : '#8B9098'}
               style={styles.profileOnlineSwitch}
             />
           </View>
         </View>
 
-        <View style={styles.menuList}>
-          {menuItems.map(item => (
-            <MenuItem
-              key={item.id}
-              item={item}
-              onPress={
-                item.id === 'reviews' ? () => setReviewsOpen(true) :
-                item.id === 'services' ? () => setServicesOpen(true) :
-                item.id === 'radius' ? () => setRadiusOpen(true) :
-                item.id === 'trust' ? () => setTrustOpen(true) :
-                item.id === 'pricing' ? () => setPricingOpen(true) :
-                item.id === 'hours' ? () => setHoursOpen(true) :
-                item.id === 'business' ? () => setBusinessOpen(true) :
-                undefined
-              }
-            />
-          ))}
-        </View>
+        {menuSections.map(section => (
+          <View key={section.title} style={styles.menuSection}>
+            <Text style={styles.menuSectionTitle}>{section.title}</Text>
+            <View style={styles.menuList}>
+              {section.items.map(item => (
+                <MenuItem
+                  key={item.id}
+                  item={item}
+                  onPress={
+                    item.id === 'reviews'     ? () => setReviewsOpen(true) :
+                    item.id === 'services'    ? () => setServicesOpen(true) :
+                    item.id === 'radius'      ? () => setRadiusOpen(true) :
+                    item.id === 'trust'       ? () => setTrustOpen(true) :
+                    item.id === 'hours'       ? () => setHoursOpen(true) :
+                    item.id === 'business'    ? () => setBusinessOpen(true) :
+                    item.id === 'payouts'     ? () => setPayoutsOpen(true) :
+                    item.id === 'settings'    ? () => setSettingsOpen(true) :
+                    item.id === 'pricing'     ? () => setPricingOpen(true) :
+                    item.id === 'calendar'    ? () => setCalendarOpen(true) :
+                    item.id === 'privacy'     ? () => Linking.openURL('https://auterio.com/privacy') :
+                    item.id === 'terms'       ? () => Linking.openURL('https://auterio.com/terms') :
+                    undefined
+                  }
+                />
+              ))}
+            </View>
+          </View>
+        ))}
+
+        {/* Version */}
+        <Text style={styles.versionText}>AuterioPro v{Constants.expoConfig?.version || '1.0.0'}</Text>
+
+
       </ScrollView>
 
+      <AccountInfoScreen
+        visible={accountInfoOpen}
+        onClose={() => setAccountInfoOpen(false)}
+        isDemoAccount={isDemoAccount}
+        onSaved={(name) => { setBusinessName(name); loadProfileData(); }}
+      />
       <BusinessProfileScreen
         visible={businessOpen}
         providerType={providerType}
@@ -312,12 +461,21 @@ export default function ProfileScreen({ online, setOnline, refreshControl, scrol
           setBusinessName(name);
           PROVIDER.company = name || PROVIDER.company;
           PROVIDER.initials = (name || PROVIDER.company).slice(0, 2).toUpperCase();
+          if (!isDemoAccount && name.trim()) {
+            fetch(`${API_URL}/profiles/${PROVIDER.id}`, {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ name: name.trim(), initials: name.trim().slice(0, 2).toUpperCase(), type }),
+            }).catch(() => {});
+          }
           setBusinessOpen(false);
         }}
       />
-      <ReviewsScreen visible={reviewsOpen} onClose={() => setReviewsOpen(false)} />
+      <CalendarScreen visible={calendarOpen} onClose={() => setCalendarOpen(false)} />
+      <ReviewsScreen visible={reviewsOpen} onClose={() => setReviewsOpen(false)} isDemo={isDemoAccount} />
+      <PayoutsScreen visible={payoutsOpen} onClose={() => setPayoutsOpen(false)} isDemo={isDemoAccount} />
       <ServicesScreen visible={servicesOpen} onClose={() => { setServicesOpen(false); loadProfileData(); }} />
-      <TrustComplianceScreen visible={trustOpen} onClose={() => setTrustOpen(false)} />
+      <TrustComplianceScreen visible={trustOpen} onClose={() => setTrustOpen(false)} verificationStatus={verificationStatus} />
       <PricingScreen visible={pricingOpen} onClose={() => setPricingOpen(false)} />
       <WorkingHoursScreen
         visible={hoursOpen}
@@ -331,7 +489,7 @@ export default function ProfileScreen({ online, setOnline, refreshControl, scrol
       />
       <ServiceRadiusScreen
         visible={radiusOpen}
-        onClose={() => setRadiusOpen(false)}
+        onClose={() => { setRadiusOpen(false); loadProfileData(); }}
         onSave={r => setSavedRadius(r)}
       />
     </View>
@@ -383,8 +541,17 @@ const styles = StyleSheet.create({
   profileAvatar: { width: 58, height: 58, borderRadius: 29, backgroundColor: '#17191D', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   profileAvatarText: { color: '#FFFFFF', fontSize: 18, lineHeight: 22, fontWeight: '900' },
   profileHeroInfo: { flex: 1, minWidth: 0 },
+  heroEditBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#ECEEF0', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   profileName: { color: '#17191D', fontSize: 18, lineHeight: 23, fontWeight: '700' },
   profileSub: { color: '#5E646D', fontSize: 12, lineHeight: 16, fontWeight: '600', marginTop: 2 },
+  networkErrorBanner: {
+    flexDirection: 'row', alignItems: 'center', gap: 8,
+    backgroundColor: '#FFFBEB', borderRadius: 10, borderWidth: 1, borderColor: '#FDE68A',
+    paddingHorizontal: 12, paddingVertical: 10, marginBottom: 10,
+  },
+  networkErrorText: { color: '#B45309', fontSize: 12, fontWeight: '600', flex: 1 },
+  skeletonName: { height: 18, width: 140, borderRadius: 6, backgroundColor: '#E4E6EA', marginBottom: 6 },
+  skeletonSub: { height: 12, width: 100, borderRadius: 4, backgroundColor: '#ECEEF0' },
   profileRatingRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 7 },
   verifBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8, alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 20, backgroundColor: '#F3F4F5', borderWidth: 1, borderColor: '#E5E7EB' },
   verifBadgeVerified: { backgroundColor: 'rgba(22,163,74,0.08)', borderColor: 'rgba(22,163,74,0.2)' },
@@ -415,7 +582,9 @@ const styles = StyleSheet.create({
   profileStatusTextOnline: { color: '#128A3A' },
   profileOnlineSwitch: { transform: [{ scaleX: 0.72 }, { scaleY: 0.72 }], marginLeft: -3 },
 
-  menuList: { gap: 10 },
+  menuSection: { marginBottom: 6, marginTop: 18 },
+  menuSectionTitle: { color: '#8B9098', fontSize: 11, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: 8, marginLeft: 2 },
+  menuList: { gap: 8 },
   menuItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', paddingHorizontal: 12, paddingVertical: 10, gap: 10 },
   menuItemRequired: { borderColor: '#FDE68A', backgroundColor: '#FFFBEB' },
   menuIcon: { width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
@@ -429,4 +598,5 @@ const styles = StyleSheet.create({
   menuValueSub: { color: '#6B7280', fontSize: 11, lineHeight: 14, fontWeight: '500', marginTop: 1 },
   requiredBadge: { backgroundColor: '#FEF3C7', borderRadius: 5, paddingHorizontal: 6, paddingVertical: 2 },
   requiredBadgeText: { color: '#D97706', fontSize: 10, fontWeight: '700' },
+  versionText: { color: '#C4C9D4', fontSize: 12, fontWeight: '500', textAlign: 'center', marginTop: 16, marginBottom: 4 },
 });

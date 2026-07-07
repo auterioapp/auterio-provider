@@ -2,13 +2,17 @@ import { useState } from 'react';
 import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
-import { getServiceMeta, getVehicleLabel, getDropoffAddress, isTowingService, getProviderIntakeItems } from '../utils/serviceUtils';
+import { getServiceMeta, getVehicleLabel, getDropoffAddress, isTowingService, getProviderIntakeItems, getServiceMode } from '../utils/serviceUtils';
 import { REQUEST_MAP_REGION, REQUEST_ROUTE } from '../constants';
 
 export default function RequestDetailScreen({ order, accepting, providerType = 'mobile', onBack, onAccept, onSchedule, onDecline, refreshControl }) {
   const [noteOpen, setNoteOpen] = useState(false);
   const [bottomPanelHeight, setBottomPanelHeight] = useState(0);
   const accent = order.accent || '#42D463';
+  // Order mode takes priority over provider type for button logic
+  const orderMode = getServiceMode(order); // 'mobile' | 'shop'
+  const isShopOrder = orderMode === 'shop';
+  const isMobileOrder = orderMode === 'mobile';
   const serviceMeta = getServiceMeta(order);
   const icon = serviceMeta.icon;
   const title = serviceMeta.title;
@@ -101,7 +105,7 @@ export default function RequestDetailScreen({ order, accepting, providerType = '
             <Ionicons name={icon} size={22} color="#F04416" />
           </View>
           <View style={styles.serviceInfo}>
-            <Text style={styles.serviceType} numberOfLines={2}>{displayVehicle}</Text>
+            <Text style={styles.serviceType} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.75}>{displayVehicle}</Text>
             <Text style={styles.serviceVehicle} numberOfLines={1}>Sedan - 92,000 mi</Text>
             <View style={[styles.trustedLine, styles.vehicleTrustedLine]}>
               <Ionicons name="checkmark-circle-outline" size={13} color="#F04416" />
@@ -184,15 +188,15 @@ export default function RequestDetailScreen({ order, accepting, providerType = '
             <Text style={styles.largeDeclineTitle}>Decline</Text>
             <Text style={styles.largeButtonSubtitle}>Reject this request</Text>
           </TouchableOpacity>
-          {providerType !== 'shop' && (
+          {isMobileOrder && (
             <TouchableOpacity style={styles.largeAcceptButton} onPress={() => onAccept(order)} disabled={accepting} activeOpacity={0.84}>
-              <Text style={styles.largeAcceptTitle}>{accepting ? 'Accepting...' : providerType === 'both' ? 'Go Now' : 'Accept'}</Text>
+              <Text style={styles.largeAcceptTitle}>{accepting ? 'Accepting...' : 'Accept'}</Text>
               <Text style={styles.largeAcceptSubtitle}>Accept and head out</Text>
             </TouchableOpacity>
           )}
-          {providerType !== 'mobile' && (
+          {isShopOrder && (
             <TouchableOpacity style={styles.largeScheduleButton} onPress={() => onSchedule && onSchedule(order)} activeOpacity={0.84}>
-              <Text style={styles.largeScheduleTitle}>{providerType === 'both' ? 'Schedule' : 'Book Appointment'}</Text>
+              <Text style={styles.largeScheduleTitle}>Book Appointment</Text>
               <Text style={styles.largeScheduleSubtitle}>Pick a date & time</Text>
             </TouchableOpacity>
           )}
@@ -247,7 +251,7 @@ function EarningStat({ icon, value, label }) {
   );
 }
 
-export function RequestInfoRow({ icon, color, label, value, chevron, onPress }) {
+export function RequestInfoRow({ icon, color, label, value, chevron, onPress, valueStyle, labelStyle }) {
   const RowComponent = onPress ? TouchableOpacity : View;
   const rowProps = onPress ? { activeOpacity: 0.82, onPress } : {};
   return (
@@ -255,8 +259,8 @@ export function RequestInfoRow({ icon, color, label, value, chevron, onPress }) 
       <View style={[styles.requestInfoIcon, { backgroundColor: color + '18' }]}>
         <Ionicons name={icon} size={16} color={color} />
       </View>
-      <Text style={styles.requestInfoLabel}>{label}</Text>
-      <Text style={styles.requestInfoValue} numberOfLines={2}>{value}</Text>
+      <Text style={[styles.requestInfoLabel, labelStyle]}>{label}</Text>
+      <Text style={[styles.requestInfoValue, valueStyle]} numberOfLines={2}>{value}</Text>
       {chevron && <Ionicons style={styles.requestInfoChevron} name="chevron-forward" size={16} color="#8B9098" />}
     </RowComponent>
   );
@@ -265,7 +269,7 @@ export function RequestInfoRow({ icon, color, label, value, chevron, onPress }) 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#020C1A' },
   requestDetailShell: { flex: 1, backgroundColor: '#FFFFFF' },
-  requestDetailHeader: { minHeight: 68, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 6, backgroundColor: '#FFFFFF' },
+  requestDetailHeader: { minHeight: 68, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 72, backgroundColor: '#FFFFFF' },
   requestHeaderIconBtn: { width: 42, height: 42, alignItems: 'flex-start', justifyContent: 'center' },
   requestHeaderTitle: { position: 'absolute', left: 72, right: 72, bottom: 13, color: '#17191D', fontSize: 19, lineHeight: 24, fontWeight: '700', textAlign: 'center' },
   requestDetailScroll: { backgroundColor: '#FFFFFF' },

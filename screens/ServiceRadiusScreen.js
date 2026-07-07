@@ -41,10 +41,17 @@ export default function ServiceRadiusScreen({ visible, onClose, onSave }) {
     }, 350);
   };
 
-  const selectSuggestion = (prediction) => {
+  const selectSuggestion = async (prediction) => {
     setAddress(prediction.description);
     addressRef.current = prediction.description;
     setSuggestions([]);
+    try {
+      const url = `https://maps.googleapis.com/maps/api/place/details/json?place_id=${prediction.place_id}&fields=geometry&key=${GOOGLE_API_KEY}`;
+      const res = await fetch(url);
+      const json = await res.json();
+      const loc = json?.result?.geometry?.location;
+      if (loc) setCenter({ latitude: loc.lat, longitude: loc.lng });
+    } catch {}
   };
 
   useEffect(() => {

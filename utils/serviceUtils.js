@@ -348,7 +348,19 @@ export function getRequestLocation(order) {
 
 export function getRequestDistance(order) {
   const demo = getDemoRequestDetails(order);
-  return order.distance || order.orderContext?.distance || demo.distance || 'Distance pending';
+  return order.distance || order.orderContext?.distance || demo.distance || null;
+}
+
+// 'mobile' = provider goes to customer | 'shop' = customer brings car
+export function getServiceMode(order) {
+  return (
+    order.tracking?.mode ||
+    order.trackingMode ||
+    order.serviceMode ||
+    order.service?.serviceMode ||
+    order.orderContext?.serviceMode ||
+    'mobile'
+  );
 }
 
 export function getVehicleVin(job) {

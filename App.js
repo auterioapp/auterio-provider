@@ -1,5 +1,5 @@
 ﻿import { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Easing, KeyboardAvoidingView, Linking, Modal, PanResponder, Platform, RefreshControl, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Animated, Dimensions, Easing, KeyboardAvoidingView, Linking, Modal, PanResponder, Platform, RefreshControl, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
@@ -18,10 +18,12 @@ import EarningsScreen from './screens/EarningsScreen';
 import ProfileScreen from './screens/ProfileScreen';
 import RequestsScreen from './screens/RequestsScreen';
 import RequestDetailScreen, { RequestInfoRow } from './screens/RequestDetailScreen';
+import ShopRequestDetailScreen from './screens/ShopRequestDetailScreen';
+import { getServiceMode } from './utils/serviceUtils';
 import JobsScreen from './screens/JobsScreen';
 import JobDetailScreen, { JobStepper } from './screens/JobDetailScreen';
 import { getJobProgressIndex } from './utils/jobUtils';
-import { API_URL, PROVIDER, ACCEPT_BLUE, TAB_BAR_PADDING, TAB_INDICATOR_EXTRA_WIDTH, TAB_INDICATOR_DROP_SCALE, TABS, REQUEST_ROUTE, REQUEST_MAP_REGION, JOB_STEPS } from './constants';
+import { API_URL, PROVIDER, ACCEPT_BLUE, TAB_BAR_PADDING, TAB_INDICATOR_EXTRA_WIDTH, TAB_INDICATOR_DROP_SCALE, TABS, REQUEST_ROUTE, REQUEST_MAP_REGION, JOB_STEPS, ACTIVE_SHOP_STATUSES } from './constants';
 
 import { formatMoney, getServiceMeta, getServiceTitle, getOrderServiceType, getServiceFlowSchema, getDiagnosisSchema, getProviderIntakeItems, isTowingService, getDropoffAddress, getRequestLocation, getRequestDistance, getVehicleVin, normalizeComplaintItem, getCustomerComplaintItems, getAcceptedAtLabel, getVehicleLabel, getBackendStatusFromWorkflowStage } from './utils/serviceUtils';
 import { getRecommendedServicesFromDiagnosis, getDemoEstimate, getEstimateCatalog, getEstimatePriceCheck, sumAmounts, formatCurrency } from './utils/estimateUtils';
@@ -113,6 +115,16 @@ function normalizeOrderToJob(order) {
   };
 }
 
+const DEMO_JOBS = [
+  { id: 'demo-job-001', status: 'on_the_way', eta: '12 min', icon: 'car-outline', service: { type: 'Oil Change' }, vehicle: { year: '2021', make: 'Toyota', model: 'Camry' }, pickup: { address: '142 Maple St, Austin TX' }, payment: { total: 89 }, distance: '3.2 mi' },
+  { id: 'demo-job-002', status: 'waiting_approval', icon: 'construct-outline', service: { type: 'Brake Inspection' }, vehicle: { year: '2019', make: 'Honda', model: 'Civic' }, pickup: { address: '78 Oak Ave, Austin TX' }, payment: { total: 210 }, distance: '1.8 mi' },
+  { id: 'demo-job-003', status: 'inspection', icon: 'flash-outline', service: { type: 'Battery Replacement' }, vehicle: { year: '2020', make: 'Ford', model: 'F-150' }, pickup: { address: '500 Congress Ave, Austin TX' }, payment: { total: 145 }, distance: '5.1 mi' },
+  { id: 'demo-job-004', status: 'scheduled', appointmentTime: 'Tomorrow, 10:00 AM', icon: 'calendar-outline', service: { type: 'Full Service' }, vehicle: { year: '2022', make: 'BMW', model: '3 Series' }, pickup: { address: '310 Lamar Blvd, Austin TX' }, payment: { total: 320 } },
+  { id: 'demo-job-005', status: 'scheduled', appointmentTime: 'Thu, Jul 10 · 2:00 PM', icon: 'calendar-outline', service: { type: 'Tire Rotation' }, vehicle: { year: '2018', make: 'Chevrolet', model: 'Silverado' }, pickup: { address: '900 S 1st St, Austin TX' }, payment: { total: 60 } },
+  { id: 'demo-job-006', status: 'completed', icon: 'checkmark-circle-outline', service: { type: 'AC Diagnostics' }, vehicle: { year: '2017', make: 'Nissan', model: 'Altima' }, pickup: { address: '25 W 6th St, Austin TX' }, payment: { total: 175 }, distance: '2.4 mi' },
+  { id: 'demo-job-007', status: 'completed', icon: 'checkmark-circle-outline', service: { type: 'Engine Tune-Up' }, vehicle: { year: '2016', make: 'Hyundai', model: 'Elantra' }, pickup: { address: '602 E 11th St, Austin TX' }, payment: { total: 230 }, distance: '4.0 mi' },
+];
+
 export default function App() {
   const [authState, setAuthState] = useState('loading');
   const pendingBusinessType = useRef('mobile');
@@ -141,6 +153,9 @@ export default function App() {
   const [allowScheduling, setAllowScheduling] = useState(false);
   const [appointmentOrder, setAppointmentOrder] = useState(null);
   const [jobWorkflows, setJobWorkflows] = useState({});
+  const [toastMsg, setToastMsg] = useState(null);
+  const toastAnim = useRef(new Animated.Value(0)).current;
+  const toastTimer = useRef(null);
   const requestAnim = useRef(new Animated.Value(0)).current;
   const tabIndicatorX = useRef(new Animated.Value(0)).current;
   const tabIndicatorDrop = useRef(new Animated.Value(1)).current;
@@ -153,8 +168,11 @@ export default function App() {
   const tabDragFrame = useRef(null);
 
   const dashboardRequests = requests;
-  const providerJobs = useMemo(() => acceptedJobs, [acceptedJobs]);
-  const activeJobs = useMemo(() => providerJobs.filter(job => job.status !== 'completed' && job.status !== 'scheduled').length, [providerJobs]);
+  const providerJobs = useMemo(() => isDemo ? [...DEMO_JOBS, ...acceptedJobs] : acceptedJobs, [acceptedJobs, isDemo]);
+  const activeJobs = useMemo(() => providerJobs.filter(job =>
+    ACTIVE_SHOP_STATUSES.includes(job.shopStatus) ||
+    (job.status !== 'completed' && job.status !== 'scheduled' && job.status !== 'proposed')
+  ).length, [providerJobs]);
   const pendingCount = dashboardRequests.length;
   const tabWidth = tabBarWidth ? (tabBarWidth - TAB_BAR_PADDING * 2) / TABS.length : 0;
   const isLightVisible = !!selectedRequest || (!selectedRequest && (activeScreen === 'home' || activeScreen === 'requests' || activeScreen === 'jobs' || activeScreen === 'earnings' || activeScreen === 'profile'));
@@ -162,6 +180,27 @@ export default function App() {
   const [isDemo, setIsDemo] = useState(false);
   const [completedOrders, setCompletedOrders] = useState([]);
   const [verificationStatus, setVerificationStatus] = useState('unverified');
+  const [profileComplete, setProfileComplete] = useState(false);
+  const profileCompleteRef = useRef(false);
+  const reminderIndexRef = useRef(0);
+
+  const PROFILE_REMINDER_MESSAGES = [
+    'Almost there! Add your services to start receiving orders.',
+    'Set your working hours and unlock incoming requests.',
+    'Complete your profile — providers earn more with a full setup.',
+    'Finish setup in under 2 minutes and get your first order today.',
+  ];
+
+  useEffect(() => {
+    if (profileCompleteRef.current || isDemo) return;
+    const interval = setInterval(() => {
+      if (profileCompleteRef.current || isDemo) return;
+      const msg = PROFILE_REMINDER_MESSAGES[reminderIndexRef.current % PROFILE_REMINDER_MESSAGES.length];
+      reminderIndexRef.current += 1;
+      showToast(msg);
+    }, 20 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, [isDemo]);
 
   const loadProviderJobsFromBackend = async (providerId) => {
     try {
@@ -219,6 +258,15 @@ export default function App() {
     if (!demo) {
       loadProviderJobsFromBackend(PROVIDER.id);
       registerPushToken(PROVIDER.id);
+      // Ensure provider profile exists in DB (creates it if new), then sync name
+      const profileName = (user?.companyName || user?.name || '').trim();
+      fetchJson(`${API_URL}/profiles/${PROVIDER.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...(profileName ? { name: profileName, initials: profileName.slice(0, 2).toUpperCase() } : {}),
+        }),
+      }).catch(() => {});
     }
     if (demo) {
       setAuthState('app');
@@ -249,6 +297,16 @@ export default function App() {
       setAllowScheduling(scheduling);
       loadRequests();
     });
+    if (!isDemo) {
+      fetchJson(`${API_URL}/profiles/${PROVIDER.id}`)
+        .then(data => {
+          if (data?.verificationStatus) {
+            setVerificationStatus(data.verificationStatus);
+            AsyncStorage.setItem('@provider_verification_status', data.verificationStatus);
+          }
+        })
+        .catch(() => {});
+    }
   }, [authState]);
 
   useEffect(() => {
@@ -270,6 +328,7 @@ export default function App() {
   }, [dashboardRequests.length > 0]);
 
   const loadRequests = async () => {
+    if (verificationStatus === 'unverified') { setRequests([]); return; }
     const type = providerTypeRef.current;
     const isMobile = type === 'mobile' || type === 'both';
     const isShop = type === 'shop' || type === 'both';
@@ -319,10 +378,57 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (!online) return undefined;
+    if (!online || verificationStatus === 'unverified') {
+      if (verificationStatus === 'unverified') setRequests([]);
+      return undefined;
+    }
     const timer = setInterval(loadRequests, 7000);
     return () => clearInterval(timer);
-  }, [online, acceptedRequestIds]);
+  }, [online, acceptedRequestIds, verificationStatus]);
+
+  useEffect(() => {
+    if (isDemo) return;
+    const subscription = Notifications.addNotificationReceivedListener(notification => {
+      const data = notification.request.content.data;
+      if (data?.type === 'proposal_accepted' && data?.orderId) {
+        setAcceptedJobs(current => current.map(job =>
+          String(job.id) === String(data.orderId) ? { ...job, status: 'scheduled' } : job
+        ));
+        showToast('Customer accepted your proposal!');
+      }
+      if (data?.type === 'estimate_approved' && data?.orderId) {
+        setAcceptedJobs(current => current.map(job =>
+          String(job.id) === String(data.orderId) ? { ...job, shopStatus: 'in_progress' } : job
+        ));
+        showToast('Customer approved the estimate!');
+      }
+    });
+    return () => subscription.remove();
+  }, [isDemo]);
+
+  const updateShopStep = (order, newShopStatus, extra = {}) => {
+    setAcceptedJobs(current => current.map(job =>
+      String(job.id) === String(order.id)
+        ? { ...job, shopStatus: newShopStatus, ...extra }
+        : job
+    ));
+    if (newShopStatus === 'waiting_approval' && extra?.estimate) {
+      const { labor = 0, parts = 0, laborSubtotal = 0, partsSubtotal = 0, subtotal = 0, tax = 0, total = 0, note = '' } = extra.estimate;
+      const orderId = order.id || order._id;
+      if (orderId && !String(orderId).startsWith('demo')) {
+        fetchJson(`${API_URL}/orders/${orderId}/status`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            status: 'estimate_sent',
+            estimate: { labor, parts, laborSubtotal, partsSubtotal, subtotal, tax, total, note },
+          }),
+        }).catch(e => console.log('Estimate sync error:', e.message));
+      }
+      showToast('Estimate sent to customer');
+    } else if (newShopStatus === 'completed') {
+      showToast('Job completed!');
+    }
+  };
 
   const addAcceptedJob = (order, patch = {}) => {
     const nextJob = normalizeOrderToJob({ ...order, ...patch });
@@ -333,7 +439,21 @@ export default function App() {
     return nextJob;
   };
 
+  const guardProfileComplete = () => {
+    if (profileCompleteRef.current || isDemo) return true;
+    Alert.alert(
+      'Profile not complete',
+      'Add your services and working hours to start accepting orders. It only takes a minute!',
+      [
+        { text: 'Not now', style: 'cancel' },
+        { text: 'Set up profile', onPress: () => { setActiveScreen('profile'); setActiveTab('profile'); } },
+      ]
+    );
+    return false;
+  };
+
   const acceptOrder = async (order) => {
+    if (!guardProfileComplete()) return;
     try {
       setAcceptingId(order.id);
       const nextJob = addAcceptedJob(order, { status: 'accepted', acceptedAt: new Date().toISOString() });
@@ -363,6 +483,7 @@ export default function App() {
   };
 
   const confirmScheduledOrder = async (order) => {
+    if (!guardProfileComplete()) return;
     try {
       setAcceptingId(order.id);
       const realId = String(order.id || order._id);
@@ -390,6 +511,7 @@ export default function App() {
   };
 
   const acceptScheduledBooking = async (order) => {
+    if (!guardProfileComplete()) return;
     try {
       setAcceptingId(order.id);
       const realId = String(order.id || order._id);
@@ -455,10 +577,20 @@ export default function App() {
     }
   };
 
+  const showToast = (msg) => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    setToastMsg(msg);
+    Animated.spring(toastAnim, { toValue: 1, useNativeDriver: true, tension: 80, friction: 10 }).start();
+    toastTimer.current = setTimeout(() => {
+      Animated.timing(toastAnim, { toValue: 0, duration: 250, useNativeDriver: true }).start(() => setToastMsg(null));
+    }, 3000);
+  };
+
   const scheduleOrder = async (order, appointmentTime) => {
+    if (!guardProfileComplete()) return;
     try {
       setAcceptingId(order.id);
-      const nextJob = addAcceptedJob(order, { status: 'scheduled', appointmentTime, acceptedAt: new Date().toISOString() });
+      const nextJob = addAcceptedJob(order, { status: 'proposed', appointmentTime, acceptedAt: new Date().toISOString() });
       fetchJson(`${API_URL}/orders/${order.id}/accept`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -585,6 +717,13 @@ export default function App() {
     setRefreshing(true);
     try {
       await loadRequests();
+      if (isDemo) {
+        setAcceptedJobs(current => current.map(job => {
+          if (job.status === 'proposed') return { ...job, status: 'scheduled' };
+          if (job.shopStatus === 'awaiting_approval') return { ...job, shopStatus: 'in_progress' };
+          return job;
+        }));
+      }
     } finally {
       setRefreshing(false);
     }
@@ -736,11 +875,14 @@ export default function App() {
           onComplete={async () => {
             await AsyncStorage.setItem('@setup_completed_v1', 'true');
             await AsyncStorage.setItem('@provider_verification_status', 'unverified');
-            // Tell backend setup is complete so cron job stops reminding
             fetchJson(`${API_URL}/profiles/${PROVIDER.id}`, {
               method: 'PUT',
               body: JSON.stringify({ profileCompletion: 100, lastActivityAt: new Date().toISOString() }),
             }).catch(() => {});
+            setAuthState('app');
+          }}
+          onSkip={async () => {
+            await AsyncStorage.setItem('@setup_completed_v1', 'true');
             setAuthState('app');
           }}
         />
@@ -754,7 +896,29 @@ export default function App() {
         <StatusBar style={isLightVisible ? 'dark' : 'light'} backgroundColor={isLightVisible ? '#FFFFFF' : '#020C1A'} />
 
         <View style={styles.screenSlot}>
-          {activeScreen === 'requests' ? (
+          <View style={activeScreen !== 'home' ? styles.screenHidden : styles.screenVisible}>
+            <HomeScreen
+              online={online}
+              setOnline={setOnline}
+              requests={dashboardRequests}
+              requestAnim={requestAnim}
+              acceptingId={acceptingId}
+              pendingCount={pendingCount}
+              activeJobs={activeJobs}
+              onOpenRequest={setSelectedRequest}
+              onViewAll={() => setActiveScreen('requests')}
+              allowScheduling={allowScheduling}
+              onAccept={acceptOrder}
+              onDecline={dismissRequest}
+              refreshControl={refreshControl}
+              scrollSignal={screenResetNonce}
+              verificationStatus={verificationStatus}
+              isDemo={isDemo}
+              profileComplete={profileComplete}
+              onGoToProfile={() => { setActiveScreen('profile'); setActiveTab('profile'); }}
+            />
+          </View>
+          <View style={activeScreen !== 'requests' ? styles.screenHidden : styles.screenVisible}>
             <RequestsScreen
               requests={dashboardRequests}
               acceptingId={acceptingId}
@@ -772,31 +936,16 @@ export default function App() {
               refreshControl={refreshControl}
               scrollSignal={screenResetNonce}
             />
-          ) : activeScreen === 'jobs' ? (
-          <JobsScreen jobs={providerJobs} jobWorkflows={jobWorkflows} onOpen={setSelectedJob} refreshControl={refreshControl} scrollSignal={screenResetNonce} providerType={providerType} />
-          ) : activeScreen === 'earnings' ? (
+          </View>
+          <View style={activeScreen !== 'jobs' ? styles.screenHidden : styles.screenVisible}>
+            <JobsScreen jobs={providerJobs} jobWorkflows={jobWorkflows} onOpen={setSelectedJob} refreshControl={refreshControl} scrollSignal={screenResetNonce} providerType={providerType} isDemo={isDemo} />
+          </View>
+          <View style={activeScreen !== 'earnings' ? styles.screenHidden : styles.screenVisible}>
             <EarningsScreen refreshControl={refreshControl} scrollSignal={screenResetNonce} isDemo={isDemo} completedOrders={completedOrders} />
-          ) : activeScreen === 'profile' ? (
-            <ProfileScreen online={online} setOnline={setOnline} refreshControl={refreshControl} scrollSignal={screenResetNonce} onLogout={handleLogout} />
-          ) : (
-            <HomeScreen
-              online={online}
-              setOnline={setOnline}
-              requests={dashboardRequests}
-              requestAnim={requestAnim}
-              acceptingId={acceptingId}
-              pendingCount={pendingCount}
-              activeJobs={activeJobs}
-              onOpenRequest={setSelectedRequest}
-              onViewAll={() => setActiveScreen('requests')}
-              allowScheduling={allowScheduling}
-              onAccept={acceptOrder}
-              onDecline={dismissRequest}
-              refreshControl={refreshControl}
-              scrollSignal={screenResetNonce}
-              verificationStatus={verificationStatus}
-            />
-          )}
+          </View>
+          <View style={activeScreen !== 'profile' ? styles.screenHidden : styles.screenVisible}>
+            <ProfileScreen online={online} setOnline={setOnline} refreshControl={refreshControl} scrollSignal={screenResetNonce} onLogout={handleLogout} verificationStatus={verificationStatus} setVerificationStatus={setVerificationStatus} onProfileComplete={(val) => { profileCompleteRef.current = val; setProfileComplete(val); }} />
+          </View>
         </View>
 
         <View pointerEvents="none" style={[styles.tabBarBackdrop, { backgroundColor: isLightVisible ? '#FFFFFF' : '#020C1A' }]} />
@@ -834,30 +983,30 @@ export default function App() {
           ))}
         </View>
 
-        <AppointmentModal
-          order={appointmentOrder}
-          onClose={() => setAppointmentOrder(null)}
-          onConfirm={async (order, appointmentTime) => {
-            setAppointmentOrder(null);
-            const job = await scheduleOrder(order, appointmentTime);
-            if (job) setSelectedJob(job);
-          }}
-        />
-
         <Modal
           visible={!!selectedRequest}
-          transparent
           animationType="slide"
           onRequestClose={() => setSelectedRequest(null)}
         >
           <View style={styles.requestModalOverlay}>
-            <TouchableOpacity
-              style={styles.requestModalBackdrop}
-              activeOpacity={1}
-              onPress={() => setSelectedRequest(null)}
-            />
             <View style={styles.requestModalSheet}>
-              {!!selectedRequest && (
+              {!!selectedRequest && getServiceMode(selectedRequest) === 'shop' ? (
+                <ShopRequestDetailScreen
+                  order={selectedRequest}
+                  accepting={acceptingId === selectedRequest.id}
+                  onBack={() => setSelectedRequest(null)}
+                  onAccept={async (o) => {
+                    await confirmScheduledOrder(o);
+                    setSelectedRequest(null);
+                    showToast('Request accepted — check the Jobs tab');
+                  }}
+                  onSchedule={(o) => { setSelectedRequest(null); setAppointmentOrder(o); }}
+                  onDecline={(o) => {
+                    dismissRequest(o);
+                    setSelectedRequest(null);
+                  }}
+                />
+              ) : !!selectedRequest && (
                 <RequestDetailScreen
                   order={selectedRequest}
                   accepting={acceptingId === selectedRequest.id}
@@ -868,10 +1017,10 @@ export default function App() {
                       setSelectedRequest(null);
                       await acceptScheduledBooking(o);
                     } else {
-                      const job = await acceptOrder(o);
+                      await acceptOrder(o);
                       setSelectedRequest(null);
-                      if (job) setSelectedJob(job);
                     }
+                    showToast('Request accepted — check the Jobs tab');
                   }}
                   onSchedule={(o) => { setSelectedRequest(null); setAppointmentOrder(o); }}
                   onDecline={(o) => {
@@ -890,20 +1039,36 @@ export default function App() {
           </View>
         </Modal>
 
+        <AppointmentModal
+          order={appointmentOrder}
+          onClose={() => { setSelectedRequest(appointmentOrder); setAppointmentOrder(null); }}
+          onConfirm={async (order, appointmentTime) => {
+            setAppointmentOrder(null);
+            await scheduleOrder(order, appointmentTime);
+            showToast('Proposal sent — waiting for customer confirmation');
+          }}
+        />
+
         <Modal
           visible={!!selectedJob}
-          transparent
           animationType="slide"
           onRequestClose={() => setSelectedJob(null)}
         >
           <View style={styles.requestModalOverlay}>
-            <TouchableOpacity
-              style={styles.requestModalBackdrop}
-              activeOpacity={1}
-              onPress={() => setSelectedJob(null)}
-            />
             <View style={styles.requestModalSheet}>
-              {!!selectedJob && (
+              {!!selectedJob && (selectedJob.status === 'scheduled' || selectedJob.status === 'proposed' || !!selectedJob.shopStatus) ? (
+                <ShopRequestDetailScreen
+                  order={selectedJob}
+                  isAccepted
+                  isProposed={selectedJob.status === 'proposed'}
+                  onBack={() => setSelectedJob(null)}
+                  onSchedule={(o) => { setSelectedJob(null); setAppointmentOrder(o); }}
+                  onStepChange={(o, nextStatus, extra) => {
+                    updateShopStep(o, nextStatus, extra);
+                    setSelectedJob(prev => prev ? { ...prev, shopStatus: nextStatus, ...extra } : prev);
+                  }}
+                />
+              ) : !!selectedJob && (
                 <JobPopupScreen
                   job={selectedJob}
                   workflow={jobWorkflows[selectedJob.id] || {}}
@@ -930,10 +1095,24 @@ export default function App() {
           onConfirm={(order, counterDate, counterSlot, note) => counterScheduledBooking(order, counterDate, counterSlot, note)}
         />
 
+        {!!toastMsg && (
+          <Animated.View style={[toastStyles.toast, {
+            opacity: toastAnim,
+            transform: [{ translateY: toastAnim.interpolate({ inputRange: [0, 1], outputRange: [20, 0] }) }],
+          }]}>
+            <Ionicons name="checkmark-circle" size={24} color="#22C55E" />
+            <Text style={toastStyles.text}>{toastMsg}</Text>
+          </Animated.View>
+        )}
       </SafeAreaView>
     </SafeAreaProvider>
   );
 }
+
+const toastStyles = StyleSheet.create({
+  toast: { position: 'absolute', bottom: 90, left: 16, right: 16, flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#17191D', borderRadius: 28, paddingVertical: 16, paddingHorizontal: 22, shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 16, shadowOffset: { width: 0, height: 6 }, elevation: 10 },
+  text: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
+});
 
 function pulseTabChange() {
   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
@@ -3210,6 +3389,176 @@ function CounterOfferModal({ order, onClose, onConfirm }) {
   );
 }
 
+function CalendarPickerModal({ visible, onClose, onSelect }) {
+  const today = new Date();
+  const [viewYear, setViewYear] = useState(today.getFullYear());
+  const [viewMonth, setViewMonth] = useState(today.getMonth());
+  const [pickedDate, setPickedDate] = useState(null);
+  const [pickedTime, setPickedTime] = useState(null);
+
+  const timeSlots = [];
+  for (let h = 8; h <= 17; h++) {
+    timeSlots.push(`${h > 12 ? h - 12 : h}:00 ${h >= 12 ? 'PM' : 'AM'}`);
+    if (h < 17) timeSlots.push(`${h > 12 ? h - 12 : h}:30 ${h >= 12 ? 'PM' : 'AM'}`);
+  }
+  const timeRows = [];
+  for (let i = 0; i < timeSlots.length; i += 4) timeRows.push(timeSlots.slice(i, 4 + i));
+  const CHIP_W = Math.floor((Dimensions.get('window').width - 32 - 24) / 4);
+
+  const firstDOW = new Date(viewYear, viewMonth, 1).getDay();
+  const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+  const calCells = [];
+  for (let i = 0; i < firstDOW; i++) calCells.push(null);
+  for (let d = 1; d <= daysInMonth; d++) calCells.push(d);
+  while (calCells.length % 7 !== 0) calCells.push(null);
+  const weeks = [];
+  for (let i = 0; i < calCells.length; i += 7) weeks.push(calCells.slice(i, i + 7));
+
+  const isPast = (d) => d && new Date(viewYear, viewMonth, d) < new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const isSelected = (d) => pickedDate && d === pickedDate.getDate() && viewYear === pickedDate.getFullYear() && viewMonth === pickedDate.getMonth();
+  const isToday = (d) => d && viewYear === today.getFullYear() && viewMonth === today.getMonth() && d === today.getDate();
+
+  const monthName = new Date(viewYear, viewMonth).toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+  const prevMonth = () => { if (viewMonth === 0) { setViewMonth(11); setViewYear(y => y - 1); } else setViewMonth(m => m - 1); };
+  const nextMonth = () => { if (viewMonth === 11) { setViewMonth(0); setViewYear(y => y + 1); } else setViewMonth(m => m + 1); };
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
+      <View style={calStyles.overlay}>
+        <TouchableOpacity style={calStyles.backdrop} activeOpacity={1} onPress={onClose} />
+        <View style={calStyles.sheet}>
+          <View style={calStyles.handle} />
+          <View style={calStyles.header}>
+            <Text style={calStyles.title}>Pick Date & Time</Text>
+            <TouchableOpacity style={calStyles.closeBtn} onPress={onClose} activeOpacity={0.8}>
+              <Ionicons name="close" size={20} color="#5E646D" />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={calStyles.content}>
+            {/* Month nav */}
+            <View style={calStyles.monthNav}>
+              <TouchableOpacity onPress={prevMonth} style={calStyles.navBtn} activeOpacity={0.7}>
+                <Ionicons name="chevron-back" size={20} color="#17191D" />
+              </TouchableOpacity>
+              <Text style={calStyles.monthLabel}>{monthName}</Text>
+              <TouchableOpacity onPress={nextMonth} style={calStyles.navBtn} activeOpacity={0.7}>
+                <Ionicons name="chevron-forward" size={20} color="#17191D" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Weekday headers */}
+            <View style={calStyles.weekRow}>
+              {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => (
+                <Text key={d} style={calStyles.weekDay}>{d}</Text>
+              ))}
+            </View>
+
+            {/* Calendar grid */}
+            {weeks.map((week, wi) => (
+              <View key={wi} style={calStyles.weekRow}>
+                {week.map((d, di) => {
+                  const past = isPast(d);
+                  const sel = isSelected(d);
+                  const tod = isToday(d);
+                  return (
+                    <TouchableOpacity
+                      key={di}
+                      style={[calStyles.dayCell, sel && calStyles.dayCellSelected, tod && !sel && calStyles.dayCellToday]}
+                      onPress={() => { if (d && !past) setPickedDate(new Date(viewYear, viewMonth, d)); }}
+                      activeOpacity={d && !past ? 0.8 : 1}
+                      disabled={!d || past}
+                    >
+                      <Text style={[calStyles.dayCellText, past && calStyles.dayCellPast, sel && calStyles.dayCellTextSelected, tod && !sel && calStyles.dayCellTextToday]}>
+                        {d || ''}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            ))}
+
+            {/* Time picker — shows after date selected */}
+            {!!pickedDate && (
+              <>
+                <Text style={calStyles.timeSectionLabel}>SELECT TIME</Text>
+                <View style={calStyles.timesGrid}>
+                  {timeRows.map((row, ri) => (
+                    <View key={ri} style={calStyles.timeRow}>
+                      {row.map(slot => (
+                        <TouchableOpacity
+                          key={slot}
+                          style={[calStyles.timeChip, { width: CHIP_W }, pickedTime === slot && calStyles.timeChipActive]}
+                          onPress={() => setPickedTime(slot)}
+                          activeOpacity={0.8}
+                        >
+                          <Text style={[calStyles.timeChipText, pickedTime === slot && calStyles.timeChipTextActive]}>{slot}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  ))}
+                </View>
+              </>
+            )}
+
+            <TouchableOpacity
+              style={[calStyles.confirmBtn, (!pickedDate || !pickedTime) && calStyles.confirmBtnDisabled, { marginTop: 20 }]}
+              activeOpacity={(pickedDate && pickedTime) ? 0.84 : 1}
+              onPress={() => { if (pickedDate && pickedTime) { onSelect(pickedDate, pickedTime); onClose(); } }}
+            >
+              <Text style={calStyles.confirmBtnText}>
+                {pickedDate && pickedTime
+                  ? `Confirm · ${pickedDate.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}, ${pickedTime}`
+                  : 'Select date & time'}
+              </Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+const calStyles = StyleSheet.create({
+  overlay: { flex: 1, justifyContent: 'flex-end' },
+  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(23,25,29,0.55)' },
+  sheet: { backgroundColor: '#FFF', borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '92%' },
+  handle: { width: 36, height: 4, borderRadius: 2, backgroundColor: '#E1E4E8', alignSelf: 'center', marginTop: 10 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 14, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: '#F0F1F3' },
+  title: { color: '#17191D', fontSize: 17, fontWeight: '800' },
+  closeBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#F3F4F5', alignItems: 'center', justifyContent: 'center' },
+  content: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 32 },
+  monthNav: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 },
+  navBtn: { width: 36, height: 36, borderRadius: 10, backgroundColor: '#F3F4F5', alignItems: 'center', justifyContent: 'center' },
+  monthLabel: { color: '#17191D', fontSize: 15, fontWeight: '700' },
+  weekRow: { flexDirection: 'row', marginBottom: 4 },
+  weekDay: { flex: 1, textAlign: 'center', color: '#9CA3AF', fontSize: 11, fontWeight: '700', paddingBottom: 8 },
+  dayCell: { flex: 1, height: 38, alignItems: 'center', justifyContent: 'center', borderRadius: 10 },
+  dayCellSelected: { backgroundColor: '#2563EB' },
+  dayCellToday: { borderWidth: 1, borderColor: '#2563EB' },
+  dayCellText: { color: '#17191D', fontSize: 14, fontWeight: '600' },
+  dayCellTextSelected: { color: '#FFF' },
+  dayCellTextToday: { color: '#2563EB' },
+  dayCellPast: { color: '#D1D5DB' },
+  timeSectionLabel: { color: '#9CA3AF', fontSize: 10, fontWeight: '800', letterSpacing: 0.8, marginTop: 20, marginBottom: 12 },
+  timesGrid: { gap: 8 },
+  timeRow: { flexDirection: 'row', gap: 8 },
+  timeChip: { height: 40, borderRadius: 8, backgroundColor: '#F3F4F5', borderWidth: 1, borderColor: '#ECEEF0', alignItems: 'center', justifyContent: 'center' },
+  timeChipActive: { backgroundColor: '#2563EB', borderColor: '#2563EB' },
+  timeChipText: { color: '#17191D', fontSize: 13, fontWeight: '600' },
+  timeChipTextActive: { color: '#FFF' },
+  confirmBtn: { backgroundColor: '#2563EB', borderRadius: 14, paddingVertical: 15, alignItems: 'center', justifyContent: 'center' },
+  confirmBtnDisabled: { backgroundColor: '#C4C9D1' },
+  confirmBtnText: { color: '#FFF', fontSize: 15, fontWeight: '800' },
+});
+
+const QUICK_OPTIONS = [
+  { icon: 'partly-sunny-outline', color: '#F97316', label: 'Tomorrow\nMorning', sub: '8:00 AM – 12:00 PM', day: 1, time: '8:00 AM' },
+  { icon: 'sunny-outline',        color: '#F97316', label: 'Tomorrow\nAfternoon', sub: '12:00 PM – 5:00 PM', day: 1, time: '12:00 PM' },
+  { icon: 'calendar-outline',     color: '#7C3AED', label: 'Pick Custom\nDate & Time', sub: 'Choose manually', day: null, time: null },
+];
+
 function AppointmentModal({ order, onClose, onConfirm }) {
   const today = new Date();
   const days = Array.from({ length: 7 }, (_, i) => {
@@ -3223,20 +3572,37 @@ function AppointmentModal({ order, onClose, onConfirm }) {
     if (h < 17) timeSlots.push(`${h > 12 ? h - 12 : h}:30 ${h >= 12 ? 'PM' : 'AM'}`);
   }
 
-  const [selectedDay, setSelectedDay] = useState(0);
+  const [selectedDay, setSelectedDay] = useState(1);
   const [selectedTime, setSelectedTime] = useState(null);
+  const [message, setMessage] = useState('');
+  const [calOpen, setCalOpen] = useState(false);
+  const [customDate, setCustomDate] = useState(null);
 
-  const dayLabel = (d, i) => {
-    if (i === 0) return 'Today';
-    if (i === 1) return 'Tomorrow';
-    return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-  };
+  useEffect(() => {
+    if (!order) {
+      setSelectedDay(1);
+      setSelectedTime(null);
+      setMessage('');
+      setCalOpen(false);
+      setCustomDate(null);
+    }
+  }, [order]);
 
-  const confirmLabel = () => {
-    if (!selectedTime) return 'Select a time';
-    const d = days[selectedDay];
-    const dayStr = selectedDay === 0 ? 'Today' : selectedDay === 1 ? 'Tomorrow' : d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-    return `Confirm · ${dayStr}, ${selectedTime}`;
+  const timeRows = [];
+  for (let i = 0; i < timeSlots.length; i += 4) timeRows.push(timeSlots.slice(i, 4 + i));
+  const CHIP_W = Math.floor((Dimensions.get('window').width - 32 - 24) / 4);
+
+  const customerRequestedTime = order?.scheduledSlotLabel || order?.scheduledSlot || 'Today • 2:00 PM';
+
+  const getConfirmDate = () => customDate || days[selectedDay];
+
+  const getSelectedLabel = () => {
+    if (!selectedTime) return null;
+    const d = getConfirmDate();
+    const isToday2 = d.toDateString() === today.toDateString();
+    const isTomorrow2 = d.toDateString() === new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1).toDateString();
+    const dayStr = isToday2 ? 'Today' : isTomorrow2 ? 'Tomorrow' : d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+    return `${dayStr} at ${selectedTime}`;
   };
 
   return (
@@ -3245,13 +3611,15 @@ function AppointmentModal({ order, onClose, onConfirm }) {
         <TouchableOpacity style={apptStyles.backdrop} activeOpacity={1} onPress={onClose} />
         <View style={apptStyles.sheet}>
           <View style={apptStyles.handle} />
+
+          {/* Header */}
           <View style={apptStyles.header}>
             <View style={apptStyles.headerIcon}>
               <Ionicons name="calendar-outline" size={18} color="#2563EB" />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={apptStyles.title}>Schedule Appointment</Text>
-              <Text style={apptStyles.sub}>{order?.service?.issueName || order?.issue?.name || 'Service'} · {order?.vehicle?.make || ''}</Text>
+              <Text style={apptStyles.title}>Suggest New Time</Text>
+              <Text style={apptStyles.sub}>Propose an alternative time for this job</Text>
             </View>
             <TouchableOpacity onPress={onClose} style={apptStyles.closeBtn}>
               <Ionicons name="close" size={20} color="#5E646D" />
@@ -3259,52 +3627,126 @@ function AppointmentModal({ order, onClose, onConfirm }) {
           </View>
 
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={apptStyles.content}>
+
+            {/* Customer requested banner */}
+            <View style={apptStyles.requestedBanner}>
+              <View style={apptStyles.requestedIconCircle}>
+                <Ionicons name="time-outline" size={18} color="#FFF" />
+              </View>
+              <View>
+                <Text style={apptStyles.requestedLabel}>Customer requested</Text>
+                <Text style={apptStyles.requestedTime}>{customerRequestedTime}</Text>
+              </View>
+            </View>
+            <Text style={apptStyles.instructionText}>Choose a different time to propose to the customer.</Text>
+
+            {/* Select day */}
             <Text style={apptStyles.sectionLabel}>SELECT DAY</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={apptStyles.daysRow}>
               {days.map((d, i) => (
                 <TouchableOpacity
                   key={i}
-                  style={[apptStyles.dayChip, selectedDay === i && apptStyles.dayChipActive]}
-                  onPress={() => setSelectedDay(i)}
+                  style={[apptStyles.dayChip, !customDate && selectedDay === i && apptStyles.dayChipActive]}
+                  onPress={() => { setSelectedDay(i); setCustomDate(null); }}
                   activeOpacity={0.8}
                 >
-                  <Text style={[apptStyles.dayChipText, selectedDay === i && apptStyles.dayChipTextActive]}>{dayLabel(d, i)}</Text>
+                  <Text style={[apptStyles.dayChipLabel, !customDate && selectedDay === i && apptStyles.dayChipTextActive]}>
+                    {i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : d.toLocaleDateString('en-US', { weekday: 'short' })}
+                  </Text>
+                  <Text style={[apptStyles.dayChipDate, !customDate && selectedDay === i && apptStyles.dayChipTextActive]}>
+                    {d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                  </Text>
                 </TouchableOpacity>
               ))}
+              {customDate ? (
+                <TouchableOpacity style={[apptStyles.dayChip, apptStyles.dayChipActive]} onPress={() => setCalOpen(true)} activeOpacity={0.8}>
+                  <Text style={[apptStyles.dayChipLabel, apptStyles.dayChipTextActive]}>
+                    {customDate.toLocaleDateString('en-US', { weekday: 'short' })}
+                  </Text>
+                  <Text style={[apptStyles.dayChipDate, apptStyles.dayChipTextActive]}>
+                    {customDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                  </Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity style={apptStyles.dayChipMore} onPress={() => setCalOpen(true)} activeOpacity={0.8}>
+                  <Ionicons name="calendar-outline" size={14} color="#2563EB" />
+                  <Text style={apptStyles.dayChipMoreText}>More</Text>
+                </TouchableOpacity>
+              )}
             </ScrollView>
 
-            <Text style={[apptStyles.sectionLabel, { marginTop: 20 }]}>SELECT TIME</Text>
+            {/* Select time */}
+            <Text style={[apptStyles.sectionLabel, { marginTop: 22 }]}>SELECT TIME</Text>
             <View style={apptStyles.timesGrid}>
-              {timeSlots.map(slot => (
-                <TouchableOpacity
-                  key={slot}
-                  style={[apptStyles.timeChip, selectedTime === slot && apptStyles.timeChipActive]}
-                  onPress={() => setSelectedTime(slot)}
-                  activeOpacity={0.8}
-                >
-                  <Text style={[apptStyles.timeChipText, selectedTime === slot && apptStyles.timeChipTextActive]}>{slot}</Text>
-                </TouchableOpacity>
+              {timeRows.map((row, ri) => (
+                <View key={ri} style={apptStyles.timeRow}>
+                  {row.map(slot => (
+                    <TouchableOpacity
+                      key={slot}
+                      style={[apptStyles.timeChip, { width: CHIP_W }, selectedTime === slot && apptStyles.timeChipActive]}
+                      onPress={() => setSelectedTime(slot)}
+                      activeOpacity={0.8}
+                    >
+                      <Text style={[apptStyles.timeChipText, selectedTime === slot && apptStyles.timeChipTextActive]}>{slot}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
               ))}
             </View>
+
+            {/* Message to customer */}
+            <Text style={[apptStyles.sectionLabel, { marginTop: 22 }]}>MESSAGE TO CUSTOMER (OPTIONAL)</Text>
+            <View style={apptStyles.messageBox}>
+              <Ionicons name="chatbubble-outline" size={18} color="#9CA3AF" style={{ marginTop: 2 }} />
+              <TextInput
+                style={apptStyles.messageInput}
+                placeholder="Add a note for the customer..."
+                placeholderTextColor="#9CA3AF"
+                multiline
+                maxLength={200}
+                value={message}
+                onChangeText={setMessage}
+              />
+              <Text style={apptStyles.messageCount}>{message.length}/200</Text>
+            </View>
+
           </ScrollView>
 
+          {/* Footer */}
           <View style={apptStyles.footer}>
             <TouchableOpacity
               style={[apptStyles.confirmBtn, !selectedTime && apptStyles.confirmBtnDisabled]}
               activeOpacity={selectedTime ? 0.84 : 1}
               onPress={() => {
                 if (!selectedTime) return;
-                const d = days[selectedDay];
+                const d = getConfirmDate();
                 const appointmentTime = `${d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}, ${selectedTime}`;
                 onConfirm(order, appointmentTime);
               }}
             >
-              <Ionicons name="calendar-outline" size={18} color="#fff" />
-              <Text style={apptStyles.confirmBtnText}>{confirmLabel()}</Text>
+              <Ionicons name="send-outline" size={18} color="#fff" />
+              <View style={{ alignItems: 'center' }}>
+                <Text style={apptStyles.confirmBtnText}>Send Proposal</Text>
+                {!!selectedTime && <Text style={apptStyles.confirmBtnSub}>{getSelectedLabel()}</Text>}
+              </View>
             </TouchableOpacity>
+            <View style={apptStyles.footerNote}>
+              <Ionicons name="lock-closed-outline" size={12} color="#9CA3AF" />
+              <Text style={apptStyles.footerNoteText}>The customer will be notified and can accept or decline.</Text>
+            </View>
           </View>
         </View>
       </View>
+
+      <CalendarPickerModal
+        visible={calOpen}
+        onClose={() => setCalOpen(false)}
+        onSelect={(date, time) => {
+          setCustomDate(date);
+          setSelectedTime(time);
+          setCalOpen(false);
+        }}
+      />
     </Modal>
   );
 }
@@ -3312,35 +3754,59 @@ function AppointmentModal({ order, onClose, onConfirm }) {
 const apptStyles = StyleSheet.create({
   overlay: { flex: 1, justifyContent: 'flex-end' },
   backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(23,25,29,0.55)' },
-  sheet: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '88%' },
+  sheet: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '92%' },
   handle: { width: 36, height: 4, borderRadius: 2, backgroundColor: '#E1E4E8', alignSelf: 'center', marginTop: 10 },
-  header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingTop: 16, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: '#F0F1F3' },
+  header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingTop: 14, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: '#F0F1F3' },
   headerIcon: { width: 38, height: 38, borderRadius: 10, backgroundColor: '#EFF6FF', alignItems: 'center', justifyContent: 'center' },
-  title: { color: '#17191D', fontSize: 16, fontWeight: '800' },
-  sub: { color: '#6B7280', fontSize: 12, marginTop: 1 },
-  closeBtn: { width: 32, height: 32, alignItems: 'center', justifyContent: 'center' },
+  title: { color: '#17191D', fontSize: 17, fontWeight: '800' },
+  sub: { color: '#6B7280', fontSize: 12, marginTop: 2 },
+  closeBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#F3F4F5', alignItems: 'center', justifyContent: 'center' },
   content: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 12 },
-  sectionLabel: { color: '#9CA3AF', fontSize: 10, fontWeight: '800', letterSpacing: 0.8, marginBottom: 10 },
+  requestedBanner: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#FFF7ED', borderRadius: 12, borderWidth: 1, borderColor: '#FED7AA', padding: 12, marginBottom: 12 },
+  requestedIconCircle: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#F97316', alignItems: 'center', justifyContent: 'center' },
+  requestedLabel: { color: '#374151', fontSize: 12, fontWeight: '600', marginBottom: 2 },
+  requestedTime: { color: '#F97316', fontSize: 15, fontWeight: '800' },
+  instructionText: { color: '#5E646D', fontSize: 13, lineHeight: 19, marginBottom: 18 },
+  sectionLabel: { color: '#9CA3AF', fontSize: 10, fontWeight: '800', letterSpacing: 0.8, marginBottom: 12 },
+  quickRow: { flexDirection: 'row', gap: 8, marginBottom: 4 },
+  quickCard: { flex: 1, borderRadius: 10, backgroundColor: '#F9FAFB', borderWidth: 1, borderColor: '#ECEEF0', padding: 10, gap: 4 },
+  quickLabel: { color: '#17191D', fontSize: 12, fontWeight: '700', lineHeight: 16 },
+  quickSub: { color: '#6B7280', fontSize: 10, fontWeight: '500' },
   daysRow: { gap: 8, paddingRight: 4 },
-  dayChip: { height: 34, borderRadius: 8, backgroundColor: '#F3F4F5', borderWidth: 1, borderColor: '#ECEEF0', paddingHorizontal: 14, alignItems: 'center', justifyContent: 'center' },
+  dayChip: { minWidth: 68, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 10, backgroundColor: '#F3F4F5', borderWidth: 1, borderColor: '#ECEEF0', alignItems: 'center', justifyContent: 'center' },
   dayChipActive: { backgroundColor: '#2563EB', borderColor: '#2563EB' },
-  dayChipText: { color: '#17191D', fontSize: 13, fontWeight: '600' },
+  dayChipLabel: { color: '#17191D', fontSize: 12, fontWeight: '700', marginBottom: 2 },
+  dayChipDate: { color: '#5E646D', fontSize: 10, fontWeight: '500' },
   dayChipTextActive: { color: '#FFFFFF' },
-  timesGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  timeChip: { height: 36, borderRadius: 8, backgroundColor: '#F3F4F5', borderWidth: 1, borderColor: '#ECEEF0', paddingHorizontal: 14, alignItems: 'center', justifyContent: 'center', minWidth: '22%' },
+  dayChipMore: { minWidth: 56, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 10, backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: '#BFDBFE', alignItems: 'center', justifyContent: 'center', gap: 3 },
+  dayChipMoreText: { color: '#2563EB', fontSize: 11, fontWeight: '700' },
+  customDateRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 10, paddingVertical: 11, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F9FAFB' },
+  customDateIcon: { width: 30, height: 30, borderRadius: 8, backgroundColor: '#EFF6FF', alignItems: 'center', justifyContent: 'center' },
+  customDateLabel: { flex: 1, color: '#2563EB', fontSize: 13, fontWeight: '600' },
+  timesGrid: { gap: 8 },
+  timeRow: { flexDirection: 'row', gap: 8 },
+  timeChip: { height: 42, borderRadius: 10, backgroundColor: '#F3F4F5', borderWidth: 1, borderColor: '#ECEEF0', alignItems: 'center', justifyContent: 'center' },
   timeChipActive: { backgroundColor: '#2563EB', borderColor: '#2563EB' },
   timeChipText: { color: '#17191D', fontSize: 13, fontWeight: '600' },
   timeChipTextActive: { color: '#FFFFFF' },
-  footer: { padding: 16, borderTopWidth: 1, borderTopColor: '#F0F1F3' },
-  confirmBtn: { backgroundColor: '#2563EB', borderRadius: 14, paddingVertical: 15, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 },
+  messageBox: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F9FAFB', padding: 12 },
+  messageInput: { flex: 1, color: '#17191D', fontSize: 13, minHeight: 36, maxHeight: 72 },
+  messageCount: { color: '#9CA3AF', fontSize: 10, alignSelf: 'flex-end' },
+  footer: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 20, borderTopWidth: 1, borderTopColor: '#F0F1F3', gap: 10 },
+  confirmBtn: { backgroundColor: '#2563EB', borderRadius: 14, paddingVertical: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10 },
   confirmBtnDisabled: { backgroundColor: '#C4C9D1' },
-  confirmBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: '800' },
+  confirmBtnText: { color: '#FFFFFF', fontSize: 16, fontWeight: '800' },
+  confirmBtnSub: { color: 'rgba(255,255,255,0.8)', fontSize: 11, fontWeight: '500', marginTop: 1 },
+  footerNote: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5 },
+  footerNoteText: { color: '#9CA3AF', fontSize: 11 },
 });
 
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: '#020C1A' },
   homeSafe: { backgroundColor: '#FFFFFF' },
   screenSlot: { flex: 1 },
+  screenVisible: { flex: 1 },
+  screenHidden: { flex: 1, display: 'none' },
   container: { flex: 1, backgroundColor: '#020C1A' },
   homeContainer: { backgroundColor: '#FFFFFF' },
   homeTitle: { color: '#17191D' },
@@ -3445,9 +3911,8 @@ const styles = StyleSheet.create({
   requestListEtaText: { color: '#5E646D', fontSize: 9, lineHeight: 12, fontWeight: '500', textAlign: 'right' },
   requestEmptyState: { minHeight: 260, alignItems: 'center', justifyContent: 'center', gap: 8 },
   requestEmptyText: { color: '#7A8BA8', fontSize: 13, fontWeight: '700' },
-  requestModalOverlay: { flex: 1, justifyContent: 'flex-end' },
-  requestModalBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(23,25,29,0.42)' },
-  requestModalSheet: { height: '88%', borderTopLeftRadius: 18, borderTopRightRadius: 18, overflow: 'hidden', backgroundColor: '#FFFFFF', shadowColor: '#000', shadowOpacity: 0.22, shadowRadius: 20, shadowOffset: { width: 0, height: -8 }, elevation: 18 },
+  requestModalOverlay: { flex: 1 },
+  requestModalSheet: { flex: 1, backgroundColor: '#FFFFFF' },
   tabBarBackdrop: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 82, zIndex: 8 },
   tabBar: { position: 'absolute', left: 22, right: 22, bottom: 14, height: 68, borderRadius: 34, backgroundColor: '#ECEEF0', borderWidth: 1.2, borderColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: TAB_BAR_PADDING, shadowColor: '#000', shadowOpacity: 0.22, shadowRadius: 18, shadowOffset: { width: 0, height: 9 }, elevation: 16, zIndex: 9 },
   tabIndicator: { position: 'absolute', left: TAB_BAR_PADDING, top: 4, bottom: 4, borderRadius: 30, backgroundColor: '#DADDE1' },
@@ -3637,7 +4102,7 @@ const styles = StyleSheet.create({
   scheduledEta: { color: '#F04416', fontSize: 13, lineHeight: 16, fontWeight: '800' },
   scheduledPay: { color: '#5E646D', fontSize: 9, lineHeight: 12, fontWeight: '500', textAlign: 'right' },
   requestDetailShell: { flex: 1, backgroundColor: '#FFFFFF' },
-  requestDetailHeader: { minHeight: 68, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 6, backgroundColor: '#FFFFFF' },
+  requestDetailHeader: { minHeight: 68, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 72, backgroundColor: '#FFFFFF' },
   requestHeaderIconBtn: { width: 42, height: 42, alignItems: 'flex-start', justifyContent: 'center' },
   requestHeaderMenuBtn: { width: 46, height: 46, borderRadius: 23, backgroundColor: '#F5F6F7', borderWidth: 1, borderColor: '#E6E8EB', alignItems: 'center', justifyContent: 'center' },
   requestHeaderTitle: { position: 'absolute', left: 72, right: 72, bottom: 13, color: '#17191D', fontSize: 19, lineHeight: 24, fontWeight: '700', textAlign: 'center' },

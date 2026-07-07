@@ -44,7 +44,7 @@ const RECENT_REVIEWS = [
   },
 ];
 
-export default function ReviewsScreen({ visible, onClose }) {
+export default function ReviewsScreen({ visible, onClose, isDemo }) {
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
       <View style={styles.container}>
@@ -56,6 +56,13 @@ export default function ReviewsScreen({ visible, onClose }) {
           <View style={styles.headerRight} />
         </View>
 
+        {!isDemo ? (
+          <View style={styles.emptyState}>
+            <Ionicons name="star-outline" size={48} color="#C8CDD4" />
+            <Text style={styles.emptyTitle}>No reviews yet</Text>
+            <Text style={styles.emptySub}>Reviews from your customers will appear here once you complete your first job.</Text>
+          </View>
+        ) : (
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <View style={styles.summaryCard}>
             <View style={styles.summaryTop}>
@@ -110,6 +117,7 @@ export default function ReviewsScreen({ visible, onClose }) {
             ))}
           </View>
         </ScrollView>
+        )}
       </View>
     </Modal>
   );
@@ -117,6 +125,9 @@ export default function ReviewsScreen({ visible, onClose }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F5F6F8' },
+  emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40, gap: 12 },
+  emptyTitle: { color: '#17191D', fontSize: 18, fontWeight: '700', textAlign: 'center' },
+  emptySub: { color: '#6B7280', fontSize: 14, textAlign: 'center', lineHeight: 20 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 72, paddingBottom: 14, backgroundColor: '#F5F6F8' },
   backBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { color: '#17191D', fontSize: 17, fontWeight: '700' },

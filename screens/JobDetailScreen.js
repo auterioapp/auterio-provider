@@ -287,7 +287,7 @@ function JobInfoRow({ icon, color, label, value, chevron, onPress }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#020C1A' },
-  jobHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 15, paddingVertical: 10, backgroundColor: '#020C1A' },
+  jobHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 15, paddingTop: 72, paddingBottom: 10, backgroundColor: '#020C1A' },
   jobHeaderTitle: { color: '#fff', fontSize: 17, fontWeight: '700' },
   jobBackBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   jobMenuBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },

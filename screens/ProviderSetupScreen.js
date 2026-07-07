@@ -35,7 +35,7 @@ const STEPS = [
   },
 ];
 
-export default function ProviderSetupScreen({ onComplete }) {
+export default function ProviderSetupScreen({ onComplete, onSkip }) {
   const [done, setDone] = useState({ services: false, zone: false, pricing: false });
   const [servicesOpen, setServicesOpen] = useState(false);
   const [zoneOpen, setZoneOpen] = useState(false);
@@ -126,6 +126,11 @@ export default function ProviderSetupScreen({ onComplete }) {
             {allDone ? 'Go to Dashboard →' : `Complete all ${STEPS.length} steps to continue`}
           </Text>
         </TouchableOpacity>
+        {!allDone && !!onSkip && (
+          <TouchableOpacity style={styles.skipBtn} onPress={onSkip} activeOpacity={0.7}>
+            <Text style={styles.skipBtnText}>Explore the app first</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       <ServicesScreen visible={servicesOpen} onClose={() => closeStep('services')} />
@@ -162,8 +167,10 @@ const styles = StyleSheet.create({
   verificationNote: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, backgroundColor: '#fff', borderRadius: 12, padding: 12, borderWidth: 1, borderColor: '#E5E7EB' },
   verificationText: { flex: 1, fontSize: 12, color: '#6B7280', lineHeight: 17 },
 
-  footer: { padding: 20, backgroundColor: '#F4F5F7', borderTopWidth: 1, borderTopColor: '#E5E7EB' },
+  footer: { padding: 20, paddingBottom: 24, backgroundColor: '#F4F5F7', borderTopWidth: 1, borderTopColor: '#E5E7EB', gap: 10 },
   startBtn: { backgroundColor: '#FF6B00', borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
   startBtnDisabled: { backgroundColor: '#D1D5DB' },
   startBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  skipBtn: { alignItems: 'center', paddingVertical: 6 },
+  skipBtnText: { color: '#9CA3AF', fontSize: 13, fontWeight: '600' },
 });

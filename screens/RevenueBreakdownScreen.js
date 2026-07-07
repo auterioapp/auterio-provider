@@ -96,7 +96,7 @@ function DonutChart({ segments }) {
   );
 }
 
-export default function RevenueBreakdownScreen({ visible, onClose }) {
+export default function RevenueBreakdownScreen({ visible, onClose, isDemo }) {
   const [period, setPeriod] = useState('This Week');
   const [showPeriods, setShowPeriods] = useState(false);
   const segments = DATA_BY_PERIOD[period];
@@ -112,6 +112,13 @@ export default function RevenueBreakdownScreen({ visible, onClose }) {
           <View style={styles.headerRight} />
         </View>
 
+        {!isDemo ? (
+          <View style={styles.emptyState}>
+            <Ionicons name="pie-chart-outline" size={48} color="#C8CDD4" />
+            <Text style={styles.emptyTitle}>No revenue data yet</Text>
+            <Text style={styles.emptySub}>Your revenue breakdown will appear here after completing your first job.</Text>
+          </View>
+        ) : (
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
 
           {/* Period picker */}
@@ -165,6 +172,7 @@ export default function RevenueBreakdownScreen({ visible, onClose }) {
           </View>
 
         </ScrollView>
+        )}
       </View>
     </Modal>
   );
@@ -172,6 +180,9 @@ export default function RevenueBreakdownScreen({ visible, onClose }) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F5F6F8' },
+  emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40, gap: 12 },
+  emptyTitle: { color: '#17191D', fontSize: 18, fontWeight: '700', textAlign: 'center' },
+  emptySub: { color: '#6B7280', fontSize: 14, textAlign: 'center', lineHeight: 20 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 72, paddingBottom: 14, backgroundColor: '#F5F6F8' },
   backBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { color: '#17191D', fontSize: 17, fontWeight: '700' },

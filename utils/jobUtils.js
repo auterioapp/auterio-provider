@@ -13,6 +13,10 @@ export function getJobStatusMeta(status) {
   if (status === 'estimate') return { label: 'BUILD ESTIMATE', actionLabel: 'Send Estimate', actionIcon: 'document-text-outline', color: '#F04416' };
   if (status === 'waiting_approval') return { label: 'WAITING APPROVAL', actionLabel: 'Message Customer', actionIcon: 'chatbubble-outline', color: '#1F6BFF' };
   if (status === 'completed') return { label: 'COMPLETED', actionLabel: 'Receipt', actionIcon: 'receipt-outline', color: '#22C55E' };
+  if (status === 'checked_in') return { label: 'CHECKED IN', actionLabel: 'Start Inspection', actionIcon: 'search-outline', color: '#2563EB' };
+  if (status === 'awaiting_approval') return { label: 'AWAITING APPROVAL', actionLabel: 'Message Customer', actionIcon: 'chatbubble-outline', color: '#D97706' };
+  if (status === 'in_progress') return { label: 'IN PROGRESS', actionLabel: 'Mark Ready', actionIcon: 'construct-outline', color: '#2563EB' };
+  if (status === 'ready_for_pickup') return { label: 'READY FOR PICKUP', actionLabel: 'Mark Complete', actionIcon: 'checkmark-circle-outline', color: '#16A34A' };
   return { label: 'ON THE WAY', actionLabel: 'Navigate', actionIcon: 'navigate-outline', color: '#F04416' };
 }
 
@@ -30,7 +34,17 @@ export function getWorkflowJobStatus(baseStatus, workflow) {
 }
 
 export function getJobStatusNote(status, job) {
-  if (status === 'waiting_approval') return 'Waiting 12 min';
+  if (status === 'waiting_approval') {
+    if (job.estimateSentAt) {
+      const mins = Math.floor((Date.now() - new Date(job.estimateSentAt).getTime()) / 60000);
+      if (mins < 1) return 'Waiting approval';
+      if (mins < 60) return `Waiting ${mins} min`;
+      const h = Math.floor(mins / 60);
+      const m = mins % 60;
+      return m > 0 ? `Waiting ${h}h ${m}m` : `Waiting ${h}h`;
+    }
+    return 'Waiting approval';
+  }
   if (status === 'arrived') return 'Ready for checklist';
   if (status === 'inspection') return 'Diagnosis in progress';
   if (status === 'estimate') return 'Preparing estimate';
