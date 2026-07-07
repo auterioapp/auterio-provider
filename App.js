@@ -543,13 +543,12 @@ export default function App() {
 
   const confirmScheduledOrder = async (order) => {
     if (!guardProfileComplete()) return;
+    const realId = String(order.id || order._id);
+    setAcceptingId(order.id);
+    dismissedRealIdsRef.current = [...dismissedRealIdsRef.current, realId];
+    setRequests(c => c.filter(item => String(item.id || item._id) !== realId));
     try {
-      setAcceptingId(order.id);
-      const realId = String(order.id || order._id);
-      dismissedRealIdsRef.current = [...dismissedRealIdsRef.current, realId];
-      setRequests(c => c.filter(item => String(item.id || item._id) !== realId));
-      const nextJob = addAcceptedJob(order, { status: 'scheduled', acceptedAt: new Date().toISOString() });
-      fetchJson(`${API_URL}/orders/${realId}/confirm-schedule`, {
+      await fetchJson(`${API_URL}/orders/${realId}/confirm-schedule`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -560,10 +559,13 @@ export default function App() {
             rating: PROVIDER.rating, eta: PROVIDER.eta, color: '#FF6B00',
           },
         }),
-      }).catch(e => console.log('Confirm order sync error:', e.message));
-      return nextJob;
+      });
+      addAcceptedJob(order, { status: 'scheduled', acceptedAt: new Date().toISOString() });
     } catch (error) {
       console.log('Confirm order error:', error.message);
+      dismissedRealIdsRef.current = dismissedRealIdsRef.current.filter(id => id !== realId);
+      loadRequests();
+      showToast('Could not confirm booking. Please try again.');
     } finally {
       setAcceptingId(null);
     }
@@ -1063,9 +1065,13 @@ export default function App() {
                   accepting={acceptingId === selectedRequest.id}
                   onBack={() => setSelectedRequest(null)}
                   onAccept={async (o) => {
-                    await confirmScheduledOrder(o);
+                    if (o.status === 'scheduled_pending') {
+                      await acceptScheduledBooking(o);
+                    } else {
+                      await confirmScheduledOrder(o);
+                    }
                     setSelectedRequest(null);
-                    showToast('Request accepted — check the Jobs tab');
+                    showToast('Booking confirmed — check the Jobs tab');
                   }}
                   onSchedule={(o) => { setSelectedRequest(null); setAppointmentOrder(o); }}
                   onDecline={(o) => {
