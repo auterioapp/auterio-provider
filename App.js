@@ -6,6 +6,7 @@ import * as Haptics from 'expo-haptics';
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import WelcomeScreen from './screens/WelcomeScreen';
@@ -27,7 +28,7 @@ import { API_URL, PROVIDER, ACCEPT_BLUE, TAB_BAR_PADDING, TAB_INDICATOR_EXTRA_WI
 
 import { formatMoney, getServiceMeta, getServiceTitle, getOrderServiceType, getServiceFlowSchema, getDiagnosisSchema, getProviderIntakeItems, isTowingService, getDropoffAddress, getRequestLocation, getRequestDistance, getVehicleVin, normalizeComplaintItem, getCustomerComplaintItems, getAcceptedAtLabel, getVehicleLabel, getBackendStatusFromWorkflowStage } from './utils/serviceUtils';
 import { getRecommendedServicesFromDiagnosis, getDemoEstimate, getEstimateCatalog, getEstimatePriceCheck, sumAmounts, formatCurrency } from './utils/estimateUtils';
-import { loadPricing, savePricing } from './utils/pricingStore';
+import { loadPricing, savePricing, DEFAULT_PRICING } from './utils/pricingStore';
 
 const DEMO_EMAIL = 'auterioapp@gmail.com';
 
@@ -221,13 +222,30 @@ export default function App() {
   };
 
   useEffect(() => {
-    AsyncStorage.multiGet(['providerToken', 'providerUser', '@setup_completed_v1', '@provider_verification_status']).then(entries => {
-      const token = entries[0][1];
-      const user = entries[1][1] ? JSON.parse(entries[1][1]) : null;
-      const setupDone = entries[2][1] === 'true';
-      const savedStatus = entries[3][1] || 'unverified';
+    const init = async () => {
+      // Migrate token from AsyncStorage to SecureStore (one-time, for existing users)
+      const legacy = await AsyncStorage.getItem('providerToken').catch(() => null);
+      if (legacy) {
+        await SecureStore.setItemAsync('providerToken', legacy).catch(() => {});
+        await AsyncStorage.removeItem('providerToken').catch(() => {});
+      }
+
+      const [token, refreshTok, entries] = await Promise.all([
+        SecureStore.getItemAsync('providerToken'),
+        SecureStore.getItemAsync('providerRefreshToken'),
+        AsyncStorage.multiGet(['providerUser', '@setup_completed_v1', '@provider_verification_status']),
+      ]);
+      return { token, refreshTok, entries };
+    };
+
+    init().then(({ token, refreshTok, entries }) => {
+      const user = entries[0][1] ? JSON.parse(entries[0][1]) : null;
+      const setupDone = entries[1][1] === 'true';
+      const savedStatus = entries[2][1] || 'unverified';
       if (token) {
         _authToken = token;
+        _refreshToken = refreshTok || null;
+        _onAuthFailure = handleLogout;
         applyProviderUser(user);
         const demo = PROVIDER.id === 'provider-demo-001';
         setIsDemo(demo);
@@ -243,18 +261,33 @@ export default function App() {
     });
   }, []);
 
-  const handleLogin = async (token, user, isRegister) => {
+  const handleLogin = async (token, refreshTok, user, isRegister) => {
     _authToken = token || 'logged_in';
-    await AsyncStorage.setItem('providerToken', _authToken);
+    _refreshToken = refreshTok || null;
+    _onAuthFailure = handleLogout;
+    await SecureStore.setItemAsync('providerToken', _authToken);
+    if (refreshTok) await SecureStore.setItemAsync('providerRefreshToken', refreshTok);
     if (user) await AsyncStorage.setItem('providerUser', JSON.stringify(user));
+    if (isRegister) {
+      // Fresh account — wipe all previous user's local data before applying new user
+      PROVIDER.id = 'provider-demo-001';
+      PROVIDER.company = 'Auterio Provider';
+      PROVIDER.name = 'Alex';
+      PROVIDER.initials = 'AP';
+      setProfileComplete(false);
+      profileCompleteRef.current = false;
+      await Promise.all([
+        AsyncStorage.removeItem('@setup_completed_v1'),
+        AsyncStorage.removeItem('@provider_verification_status'),
+        AsyncStorage.removeItem('@warranty_policy'),
+        AsyncStorage.removeItem('@service_radius'),
+        savePricing({ ...DEFAULT_PRICING, providerType: pendingBusinessType.current || 'mobile' }),
+      ]);
+    }
     applyProviderUser(user);
     const demo = PROVIDER.id === 'provider-demo-001';
     setIsDemo(demo);
     setVerificationStatus(demo ? 'verified' : 'unverified');
-    if (isRegister && pendingBusinessType.current) {
-      const current = await loadPricing();
-      await savePricing({ ...current, providerType: pendingBusinessType.current });
-    }
     if (!demo) {
       loadProviderJobsFromBackend(PROVIDER.id);
       registerPushToken(PROVIDER.id);
@@ -278,12 +311,29 @@ export default function App() {
 
   const handleLogout = async () => {
     _authToken = null;
+    _refreshToken = null;
+    _onAuthFailure = null;
     setIsDemo(false);
     setVerificationStatus('unverified');
     setCompletedOrders([]);
     setAcceptedJobs([]);
     setAcceptedRequestIds([]);
-    await AsyncStorage.multiRemove(['providerToken', 'providerUser']);
+    setProfileComplete(false);
+    profileCompleteRef.current = false;
+    PROVIDER.id = 'provider-demo-001';
+    PROVIDER.company = 'Auterio Provider';
+    PROVIDER.name = 'Alex';
+    PROVIDER.initials = 'AP';
+    await Promise.all([
+      SecureStore.deleteItemAsync('providerToken'),
+      SecureStore.deleteItemAsync('providerRefreshToken'),
+      AsyncStorage.removeItem('providerUser'),
+      AsyncStorage.removeItem('@setup_completed_v1'),
+      AsyncStorage.removeItem('@provider_verification_status'),
+      AsyncStorage.removeItem('@warranty_policy'),
+      AsyncStorage.removeItem('@service_radius'),
+      savePricing({ ...DEFAULT_PRICING }),
+    ]);
     setAuthState('welcome');
   };
 
@@ -333,10 +383,11 @@ export default function App() {
     const isMobile = type === 'mobile' || type === 'both';
     const isShop = type === 'shop' || type === 'both';
     try {
-      const [availableData, scheduledPendingData, scheduledData] = await Promise.all([
+      const [availableData, scheduledPendingData, scheduledData, myScheduledPendingData] = await Promise.all([
         isMobile ? fetchJson(`${API_URL}/orders/provider/available?providerId=${PROVIDER.id}`) : Promise.resolve([]),
         isShop   ? fetchJson(`${API_URL}/orders?status=scheduled_pending`)                     : Promise.resolve([]),
         isShop   ? fetchJson(`${API_URL}/orders?status=scheduled`)                             : Promise.resolve([]),
+        !isShop  ? fetchJson(`${API_URL}/orders?status=scheduled_pending&providerId=${PROVIDER.id}`) : Promise.resolve([]),
       ]);
 
       const dismissed = dismissedRealIdsRef.current;
@@ -349,13 +400,23 @@ export default function App() {
           )
         : [];
 
-      const bookingOrders = isShop && Array.isArray(scheduledPendingData)
+      const shopBookingOrders = isShop && Array.isArray(scheduledPendingData)
         ? scheduledPendingData.filter(o =>
             o.status === 'scheduled_pending' &&
             String(o.provider?.id) === String(PROVIDER.id) &&
             !dismissed.includes(String(o.id || o._id))
           )
         : [];
+
+      const mobileBookingOrders = !isShop && Array.isArray(myScheduledPendingData)
+        ? myScheduledPendingData.filter(o =>
+            o.status === 'scheduled_pending' &&
+            String(o.provider?.id) === String(PROVIDER.id) &&
+            !dismissed.includes(String(o.id || o._id))
+          )
+        : [];
+
+      const bookingOrders = [...shopBookingOrders, ...mobileBookingOrders];
 
       const scheduledOrders = isShop && Array.isArray(scheduledData)
         ? scheduledData.filter(o =>
@@ -382,7 +443,7 @@ export default function App() {
       if (verificationStatus === 'unverified') setRequests([]);
       return undefined;
     }
-    const timer = setInterval(loadRequests, 7000);
+    const timer = setInterval(loadRequests, 3000);
     return () => clearInterval(timer);
   }, [online, acceptedRequestIds, verificationStatus]);
 
@@ -454,10 +515,11 @@ export default function App() {
 
   const acceptOrder = async (order) => {
     if (!guardProfileComplete()) return;
+    const orderId = String(order.id || order._id);
+    setAcceptingId(order.id);
+    const nextJob = addAcceptedJob(order, { status: 'accepted', acceptedAt: new Date().toISOString() });
     try {
-      setAcceptingId(order.id);
-      const nextJob = addAcceptedJob(order, { status: 'accepted', acceptedAt: new Date().toISOString() });
-      fetchJson(`${API_URL}/orders/${order.id}/accept`, {
+      const acceptedOrder = await fetchJson(`${API_URL}/orders/${order.id}/accept`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -468,15 +530,23 @@ export default function App() {
             rating: PROVIDER.rating, eta: PROVIDER.eta, color: '#FF6B00',
           },
         }),
-      }).then((acceptedOrder) => {
-        if (acceptedOrder) addAcceptedJob(acceptedOrder, { status: 'accepted' });
-        loadRequests();
-      }).catch((error) => {
-        console.log('Accept order sync error:', error.message);
       });
+      if (acceptedOrder) addAcceptedJob(acceptedOrder, { status: 'accepted' });
+      loadRequests();
       return nextJob;
     } catch (error) {
-      console.log('Accept order error:', error.message);
+      // Rollback optimistic update
+      setAcceptedJobs(current => current.filter(j => String(j.id) !== orderId));
+      setAcceptedRequestIds(current => current.filter(id => id !== orderId));
+      setRequests(current =>
+        current.some(r => String(r.id || r._id) === orderId) ? current : [order, ...current]
+      );
+      loadRequests();
+      showToast(
+        error?.status === 409
+          ? 'This order was already taken by another provider.'
+          : 'Could not accept order. Please try again.'
+      );
     } finally {
       setAcceptingId(null);
     }
@@ -512,18 +582,26 @@ export default function App() {
 
   const acceptScheduledBooking = async (order) => {
     if (!guardProfileComplete()) return;
+    const realId = String(order.id || order._id);
+    setAcceptingId(order.id);
+    dismissedRealIdsRef.current = [...dismissedRealIdsRef.current, realId];
+    setRequests(c => c.filter(item => String(item.id || item._id) !== realId));
+    setSelectedRequest(null);
     try {
-      setAcceptingId(order.id);
-      const realId = String(order.id || order._id);
-      dismissedRealIdsRef.current = [...dismissedRealIdsRef.current, realId];
-      setRequests(c => c.filter(item => String(item.id || item._id) !== realId));
-      setSelectedRequest(null);
       await fetchJson(`${API_URL}/orders/${realId}/schedule-accept`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
       });
+      addAcceptedJob(order, { status: 'confirmed', acceptedAt: new Date().toISOString() });
     } catch (e) {
       console.log('Schedule accept error:', e.message);
+      dismissedRealIdsRef.current = dismissedRealIdsRef.current.filter(id => id !== realId);
+      loadRequests();
+      showToast(
+        e?.status === 409
+          ? 'This booking was already handled.'
+          : 'Could not confirm booking. Please try again.'
+      );
     } finally {
       setAcceptingId(null);
     }
@@ -861,7 +939,7 @@ export default function App() {
       <SafeAreaProvider>
         <AuthScreen
           mode={authState}
-          onLogin={(token, user) => handleLogin(token, user, authState === 'register')}
+          onLogin={(token, refreshTok, user) => handleLogin(token, refreshTok, user, authState === 'register')}
           onBack={() => setAuthState('welcome')}
         />
       </SafeAreaProvider>
@@ -3243,15 +3321,70 @@ function Tab({ icon, label, active, badge }) {
 }
 
 let _authToken = null;
+let _refreshToken = null;
+let _onAuthFailure = null;
+let _refreshPromise = null;
+
+async function tryRefreshToken() {
+  if (_refreshPromise) return _refreshPromise;
+  _refreshPromise = (async () => {
+    try {
+      const res = await fetch(`${API_URL}/auth/refresh`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken: _refreshToken }),
+      });
+      if (!res.ok) throw new Error('Refresh failed');
+      const data = await res.json();
+      _authToken = data.token;
+      _refreshToken = data.refreshToken;
+      await SecureStore.setItemAsync('providerToken', data.token);
+      await SecureStore.setItemAsync('providerRefreshToken', data.refreshToken);
+      return true;
+    } catch {
+      _onAuthFailure?.();
+      return false;
+    } finally {
+      _refreshPromise = null;
+    }
+  })();
+  return _refreshPromise;
+}
+
+function parseResponse(text, contentType, status) {
+  if (!text) return null;
+  if (!contentType.includes('application/json')) throw new Error(`Expected JSON, received ${contentType || 'unknown content type'}`);
+  return JSON.parse(text);
+}
 
 async function fetchJson(url, options = {}) {
-  const headers = { ...(options.headers || {}) };
-  if (_authToken && _authToken !== 'logged_in') {
-    headers['Authorization'] = `Bearer ${_authToken}`;
-  }
-  const response = await fetch(url, { ...options, headers });
+  const makeHeaders = () => ({
+    ...(options.headers || {}),
+    ...(_authToken && _authToken !== 'logged_in' ? { Authorization: `Bearer ${_authToken}` } : {}),
+  });
+
+  const response = await fetch(url, { ...options, headers: makeHeaders() });
   const text = await response.text();
   const contentType = response.headers.get('content-type') || '';
+
+  // Auto-refresh on 401
+  if (response.status === 401 && _refreshToken) {
+    const refreshed = await tryRefreshToken();
+    if (refreshed) {
+      const retry = await fetch(url, { ...options, headers: makeHeaders() });
+      const retryText = await retry.text();
+      const retryCT = retry.headers.get('content-type') || '';
+      if (!retry.ok) {
+        const payload = retryText ? JSON.parse(retryText) : {};
+        const e = new Error(payload.error || payload.message || `Request failed: ${retry.status}`);
+        e.status = retry.status;
+        throw e;
+      }
+      return parseResponse(retryText, retryCT, retry.status);
+    }
+    return null;
+  }
+
   if (!response.ok) {
     let message = `Request failed: ${response.status}`;
     if (contentType.includes('application/json') && text) {
@@ -3260,11 +3393,11 @@ async function fetchJson(url, options = {}) {
     } else if (text) {
       message = `${message} ${text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()}`;
     }
-    throw new Error(message);
+    const e = new Error(message);
+    e.status = response.status;
+    throw e;
   }
-  if (!text) return null;
-  if (!contentType.includes('application/json')) throw new Error(`Expected JSON, received ${contentType || 'unknown content type'}`);
-  return JSON.parse(text);
+  return parseResponse(text, contentType, response.status);
 }
 
 
