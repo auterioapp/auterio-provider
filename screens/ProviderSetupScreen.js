@@ -1,176 +1,553 @@
 import { useState } from 'react';
-import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import {
+  ActivityIndicator, Alert, KeyboardAvoidingView, Platform,
+  ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import ServicesScreen from './ServicesScreen';
-import ServiceRadiusScreen from './ServiceRadiusScreen';
-import PricingScreen from './PricingScreen';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { API_URL, PROVIDER } from '../constants';
+import { savePricing, DEFAULT_PRICING } from '../utils/pricingStore';
 
-const STEPS = [
-  {
-    key: 'services',
-    icon: 'construct-outline',
-    color: '#2563EB',
-    bg: 'rgba(37,99,235,0.08)',
-    title: 'Services',
-    desc: 'Add the services you offer so customers can find you.',
-    cta: 'Configure Services',
-  },
-  {
-    key: 'zone',
-    icon: 'location-outline',
-    color: '#16A34A',
-    bg: 'rgba(22,163,74,0.08)',
-    title: 'Service Area',
-    desc: 'Set your service radius. Orders outside it won\'t be shown to you.',
-    cta: 'Set Service Area',
-  },
-  {
-    key: 'pricing',
-    icon: 'cash-outline',
-    color: '#F04416',
-    bg: 'rgba(240,68,22,0.08)',
-    title: 'Pricing',
-    desc: 'Define your rates. You can change these anytime.',
-    cta: 'Configure Pricing',
-  },
+// ── Services data (labels must match ServicesScreen exactly) ──────────────────
+
+const MOBILE_SERVICES = [
+  { id: 'battery',     title: 'Battery Service', icon: 'flash-outline' },
+  { id: 'tire',        title: 'Tire Service',     icon: 'disc-outline' },
+  { id: 'towing',      title: 'Towing',           icon: 'car-outline' },
+  { id: 'diagnostics', title: 'Diagnostics',      icon: 'speedometer-outline' },
+  { id: 'lockout',     title: 'Lockout Service',  icon: 'lock-closed-outline' },
+  { id: 'fuel',        title: 'Fuel Delivery',    icon: 'flame-outline' },
 ];
 
-export default function ProviderSetupScreen({ onComplete, onSkip }) {
-  const [done, setDone] = useState({ services: false, zone: false, pricing: false });
-  const [servicesOpen, setServicesOpen] = useState(false);
-  const [zoneOpen, setZoneOpen] = useState(false);
-  const [pricingOpen, setPricingOpen] = useState(false);
+const SHOP_CATEGORIES = [
+  { id: 'oil',              label: 'Oil & Fluids',          icon: 'water-outline' },
+  { id: 'brakes',           label: 'Brakes',                icon: 'radio-button-on-outline' },
+  { id: 'tires',            label: 'Tires',                 icon: 'disc-outline' },
+  { id: 'engine',           label: 'Engine',                icon: 'construct-outline' },
+  { id: 'electrical',       label: 'Electrical',            icon: 'flash-outline' },
+  { id: 'ac',               label: 'AC & Heating',          icon: 'thermometer-outline' },
+  { id: 'suspension',       label: 'Suspension & Steering', icon: 'git-branch-outline' },
+  { id: 'exhaust',          label: 'Exhaust',               icon: 'cloud-outline' },
+  { id: 'diagnostics_shop', label: 'Diagnostics',           icon: 'speedometer-outline' },
+];
 
-  const allDone = STEPS.every(s => done[s.key]);
-  const doneCount = STEPS.filter(s => done[s.key]).length;
+// ── Working hours — all days off by default ───────────────────────────────────
 
-  const openStep = (key) => {
-    if (key === 'services') setServicesOpen(true);
-    else if (key === 'zone') setZoneOpen(true);
-    else if (key === 'pricing') setPricingOpen(true);
-  };
+const WIZARD_DAYS = [
+  { id: 'mon', label: 'Monday',    enabled: false, startH: 8, startM: 0, startP: 'AM', endH: 6, endM: 0, endP: 'PM' },
+  { id: 'tue', label: 'Tuesday',   enabled: false, startH: 8, startM: 0, startP: 'AM', endH: 6, endM: 0, endP: 'PM' },
+  { id: 'wed', label: 'Wednesday', enabled: false, startH: 8, startM: 0, startP: 'AM', endH: 6, endM: 0, endP: 'PM' },
+  { id: 'thu', label: 'Thursday',  enabled: false, startH: 8, startM: 0, startP: 'AM', endH: 6, endM: 0, endP: 'PM' },
+  { id: 'fri', label: 'Friday',    enabled: false, startH: 8, startM: 0, startP: 'AM', endH: 6, endM: 0, endP: 'PM' },
+  { id: 'sat', label: 'Saturday',  enabled: false, startH: 9, startM: 0, startP: 'AM', endH: 3, endM: 0, endP: 'PM' },
+  { id: 'sun', label: 'Sunday',    enabled: false, startH: 9, startM: 0, startP: 'AM', endH: 3, endM: 0, endP: 'PM' },
+];
 
-  const closeStep = (key) => {
-    setDone(d => ({ ...d, [key]: true }));
-    if (key === 'services') setServicesOpen(false);
-    else if (key === 'zone') setZoneOpen(false);
-    else if (key === 'pricing') setPricingOpen(false);
-  };
+function uiTimeToApi(h, m, p) {
+  let hh = h % 12;
+  if (p === 'PM') hh += 12;
+  return `${String(hh).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
 
+function fmtTime(h, m, p) {
+  return `${h}:${String(m).padStart(2, '0')} ${p}`;
+}
+
+// ── Step 1: Business Type ─────────────────────────────────────────────────────
+
+function Step1_BusinessType({ value, onChange }) {
+  const options = [
+    { id: 'mobile', icon: 'car-outline',            title: 'Mobile', desc: 'You travel to the customer' },
+    { id: 'shop',   icon: 'business-outline',        title: 'Shop',   desc: 'Customer comes to you' },
+    { id: 'both',   icon: 'swap-horizontal-outline', title: 'Both',   desc: 'Mobile and shop' },
+  ];
   return (
-    <View style={styles.container}>
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.topSection}>
-          <View style={styles.logoWrap}>
-            <Ionicons name="briefcase-outline" size={28} color="#FF6B00" />
-          </View>
-          <Text style={styles.title}>Set up your profile</Text>
-          <Text style={styles.subtitle}>Complete these steps before you can start receiving orders.</Text>
-
-          <View style={styles.progressBar}>
-            <View style={[styles.progressFill, { width: `${(doneCount / STEPS.length) * 100}%` }]} />
-          </View>
-          <Text style={styles.progressText}>{doneCount} of {STEPS.length} completed</Text>
-        </View>
-
-        <View style={styles.stepList}>
-          {STEPS.map((step, i) => {
-            const isDone = done[step.key];
-            return (
-              <TouchableOpacity
-                key={step.key}
-                style={[styles.stepCard, isDone && styles.stepCardDone]}
-                activeOpacity={0.86}
-                onPress={() => openStep(step.key)}
-              >
-                <View style={[styles.stepIconWrap, { backgroundColor: isDone ? 'rgba(22,163,74,0.1)' : step.bg }]}>
-                  <Ionicons
-                    name={isDone ? 'checkmark-circle' : step.icon}
-                    size={22}
-                    color={isDone ? '#16A34A' : step.color}
-                  />
+    <View style={s.stepContent}>
+      <Text style={s.stepTitle}>How do you operate?</Text>
+      <Text style={s.stepDesc}>
+        This determines what services you can offer and how customers find you.
+      </Text>
+      <View style={s.typeOptions}>
+        {options.map(opt => {
+          const sel = value === opt.id;
+          return (
+            <TouchableOpacity
+              key={opt.id}
+              style={[s.typeCard, sel && s.typeCardSel]}
+              activeOpacity={0.8}
+              onPress={() => onChange(opt.id)}
+            >
+              <View style={[s.typeIconWrap, sel && s.typeIconWrapSel]}>
+                <Ionicons name={opt.icon} size={26} color={sel ? '#FF6B00' : '#6B7280'} />
+              </View>
+              <Text style={[s.typeTitle, sel && s.typeTitleSel]}>{opt.title}</Text>
+              <Text style={s.typeCardDesc}>{opt.desc}</Text>
+              {sel && (
+                <View style={s.typeCheck}>
+                  <Ionicons name="checkmark-circle" size={18} color="#FF6B00" />
                 </View>
-                <View style={styles.stepInfo}>
-                  <View style={styles.stepTitleRow}>
-                    <Text style={[styles.stepTitle, isDone && styles.stepTitleDone]}>{step.title}</Text>
-                    {isDone && <View style={styles.doneBadge}><Text style={styles.doneBadgeText}>Done</Text></View>}
-                  </View>
-                  <Text style={styles.stepDesc} numberOfLines={2}>{step.desc}</Text>
-                </View>
-                <Ionicons
-                  name={isDone ? 'checkmark' : 'chevron-forward'}
-                  size={18}
-                  color={isDone ? '#16A34A' : '#C4C9D1'}
-                />
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-
-        <View style={styles.verificationNote}>
-          <Ionicons name="shield-checkmark-outline" size={16} color="#8B9098" />
-          <Text style={styles.verificationText}>
-            After setup, upload your documents in Profile to start accepting orders.
-          </Text>
-        </View>
-      </ScrollView>
-
-      <View style={styles.footer}>
-        <TouchableOpacity
-          style={[styles.startBtn, !allDone && styles.startBtnDisabled]}
-          onPress={() => allDone && onComplete()}
-          activeOpacity={0.88}
-          disabled={!allDone}
-        >
-          <Text style={styles.startBtnText}>
-            {allDone ? 'Go to Dashboard →' : `Complete all ${STEPS.length} steps to continue`}
-          </Text>
-        </TouchableOpacity>
-        {!allDone && !!onSkip && (
-          <TouchableOpacity style={styles.skipBtn} onPress={onSkip} activeOpacity={0.7}>
-            <Text style={styles.skipBtnText}>Explore the app first</Text>
-          </TouchableOpacity>
-        )}
+              )}
+            </TouchableOpacity>
+          );
+        })}
       </View>
-
-      <ServicesScreen visible={servicesOpen} onClose={() => closeStep('services')} />
-      <ServiceRadiusScreen visible={zoneOpen} onClose={() => closeStep('zone')} onSave={() => {}} />
-      <PricingScreen visible={pricingOpen} onClose={() => closeStep('pricing')} />
     </View>
   );
 }
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F4F5F7' },
-  content: { padding: 20, paddingBottom: 32 },
+// ── Step 2: Services ──────────────────────────────────────────────────────────
 
-  topSection: { alignItems: 'center', paddingVertical: 28 },
-  logoWrap: { width: 56, height: 56, borderRadius: 16, backgroundColor: 'rgba(255,107,0,0.1)', alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
-  title: { fontSize: 24, fontWeight: '800', color: '#111827', marginBottom: 8, textAlign: 'center' },
-  subtitle: { fontSize: 14, color: '#6B7280', lineHeight: 20, textAlign: 'center', marginBottom: 20 },
-  progressBar: { width: '100%', height: 6, backgroundColor: '#E5E7EB', borderRadius: 3, overflow: 'hidden', marginBottom: 8 },
-  progressFill: { height: 6, backgroundColor: '#FF6B00', borderRadius: 3 },
-  progressText: { fontSize: 12, fontWeight: '600', color: '#6B7280' },
+function Step2_Services({ providerType, mobileEnabled, shopEnabled, onMobileToggle, onShopToggle }) {
+  const showMobile = providerType === 'mobile' || providerType === 'both';
+  const showShop   = providerType === 'shop'   || providerType === 'both';
+  return (
+    <View style={s.stepContent}>
+      <Text style={s.stepTitle}>What services do you offer?</Text>
+      <Text style={s.stepDesc}>Select at least one to continue.</Text>
 
-  stepList: { gap: 10, marginBottom: 20 },
-  stepCard: { flexDirection: 'row', alignItems: 'center', gap: 14, backgroundColor: '#FFFFFF', borderRadius: 14, padding: 14, borderWidth: 1, borderColor: '#E5E7EB' },
-  stepCardDone: { borderColor: 'rgba(22,163,74,0.25)', backgroundColor: 'rgba(22,163,74,0.03)' },
-  stepIconWrap: { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
-  stepInfo: { flex: 1 },
-  stepTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 3 },
-  stepTitle: { fontSize: 15, fontWeight: '700', color: '#111827' },
-  stepTitleDone: { color: '#16A34A' },
-  doneBadge: { backgroundColor: 'rgba(22,163,74,0.1)', borderRadius: 8, paddingHorizontal: 7, paddingVertical: 2 },
-  doneBadgeText: { fontSize: 10, fontWeight: '700', color: '#16A34A' },
-  stepDesc: { fontSize: 12, color: '#6B7280', lineHeight: 16 },
+      {showMobile && (
+        <>
+          {providerType === 'both' && <Text style={s.sectionLabel}>Mobile Services</Text>}
+          {MOBILE_SERVICES.map(svc => {
+            const on = mobileEnabled.has(svc.id);
+            return (
+              <TouchableOpacity
+                key={svc.id}
+                style={[s.svcRow, on && s.svcRowOn]}
+                activeOpacity={0.8}
+                onPress={() => onMobileToggle(svc.id)}
+              >
+                <View style={[s.svcIcon, on && s.svcIconOn]}>
+                  <Ionicons name={svc.icon} size={20} color={on ? '#FF6B00' : '#6B7280'} />
+                </View>
+                <Text style={[s.svcTitle, on && s.svcTitleOn]}>{svc.title}</Text>
+                <View style={[s.checkbox, on && s.checkboxOn]}>
+                  {on && <Ionicons name="checkmark" size={13} color="#fff" />}
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </>
+      )}
 
-  verificationNote: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, backgroundColor: '#fff', borderRadius: 12, padding: 12, borderWidth: 1, borderColor: '#E5E7EB' },
-  verificationText: { flex: 1, fontSize: 12, color: '#6B7280', lineHeight: 17 },
+      {showShop && (
+        <>
+          {providerType === 'both' && (
+            <Text style={[s.sectionLabel, { marginTop: 20 }]}>Shop Categories</Text>
+          )}
+          {SHOP_CATEGORIES.map(cat => {
+            const on = shopEnabled.has(cat.id);
+            return (
+              <TouchableOpacity
+                key={cat.id}
+                style={[s.svcRow, on && s.svcRowOn]}
+                activeOpacity={0.8}
+                onPress={() => onShopToggle(cat.id)}
+              >
+                <View style={[s.svcIcon, on && s.svcIconOn]}>
+                  <Ionicons name={cat.icon} size={20} color={on ? '#FF6B00' : '#6B7280'} />
+                </View>
+                <Text style={[s.svcTitle, on && s.svcTitleOn]}>{cat.label}</Text>
+                <View style={[s.checkbox, on && s.checkboxOn]}>
+                  {on && <Ionicons name="checkmark" size={13} color="#fff" />}
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </>
+      )}
+    </View>
+  );
+}
 
-  footer: { padding: 20, paddingBottom: 24, backgroundColor: '#F4F5F7', borderTopWidth: 1, borderTopColor: '#E5E7EB', gap: 10 },
-  startBtn: { backgroundColor: '#FF6B00', borderRadius: 14, paddingVertical: 16, alignItems: 'center' },
-  startBtnDisabled: { backgroundColor: '#D1D5DB' },
-  startBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
-  skipBtn: { alignItems: 'center', paddingVertical: 6 },
-  skipBtnText: { color: '#9CA3AF', fontSize: 13, fontWeight: '600' },
+// ── Step 3: Working Hours ─────────────────────────────────────────────────────
+
+function Step3_Hours({ days, onToggle }) {
+  return (
+    <View style={s.stepContent}>
+      <Text style={s.stepTitle}>When are you available?</Text>
+      <Text style={s.stepDesc}>Enable at least one day. You can adjust exact times later in your profile.</Text>
+      {days.map((day, i) => (
+        <View key={day.id} style={s.dayRow}>
+          <Switch
+            value={day.enabled}
+            onValueChange={() => onToggle(i)}
+            trackColor={{ false: '#E5E7EB', true: '#FF6B00' }}
+            thumbColor="#fff"
+          />
+          <View style={s.dayInfo}>
+            <Text style={[s.dayLabel, !day.enabled && s.dayLabelOff]}>{day.label}</Text>
+            {day.enabled && (
+              <Text style={s.dayTime}>
+                {fmtTime(day.startH, day.startM, day.startP)} – {fmtTime(day.endH, day.endM, day.endP)}
+              </Text>
+            )}
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+// ── Step 4: Service Zone ──────────────────────────────────────────────────────
+
+function Step4_Zone({ providerType, radius, onRadiusChange, address, onAddressChange }) {
+  const showRadius  = providerType === 'mobile' || providerType === 'both';
+  const showAddress = providerType === 'shop'   || providerType === 'both';
+  return (
+    <View style={s.stepContent}>
+      <Text style={s.stepTitle}>Where do you serve?</Text>
+      <Text style={s.stepDesc}>
+        {showRadius && showAddress
+          ? 'Set your travel radius and enter your shop address.'
+          : showRadius
+          ? 'Set the radius you are willing to travel to customers.'
+          : 'Enter your shop address so customers can find you.'}
+      </Text>
+
+      {showRadius && (
+        <View style={s.zoneCard}>
+          <Text style={s.zoneCardLabel}>Service radius</Text>
+          <View style={s.radiusRow}>
+            <TouchableOpacity style={s.radiusBtn} onPress={() => onRadiusChange(Math.max(5, radius - 5))}>
+              <Ionicons name="remove" size={20} color="#111827" />
+            </TouchableOpacity>
+            <Text style={s.radiusValue}>{radius} mi</Text>
+            <TouchableOpacity style={s.radiusBtn} onPress={() => onRadiusChange(Math.min(100, radius + 5))}>
+              <Ionicons name="add" size={20} color="#111827" />
+            </TouchableOpacity>
+          </View>
+          <Text style={s.radiusHint}>Orders beyond this radius won't be shown to you</Text>
+        </View>
+      )}
+
+      {showAddress && (
+        <View style={[s.zoneCard, showRadius && { marginTop: 14 }]}>
+          <Text style={s.zoneCardLabel}>
+            Shop address{providerType === 'shop' ? ' (required)' : ' (optional)'}
+          </Text>
+          <TextInput
+            style={s.addressInput}
+            value={address}
+            onChangeText={onAddressChange}
+            placeholder="123 Main St, City, State"
+            placeholderTextColor="#9CA3AF"
+            autoCapitalize="words"
+            returnKeyType="done"
+          />
+        </View>
+      )}
+    </View>
+  );
+}
+
+// ── Wizard ────────────────────────────────────────────────────────────────────
+
+const TOTAL_STEPS = 4;
+
+export default function ProviderSetupScreen({ onComplete, onSkip }) {
+  const [step, setStep]                   = useState(1);
+  const [saving, setSaving]               = useState(false);
+
+  const [providerType, setProviderType]   = useState('mobile');
+  const [mobileEnabled, setMobileEnabled] = useState(new Set());
+  const [shopEnabled, setShopEnabled]     = useState(new Set());
+  const [days, setDays]                   = useState(WIZARD_DAYS.map(d => ({ ...d })));
+  const [radius, setRadius]               = useState(18);
+  const [address, setAddress]             = useState('');
+
+  const toggleDay = (i) =>
+    setDays(prev => prev.map((d, idx) => idx === i ? { ...d, enabled: !d.enabled } : d));
+
+  const toggleMobile = (id) =>
+    setMobileEnabled(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+
+  const toggleShop = (id) =>
+    setShopEnabled(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+
+  const canProceed = () => {
+    if (step === 1) return true;
+    if (step === 2) return (mobileEnabled.size + shopEnabled.size) > 0;
+    if (step === 3) return days.some(d => d.enabled);
+    if (step === 4) return providerType !== 'shop' || address.trim().length > 0;
+    return false;
+  };
+
+  const buildServices = () => {
+    const isMobile = providerType === 'mobile' || providerType === 'both';
+    const isShop   = providerType === 'shop'   || providerType === 'both';
+    const mobile   = isMobile ? MOBILE_SERVICES.filter(sv => mobileEnabled.has(sv.id)).map(sv => sv.title) : [];
+    const shop     = isShop   ? SHOP_CATEGORIES.filter(c  => shopEnabled.has(c.id)).map(c => c.label)      : [];
+    return [...mobile, ...shop];
+  };
+
+  const buildSchedule = () => {
+    const apiDays = {};
+    days.forEach(day => {
+      apiDays[day.id] = {
+        enabled: day.enabled,
+        open:  uiTimeToApi(day.startH, day.startM, day.startP),
+        close: uiTimeToApi(day.endH,   day.endM,   day.endP),
+      };
+    });
+    return { days: apiDays };
+  };
+
+  const handleNext = async () => {
+    if (saving) return;
+    setSaving(true);
+    try {
+      if (step === 1) {
+        await savePricing({ ...DEFAULT_PRICING, providerType });
+        setStep(2);
+
+      } else if (step === 2) {
+        const res = await fetch(`${API_URL}/profiles/${PROVIDER.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ services: buildServices() }),
+        });
+        if (!res.ok) throw new Error('Could not save services');
+        setStep(3);
+
+      } else if (step === 3) {
+        const res = await fetch(`${API_URL}/schedules/${PROVIDER.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(buildSchedule()),
+        });
+        if (!res.ok) throw new Error('Could not save schedule');
+        setStep(4);
+
+      } else if (step === 4) {
+        await AsyncStorage.setItem('@service_radius', String(radius));
+        if (address.trim()) {
+          const res = await fetch(`${API_URL}/profiles/${PROVIDER.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ address: address.trim() }),
+          });
+          if (!res.ok) throw new Error('Could not save address');
+        }
+        onComplete();
+      }
+    } catch (e) {
+      Alert.alert('Error', e.message || 'Could not save. Check your connection.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const totalSelected = mobileEnabled.size + shopEnabled.size;
+  const enabledDays   = days.filter(d => d.enabled).length;
+
+  return (
+    <View style={s.container}>
+      {/* Header */}
+      <View style={s.header}>
+        <View style={s.headerSide}>
+          {step > 1 && (
+            <TouchableOpacity style={s.backBtn} onPress={() => setStep(p => p - 1)} disabled={saving}>
+              <Ionicons name="arrow-back" size={22} color="#17191D" />
+            </TouchableOpacity>
+          )}
+        </View>
+
+        <View style={s.headerCenter}>
+          <Text style={s.headerStepText}>Step {step} of {TOTAL_STEPS}</Text>
+          <View style={s.dots}>
+            {Array.from({ length: TOTAL_STEPS }, (_, i) => (
+              <View key={i} style={[s.dot, i + 1 === step && s.dotActive, i + 1 < step && s.dotDone]} />
+            ))}
+          </View>
+        </View>
+
+        <View style={s.headerSide}>
+          {step === 1 && onSkip && (
+            <TouchableOpacity onPress={onSkip}>
+              <Text style={s.skipText}>Skip</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+
+      {/* Content */}
+      <KeyboardAvoidingView
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+      >
+        <ScrollView
+          contentContainerStyle={s.scroll}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          {step === 1 && <Step1_BusinessType value={providerType} onChange={setProviderType} />}
+          {step === 2 && (
+            <Step2_Services
+              providerType={providerType}
+              mobileEnabled={mobileEnabled}
+              shopEnabled={shopEnabled}
+              onMobileToggle={toggleMobile}
+              onShopToggle={toggleShop}
+            />
+          )}
+          {step === 3 && <Step3_Hours days={days} onToggle={toggleDay} />}
+          {step === 4 && (
+            <Step4_Zone
+              providerType={providerType}
+              radius={radius}
+              onRadiusChange={setRadius}
+              address={address}
+              onAddressChange={setAddress}
+            />
+          )}
+        </ScrollView>
+
+        {/* Footer */}
+        <View style={s.footer}>
+          {step === 2 && (
+            <Text style={s.hint}>
+              {totalSelected === 0
+                ? 'Select at least one service'
+                : `${totalSelected} service${totalSelected !== 1 ? 's' : ''} selected`}
+            </Text>
+          )}
+          {step === 3 && (
+            <Text style={s.hint}>
+              {enabledDays === 0
+                ? 'Enable at least one day'
+                : `${enabledDays} day${enabledDays !== 1 ? 's' : ''} selected`}
+            </Text>
+          )}
+
+          <TouchableOpacity
+            style={[s.nextBtn, (!canProceed() || saving) && s.nextBtnOff]}
+            onPress={handleNext}
+            disabled={!canProceed() || saving}
+            activeOpacity={0.88}
+          >
+            {saving
+              ? <ActivityIndicator color="#fff" size="small" />
+              : <Text style={s.nextBtnText}>{step === TOTAL_STEPS ? 'Complete Setup' : 'Continue'}</Text>}
+          </TouchableOpacity>
+        </View>
+      </KeyboardAvoidingView>
+    </View>
+  );
+}
+
+// ── Styles ────────────────────────────────────────────────────────────────────
+
+const s = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#fff' },
+
+  header: {
+    flexDirection: 'row', alignItems: 'center',
+    paddingHorizontal: 20, paddingTop: 56, paddingBottom: 16,
+    borderBottomWidth: 1, borderBottomColor: '#F3F4F6',
+  },
+  headerSide: { width: 44 },
+  headerCenter: { flex: 1, alignItems: 'center' },
+  backBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
+  headerStepText: { fontSize: 12, fontWeight: '600', color: '#6B7280', marginBottom: 6 },
+  dots: { flexDirection: 'row', gap: 6 },
+  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#E5E7EB' },
+  dotActive: { width: 24, backgroundColor: '#FF6B00' },
+  dotDone: { backgroundColor: '#FF6B00', opacity: 0.35 },
+  skipText: { color: '#9CA3AF', fontSize: 13, fontWeight: '600' },
+
+  scroll: { padding: 24, paddingBottom: 32 },
+
+  stepContent: {},
+  stepTitle: { fontSize: 24, fontWeight: '800', color: '#111827', marginBottom: 8 },
+  stepDesc: { fontSize: 14, color: '#6B7280', lineHeight: 20, marginBottom: 24 },
+  sectionLabel: {
+    fontSize: 12, fontWeight: '700', color: '#374151',
+    textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 10,
+  },
+
+  // Business type
+  typeOptions: { flexDirection: 'row', gap: 10 },
+  typeCard: {
+    flex: 1, backgroundColor: '#F9FAFB', borderRadius: 14,
+    padding: 14, alignItems: 'center', gap: 8,
+    borderWidth: 2, borderColor: 'transparent',
+  },
+  typeCardSel: { backgroundColor: 'rgba(255,107,0,0.05)', borderColor: '#FF6B00' },
+  typeIconWrap: {
+    width: 52, height: 52, borderRadius: 14,
+    backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center',
+  },
+  typeIconWrapSel: { backgroundColor: 'rgba(255,107,0,0.12)' },
+  typeTitle: { fontSize: 14, fontWeight: '700', color: '#374151' },
+  typeTitleSel: { color: '#FF6B00' },
+  typeCardDesc: { fontSize: 11, color: '#9CA3AF', textAlign: 'center', lineHeight: 14 },
+  typeCheck: { position: 'absolute', top: 8, right: 8 },
+
+  // Services
+  svcRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    backgroundColor: '#F9FAFB', borderRadius: 12,
+    padding: 14, marginBottom: 8,
+    borderWidth: 1.5, borderColor: 'transparent',
+  },
+  svcRowOn: { backgroundColor: 'rgba(255,107,0,0.04)', borderColor: 'rgba(255,107,0,0.3)' },
+  svcIcon: {
+    width: 38, height: 38, borderRadius: 10,
+    backgroundColor: '#EBEBEB', alignItems: 'center', justifyContent: 'center',
+  },
+  svcIconOn: { backgroundColor: 'rgba(255,107,0,0.12)' },
+  svcTitle: { flex: 1, fontSize: 14, fontWeight: '600', color: '#6B7280' },
+  svcTitleOn: { color: '#111827' },
+  checkbox: {
+    width: 22, height: 22, borderRadius: 6,
+    borderWidth: 2, borderColor: '#D1D5DB',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  checkboxOn: { backgroundColor: '#FF6B00', borderColor: '#FF6B00' },
+
+  // Working hours
+  dayRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 14,
+    paddingVertical: 13, borderBottomWidth: 1, borderBottomColor: '#F3F4F6',
+  },
+  dayInfo: { flex: 1 },
+  dayLabel: { fontSize: 15, fontWeight: '600', color: '#111827' },
+  dayLabelOff: { color: '#9CA3AF' },
+  dayTime: { fontSize: 12, color: '#FF6B00', marginTop: 2 },
+
+  // Zone
+  zoneCard: {
+    backgroundColor: '#F9FAFB', borderRadius: 14,
+    padding: 16, borderWidth: 1, borderColor: '#E5E7EB',
+  },
+  zoneCardLabel: { fontSize: 13, fontWeight: '600', color: '#374151', marginBottom: 14 },
+  radiusRow: {
+    flexDirection: 'row', alignItems: 'center',
+    justifyContent: 'center', gap: 24, marginBottom: 10,
+  },
+  radiusBtn: {
+    width: 44, height: 44, borderRadius: 12, backgroundColor: '#fff',
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1.5, borderColor: '#E5E7EB',
+    shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 4,
+    shadowOffset: { width: 0, height: 1 }, elevation: 2,
+  },
+  radiusValue: { fontSize: 30, fontWeight: '800', color: '#FF6B00', minWidth: 80, textAlign: 'center' },
+  radiusHint: { fontSize: 12, color: '#9CA3AF', textAlign: 'center' },
+  addressInput: {
+    backgroundColor: '#fff', borderRadius: 10, padding: 14,
+    fontSize: 14, color: '#111827', borderWidth: 1.5, borderColor: '#E5E7EB',
+  },
+
+  // Footer
+  footer: {
+    padding: 20, paddingBottom: 32, backgroundColor: '#fff',
+    borderTopWidth: 1, borderTopColor: '#F3F4F6', gap: 10,
+  },
+  hint: { fontSize: 13, color: '#9CA3AF', textAlign: 'center', fontWeight: '500' },
+  nextBtn: { backgroundColor: '#FF6B00', borderRadius: 14, paddingVertical: 17, alignItems: 'center' },
+  nextBtnOff: { backgroundColor: '#D1D5DB' },
+  nextBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
 });
