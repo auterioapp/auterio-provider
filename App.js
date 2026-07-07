@@ -383,11 +383,10 @@ export default function App() {
     const isMobile = type === 'mobile' || type === 'both';
     const isShop = type === 'shop' || type === 'both';
     try {
-      const [availableData, scheduledPendingData, scheduledData, myScheduledPendingData] = await Promise.all([
+      const [availableData, scheduledPendingData, scheduledData] = await Promise.all([
         isMobile ? fetchJson(`${API_URL}/orders/provider/available?providerId=${PROVIDER.id}`) : Promise.resolve([]),
         isShop   ? fetchJson(`${API_URL}/orders?status=scheduled_pending`)                     : Promise.resolve([]),
         isShop   ? fetchJson(`${API_URL}/orders?status=scheduled`)                             : Promise.resolve([]),
-        !isShop  ? fetchJson(`${API_URL}/orders?status=scheduled_pending&providerId=${PROVIDER.id}`) : Promise.resolve([]),
       ]);
 
       const dismissed = dismissedRealIdsRef.current;
@@ -400,23 +399,13 @@ export default function App() {
           )
         : [];
 
-      const shopBookingOrders = isShop && Array.isArray(scheduledPendingData)
+      const bookingOrders = isShop && Array.isArray(scheduledPendingData)
         ? scheduledPendingData.filter(o =>
             o.status === 'scheduled_pending' &&
             String(o.provider?.id) === String(PROVIDER.id) &&
             !dismissed.includes(String(o.id || o._id))
           )
         : [];
-
-      const mobileBookingOrders = !isShop && Array.isArray(myScheduledPendingData)
-        ? myScheduledPendingData.filter(o =>
-            o.status === 'scheduled_pending' &&
-            String(o.provider?.id) === String(PROVIDER.id) &&
-            !dismissed.includes(String(o.id || o._id))
-          )
-        : [];
-
-      const bookingOrders = [...shopBookingOrders, ...mobileBookingOrders];
 
       const scheduledOrders = isShop && Array.isArray(scheduledData)
         ? scheduledData.filter(o =>
