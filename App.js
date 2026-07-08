@@ -252,6 +252,7 @@ export default function App() {
         setIsDemo(demo);
         setVerificationStatus(demo ? 'verified' : savedStatus);
         let serverSetupDone = false;
+        let needsBusinessInfo = false;
         if (!demo) {
           try {
             const profile = await fetchJson(`${API_URL}/profiles/${PROVIDER.id}`);
@@ -262,11 +263,13 @@ export default function App() {
             }
             if (profile?.contactName) PROVIDER.name = profile.contactName;
             serverSetupDone = profile?.setupCompleted === true;
+            needsBusinessInfo = !businessName || !String(profile?.contactName || '').trim();
           } catch {}
           loadProviderJobsFromBackend(PROVIDER.id);
           registerPushToken(PROVIDER.id);
         }
-        setAuthState(demo || setupDone || serverSetupDone ? 'app' : 'setup');
+        if (needsBusinessInfo) setAuthState('business-info-existing');
+        else setAuthState(demo || setupDone || serverSetupDone ? 'app' : 'setup');
       } else {
         setAuthState('welcome');
       }
@@ -328,11 +331,15 @@ export default function App() {
     } else {
       const setupDone = await AsyncStorage.getItem('@setup_completed_v1');
       let serverSetupDone = false;
+      let needsBusinessInfo = false;
       try {
         const profile = await fetchJson(`${API_URL}/profiles/${PROVIDER.id}`);
         serverSetupDone = profile?.setupCompleted === true;
+        needsBusinessInfo = !String(profile?.businessName || profile?.name || '').trim()
+          || !String(profile?.contactName || '').trim();
       } catch {}
-      setAuthState(isRegister || (setupDone !== 'true' && !serverSetupDone) ? 'setup' : 'app');
+      if (!isRegister && needsBusinessInfo) setAuthState('business-info-existing');
+      else setAuthState(isRegister || (setupDone !== 'true' && !serverSetupDone) ? 'setup' : 'app');
     }
   };
 
@@ -397,6 +404,42 @@ export default function App() {
       await handleLogin(data.token, data.refreshToken, data.user, true);
     } catch (error) {
       Alert.alert('Registration failed', error.message || 'Please try again.');
+    } finally {
+      setBusinessInfoLoading(false);
+    }
+  };
+
+  const completeExistingBusinessInfo = async ({ kind, businessName, name }) => {
+    setBusinessInfoLoading(true);
+    try {
+      const displayBusinessName = kind === 'individual' ? name : businessName;
+      await fetchJson(`${API_URL}/profiles/${PROVIDER.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: displayBusinessName,
+          businessName: displayBusinessName,
+          contactName: name,
+          businessKind: kind,
+          initials: displayBusinessName.slice(0, 2).toUpperCase(),
+        }),
+      });
+      PROVIDER.company = displayBusinessName;
+      PROVIDER.name = name;
+      PROVIDER.initials = displayBusinessName.slice(0, 2).toUpperCase();
+      const storedUserRaw = await AsyncStorage.getItem('providerUser');
+      const storedUser = storedUserRaw ? JSON.parse(storedUserRaw) : {};
+      await AsyncStorage.setItem('providerUser', JSON.stringify({
+        ...storedUser,
+        name,
+        companyName: displayBusinessName,
+        businessKind: kind,
+      }));
+      const pricing = await loadPricing();
+      await savePricing({ ...pricing, businessName: displayBusinessName });
+      setAuthState('setup');
+    } catch (error) {
+      Alert.alert('Could not save business information', error.message || 'Please try again.');
     } finally {
       setBusinessInfoLoading(false);
     }
@@ -1023,13 +1066,13 @@ export default function App() {
     );
   }
 
-  if (authState === 'business-info') {
+  if (authState === 'business-info' || authState === 'business-info-existing') {
     return (
       <SafeAreaProvider>
         <BusinessInfoScreen
           loading={businessInfoLoading}
-          onBack={() => setAuthState('register')}
-          onContinue={completeProviderRegistration}
+          onBack={() => authState === 'business-info-existing' ? handleLogout() : setAuthState('register')}
+          onContinue={authState === 'business-info-existing' ? completeExistingBusinessInfo : completeProviderRegistration}
         />
       </SafeAreaProvider>
     );
