@@ -21,6 +21,7 @@ export default function BusinessProfileScreen({ visible, providerType, businessN
   }, [visible, providerType, businessName]);
 
   const handleSave = async () => {
+    if (!name.trim()) return;
     setSaving(true);
     await onSave({ type, name: name.trim() });
     setSaving(false);
@@ -86,10 +87,10 @@ export default function BusinessProfileScreen({ visible, providerType, businessN
 
         <View style={styles.footer}>
           <TouchableOpacity
-            style={[styles.saveBtn, saving && styles.saveBtnDisabled]}
+            style={[styles.saveBtn, (saving || !name.trim()) && styles.saveBtnDisabled]}
             onPress={handleSave}
             activeOpacity={0.88}
-            disabled={saving}
+            disabled={saving || !name.trim()}
           >
             <Text style={styles.saveBtnText}>{saving ? 'Saving...' : 'Save Changes'}</Text>
           </TouchableOpacity>

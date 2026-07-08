@@ -1,5 +1,5 @@
 ﻿import { useEffect, useMemo, useRef, useState } from 'react';
-import { Animated, Dimensions, Easing, KeyboardAvoidingView, Linking, Modal, PanResponder, Platform, RefreshControl, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Animated, Dimensions, Easing, KeyboardAvoidingView, Linking, Modal, PanResponder, Platform, RefreshControl, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
@@ -11,7 +11,6 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import WelcomeScreen from './screens/WelcomeScreen';
 import AuthScreen from './screens/AuthScreen';
-import BusinessTypeScreen from './screens/BusinessTypeScreen';
 import BusinessInfoScreen from './screens/BusinessInfoScreen';
 import ProviderSetupScreen from './screens/ProviderSetupScreen';
 import HomeScreen from './screens/HomeScreen';
@@ -239,7 +238,7 @@ export default function App() {
       return { token, refreshTok, entries };
     };
 
-    init().then(({ token, refreshTok, entries }) => {
+    init().then(async ({ token, refreshTok, entries }) => {
       const user = entries[0][1] ? JSON.parse(entries[0][1]) : null;
       const setupDone = entries[1][1] === 'true';
       const savedStatus = entries[2][1] || 'unverified';
@@ -251,11 +250,22 @@ export default function App() {
         const demo = PROVIDER.id === 'provider-demo-001';
         setIsDemo(demo);
         setVerificationStatus(demo ? 'verified' : savedStatus);
+        let serverSetupDone = false;
         if (!demo) {
+          try {
+            const profile = await fetchJson(`${API_URL}/profiles/${PROVIDER.id}`);
+            const businessName = (profile?.businessName || profile?.name || '').trim();
+            if (businessName) {
+              PROVIDER.company = businessName;
+              PROVIDER.initials = businessName.slice(0, 2).toUpperCase();
+            }
+            if (profile?.contactName) PROVIDER.name = profile.contactName;
+            serverSetupDone = profile?.setupCompleted === true;
+          } catch {}
           loadProviderJobsFromBackend(PROVIDER.id);
           registerPushToken(PROVIDER.id);
         }
-        setAuthState(demo || setupDone ? 'app' : 'setup');
+        setAuthState(demo || setupDone || serverSetupDone ? 'app' : 'setup');
       } else {
         setAuthState('welcome');
       }
@@ -282,7 +292,11 @@ export default function App() {
         AsyncStorage.removeItem('@provider_verification_status'),
         AsyncStorage.removeItem('@warranty_policy'),
         AsyncStorage.removeItem('@service_radius'),
-        savePricing({ ...DEFAULT_PRICING, providerType: pendingBusinessType.current || 'mobile' }),
+        savePricing({
+          ...DEFAULT_PRICING,
+          providerType: pendingBusinessType.current || 'mobile',
+          businessName: user?.companyName || user?.name || '',
+        }),
       ]);
     }
     applyProviderUser(user);
@@ -298,7 +312,13 @@ export default function App() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...(profileName ? { name: profileName, initials: profileName.slice(0, 2).toUpperCase() } : {}),
+          ...(profileName ? {
+            name: profileName,
+            businessName: profileName,
+            contactName: user?.name || '',
+            businessKind: user?.businessKind || 'company',
+            initials: profileName.slice(0, 2).toUpperCase(),
+          } : {}),
         }),
       }).catch(() => {});
     }
@@ -306,7 +326,12 @@ export default function App() {
       setAuthState('app');
     } else {
       const setupDone = await AsyncStorage.getItem('@setup_completed_v1');
-      setAuthState(isRegister || setupDone !== 'true' ? 'setup' : 'app');
+      let serverSetupDone = false;
+      try {
+        const profile = await fetchJson(`${API_URL}/profiles/${PROVIDER.id}`);
+        serverSetupDone = profile?.setupCompleted === true;
+      } catch {}
+      setAuthState(isRegister || (setupDone !== 'true' && !serverSetupDone) ? 'setup' : 'app');
     }
   };
 
@@ -338,6 +363,44 @@ export default function App() {
     setAuthState('welcome');
   };
 
+  const beginProviderRegistration = async (credentials) => {
+    pendingCredentials.current = credentials;
+    setAuthState('business-info');
+  };
+
+  const completeProviderRegistration = async ({ kind, businessName, name }) => {
+    const credentials = pendingCredentials.current;
+    if (!credentials) {
+      setAuthState('register');
+      return;
+    }
+    setBusinessInfoLoading(true);
+    try {
+      const isEmail = credentials.loginValue.includes('@');
+      const displayBusinessName = kind === 'individual' ? name : businessName;
+      const response = await fetch(`${API_URL}/auth/register-provider`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: isEmail ? credentials.loginValue : undefined,
+          phone: isEmail ? undefined : credentials.loginValue,
+          password: credentials.password,
+          contactName: name,
+          companyName: displayBusinessName,
+          businessKind: kind,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Could not create account');
+      pendingCredentials.current = null;
+      await handleLogin(data.token, data.refreshToken, data.user, true);
+    } catch (error) {
+      Alert.alert('Registration failed', error.message || 'Please try again.');
+    } finally {
+      setBusinessInfoLoading(false);
+    }
+  };
+
   useEffect(() => {
     setApiAuthFailureHandler(handleLogout);
     return () => setApiAuthFailureHandler(null);
@@ -356,6 +419,13 @@ export default function App() {
     if (!isDemo) {
       fetchJson(`${API_URL}/profiles/${PROVIDER.id}`)
         .then(data => {
+          const businessName = (data?.businessName || data?.name || '').trim();
+          if (businessName) {
+            PROVIDER.company = businessName;
+            PROVIDER.initials = businessName.slice(0, 2).toUpperCase();
+            loadPricing().then(current => savePricing({ ...current, businessName }));
+          }
+          if (data?.contactName) PROVIDER.name = data.contactName;
           if (data?.verificationStatus) {
             setVerificationStatus(data.verificationStatus);
             AsyncStorage.setItem('@provider_verification_status', data.verificationStatus);
@@ -945,7 +1015,20 @@ export default function App() {
         <AuthScreen
           mode={authState}
           onLogin={(token, refreshTok, user) => handleLogin(token, refreshTok, user, authState === 'register')}
+          onRegisterCredentials={authState === 'register' ? beginProviderRegistration : undefined}
           onBack={() => setAuthState('welcome')}
+        />
+      </SafeAreaProvider>
+    );
+  }
+
+  if (authState === 'business-info') {
+    return (
+      <SafeAreaProvider>
+        <BusinessInfoScreen
+          loading={businessInfoLoading}
+          onBack={() => setAuthState('register')}
+          onContinue={completeProviderRegistration}
         />
       </SafeAreaProvider>
     );
@@ -960,12 +1043,12 @@ export default function App() {
             await AsyncStorage.setItem('@provider_verification_status', 'unverified');
             fetchJson(`${API_URL}/profiles/${PROVIDER.id}`, {
               method: 'PUT',
-              body: JSON.stringify({ profileCompletion: 100, lastActivityAt: new Date().toISOString() }),
+              body: JSON.stringify({
+                profileCompletion: 100,
+                setupCompleted: true,
+                lastActivityAt: new Date().toISOString(),
+              }),
             }).catch(() => {});
-            setAuthState('app');
-          }}
-          onSkip={async () => {
-            await AsyncStorage.setItem('@setup_completed_v1', 'true');
             setAuthState('app');
           }}
         />

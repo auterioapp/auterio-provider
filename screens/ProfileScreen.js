@@ -56,6 +56,13 @@ export default function ProfileScreen({ online, setOnline, refreshControl, scrol
       setNetworkError(!profileRes && !scheduleRes);
       if (profileRes) {
         setProfileData(profileRes);
+        const serverBusinessName = (profileRes.businessName || profileRes.name || '').trim();
+        if (serverBusinessName) {
+          setBusinessName(serverBusinessName);
+          PROVIDER.company = serverBusinessName;
+          PROVIDER.initials = serverBusinessName.slice(0, 2).toUpperCase();
+        }
+        if (profileRes.contactName) PROVIDER.name = profileRes.contactName;
         if (profileRes.verificationStatus) {
           setVerificationStatus?.(profileRes.verificationStatus);
           AsyncStorage.setItem('@provider_verification_status', profileRes.verificationStatus);
@@ -68,7 +75,7 @@ export default function ProfileScreen({ online, setOnline, refreshControl, scrol
         if (enabledDays.length) setHoursSummary(`${enabledDays.length} day${enabledDays.length !== 1 ? 's' : ''} active`);
       }
       if (pricing?.providerType) setProviderType(pricing.providerType);
-      if (pricing?.businessName) setBusinessName(pricing.businessName);
+      if (!profileRes?.businessName && !profileRes?.name && pricing?.businessName) setBusinessName(pricing.businessName);
       if (PROVIDER.id === 'provider-demo-001') setVerificationStatus?.('verified');
       if (radius) setSavedRadius(parseInt(radius, 10));
       if (storedUser) {
@@ -88,7 +95,8 @@ export default function ProfileScreen({ online, setOnline, refreshControl, scrol
   const hasHours = isDemoAccount || (scheduleData?.days && Object.values(scheduleData.days).some(day => day?.enabled));
   const needsAddress = !isDemoAccount && (providerType === 'shop' || providerType === 'both');
   const hasAddress = !needsAddress || !!profileData?.address;
-  const profileComplete = isDemoAccount || (hasServices && hasHours && hasAddress);
+  const hasBusinessIdentity = isDemoAccount || !!(profileData?.businessName || profileData?.name) && !!profileData?.contactName;
+  const profileComplete = isDemoAccount || (hasBusinessIdentity && hasServices && hasHours && hasAddress);
 
   useEffect(() => {
     onProfileComplete?.(profileComplete);
@@ -461,7 +469,12 @@ export default function ProfileScreen({ online, setOnline, refreshControl, scrol
               const res = await authorizedFetch(`${API_URL}/profiles/${PROVIDER.id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ name: name.trim(), initials: name.trim().slice(0, 2).toUpperCase(), type }),
+                body: JSON.stringify({
+                  name: name.trim(),
+                  businessName: name.trim(),
+                  initials: name.trim().slice(0, 2).toUpperCase(),
+                  type,
+                }),
               });
               if (!res.ok) throw new Error('Server error');
             } catch {

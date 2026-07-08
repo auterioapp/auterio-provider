@@ -29,20 +29,38 @@ export default function AccountInfoScreen({ visible, onClose, isDemoAccount, onS
 
   const handleSave = async () => {
     if (isDemoAccount) return;
+    if (!name.trim() || !companyName.trim()) {
+      Alert.alert('Required fields', 'Contact name and company name are required.');
+      return;
+    }
     setSaving(true);
     try {
       const trimmed = companyName.trim();
-      if (trimmed) {
+      const contactName = name.trim();
+      if (trimmed && contactName) {
         await authorizedFetch(`${API_URL}/profiles/${PROVIDER.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name: trimmed, initials: trimmed.slice(0, 2).toUpperCase() }),
+          body: JSON.stringify({
+            name: trimmed,
+            businessName: trimmed,
+            contactName,
+            initials: trimmed.slice(0, 2).toUpperCase(),
+          }),
         });
         PROVIDER.company = trimmed;
+        PROVIDER.name = contactName;
         PROVIDER.initials = trimmed.slice(0, 2).toUpperCase();
         const raw = await AsyncStorage.getItem('@pricing_store');
         const current = raw ? JSON.parse(raw) : {};
         await AsyncStorage.setItem('@pricing_store', JSON.stringify({ ...current, businessName: trimmed }));
+        const storedUserRaw = await AsyncStorage.getItem('providerUser');
+        const storedUser = storedUserRaw ? JSON.parse(storedUserRaw) : {};
+        await AsyncStorage.setItem('providerUser', JSON.stringify({
+          ...storedUser,
+          name: contactName,
+          companyName: trimmed,
+        }));
       }
       onSaved?.(companyName.trim());
       onClose();

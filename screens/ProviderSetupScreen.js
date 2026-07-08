@@ -300,6 +300,12 @@ export default function ProviderSetupScreen({ onComplete, onSkip }) {
     try {
       if (step === 1) {
         await savePricing({ ...DEFAULT_PRICING, providerType });
+        const res = await authorizedFetch(`${API_URL}/profiles/${PROVIDER.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ type: providerType }),
+        });
+        if (!res.ok) throw new Error('Could not save business type');
         setStep(2);
 
       } else if (step === 2) {
@@ -322,13 +328,16 @@ export default function ProviderSetupScreen({ onComplete, onSkip }) {
 
       } else if (step === 4) {
         await AsyncStorage.setItem('@service_radius', String(radius));
-        if (address.trim()) {
+        {
           const res = await authorizedFetch(`${API_URL}/profiles/${PROVIDER.id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ address: address.trim() }),
+            body: JSON.stringify({
+              serviceRadius: radius,
+              ...(address.trim() ? { address: address.trim() } : {}),
+            }),
           });
-          if (!res.ok) throw new Error('Could not save address');
+          if (!res.ok) throw new Error('Could not save service area');
         }
         onComplete();
       }

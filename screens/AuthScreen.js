@@ -3,7 +3,7 @@ import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput
 import { Ionicons } from '@expo/vector-icons';
 import { API_URL } from '../constants';
 
-export default function AuthScreen({ mode = 'login', onLogin, onBack }) {
+export default function AuthScreen({ mode = 'login', onLogin, onRegisterCredentials, onBack }) {
   const [isLogin, setIsLogin] = useState(mode !== 'register');
   const [loginValue, setLoginValue] = useState('');
   const [password, setPassword] = useState('');
@@ -15,6 +15,10 @@ export default function AuthScreen({ mode = 'login', onLogin, onBack }) {
 
     setLoading(true);
     try {
+      if (!isLogin && onRegisterCredentials) {
+        await onRegisterCredentials({ loginValue: loginValue.trim(), password });
+        return;
+      }
       const endpoint = isLogin ? '/auth/login' : '/auth/register-provider';
       const isEmail = loginValue.includes('@');
       const body = isLogin
