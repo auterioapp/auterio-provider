@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Alert, Linking, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { authorizedFetch } from '../apiClient';
 import Constants from 'expo-constants';
 import { Ionicons } from '@expo/vector-icons';
 import useScrollToTop from '../hooks/useScrollToTop';
@@ -46,8 +47,8 @@ export default function ProfileScreen({ online, setOnline, refreshControl, scrol
     setLoading(true);
     try {
       const [profileRes, scheduleRes, pricing, radius, storedUser] = await Promise.all([
-        fetch(`${API_URL}/profiles/${PROVIDER.id}`).then(r => r.ok ? r.json() : null).catch(() => null),
-        fetch(`${API_URL}/schedules/${PROVIDER.id}`).then(r => r.ok ? r.json() : null).catch(() => null),
+        authorizedFetch(`${API_URL}/profiles/${PROVIDER.id}`).then(r => r.ok ? r.json() : null).catch(() => null),
+        authorizedFetch(`${API_URL}/schedules/${PROVIDER.id}`).then(r => r.ok ? r.json() : null).catch(() => null),
         loadPricing(),
         AsyncStorage.getItem('@service_radius'),
         AsyncStorage.getItem('providerUser'),
@@ -96,7 +97,7 @@ export default function ProfileScreen({ online, setOnline, refreshControl, scrol
   useEffect(() => {
     if (!profileData) return;
     if (profileComplete && verificationStatus === 'unverified' && !isDemoAccount) {
-      fetch(`${API_URL}/profiles/${PROVIDER.id}`, {
+      authorizedFetch(`${API_URL}/profiles/${PROVIDER.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ verificationStatus: 'pending_review' }),
@@ -455,19 +456,25 @@ export default function ProfileScreen({ online, setOnline, refreshControl, scrol
         businessName={businessName}
         onClose={() => setBusinessOpen(false)}
         onSave={async ({ type, name }) => {
+          if (!isDemoAccount && name.trim()) {
+            try {
+              const res = await authorizedFetch(`${API_URL}/profiles/${PROVIDER.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: name.trim(), initials: name.trim().slice(0, 2).toUpperCase(), type }),
+              });
+              if (!res.ok) throw new Error('Server error');
+            } catch {
+              Alert.alert('Error', 'Could not save business name. Check your connection.');
+              return;
+            }
+          }
           const current = await loadPricing();
           await savePricing({ ...current, providerType: type, businessName: name });
           setProviderType(type);
           setBusinessName(name);
           PROVIDER.company = name || PROVIDER.company;
           PROVIDER.initials = (name || PROVIDER.company).slice(0, 2).toUpperCase();
-          if (!isDemoAccount && name.trim()) {
-            fetch(`${API_URL}/profiles/${PROVIDER.id}`, {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ name: name.trim(), initials: name.trim().slice(0, 2).toUpperCase(), type }),
-            }).catch(() => {});
-          }
           setBusinessOpen(false);
         }}
       />
@@ -479,8 +486,8 @@ export default function ProfileScreen({ online, setOnline, refreshControl, scrol
       <PricingScreen visible={pricingOpen} onClose={() => setPricingOpen(false)} />
       <WorkingHoursScreen
         visible={hoursOpen}
-        onClose={() => setHoursOpen(false)}
-        onSave={days => { setHoursSummary(getHoursSummary(days)); loadProfileData(); }}
+        onClose={() => { setHoursOpen(false); loadProfileData(); }}
+        onSave={days => setHoursSummary(getHoursSummary(days))}
       />
       <AppSettingsScreen
         visible={settingsOpen}

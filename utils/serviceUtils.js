@@ -332,6 +332,17 @@ function getDemoRequestDetails(order) {
   return DEMO_REQUEST_DETAILS_BY_ID[String(order.id || order.number || '')] || {};
 }
 
+// Extracts "City, State" from a full address string like "123 Main St, Los Angeles, CA, US"
+export function getCityState(address) {
+  if (!address) return address;
+  const parts = address.split(',').map(p => p.trim()).filter(Boolean);
+  if (parts.length >= 3) {
+    // city is 3rd from end, state/region is 2nd from end (last part is country)
+    return `${parts[parts.length - 3]}, ${parts[parts.length - 2]}`;
+  }
+  return address;
+}
+
 export function getRequestLocation(order) {
   const demo = getDemoRequestDetails(order);
   return (

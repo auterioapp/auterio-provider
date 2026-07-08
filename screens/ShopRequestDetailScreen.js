@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { KeyboardAvoidingView, Linking, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { authorizedFetch } from '../apiClient';
 import * as Haptics from 'expo-haptics';
 
 function pulseTabChange() {
@@ -51,7 +52,7 @@ export default function ShopRequestDetailScreen({ order, accepting, onBack, onAc
     if (shopStatus !== 'waiting_approval' || !orderId || String(orderId).startsWith('demo')) return;
     const interval = setInterval(async () => {
       try {
-        const res = await fetch(`${API_URL}/orders/${orderId}`);
+        const res = await authorizedFetch(`${API_URL}/orders/${orderId}`);
         const data = await res.json();
         if (data.status === 'estimate_approved') {
           advanceStep('in_progress');

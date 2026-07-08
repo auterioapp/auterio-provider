@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { authorizedFetch } from '../apiClient';
 import { API_URL, PROVIDER } from '../constants';
 import { loadPricing } from '../utils/pricingStore';
 
@@ -136,7 +137,7 @@ export default function WorkingHoursScreen({ visible, onClose, onSave }) {
   async function loadSchedule() {
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/schedules/${PROVIDER.id}`);
+      const res = await authorizedFetch(`${API_URL}/schedules/${PROVIDER.id}`);
       const data = await res.json();
       const newDays = INITIAL_DAYS.map(day => {
         const d = data.days?.[day.id];
@@ -167,7 +168,7 @@ export default function WorkingHoursScreen({ visible, onClose, onSave }) {
       });
       const body = { days: apiDays };
       if (hasAppointments) body.slotDuration = slotDuration;
-      await fetch(`${API_URL}/schedules/${PROVIDER.id}`, {
+      await authorizedFetch(`${API_URL}/schedules/${PROVIDER.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),

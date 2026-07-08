@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Alert, Modal, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import useScrollToTop from '../hooks/useScrollToTop';
-import { getServiceMeta, formatMoney, getServiceMode, getRequestDistance } from '../utils/serviceUtils';
+import { getServiceMeta, formatMoney, getServiceMode, getRequestDistance, getCityState } from '../utils/serviceUtils';
 import { PROVIDER } from '../constants';
 
 const DEMO_INCOMING_REQUEST = {
@@ -255,7 +255,7 @@ export default function HomeScreen({ online, setOnline, requests = [], requestAn
             {requests.map((order, i) => {
               const meta = getServiceMeta(order);
               const vehicle = [order.vehicle?.year, order.vehicle?.make, order.vehicle?.model].filter(Boolean).join(' ');
-              const addr = order.pickup?.address || 'Location pending';
+              const addr = getCityState(order.pickup?.address) || 'Location pending';
               return (
                 <TouchableOpacity
                   key={order.id || order._id || i}
@@ -297,16 +297,7 @@ function IncomingRequest({ order, accepting, onOpen, onAccept, onDecline, allowS
   const serviceMeta = getServiceMeta(order);
   const serviceMode = getServiceMode(order);
   const mode = INCOMING_MODE[serviceMode] || INCOMING_MODE.mobile;
-  const address = (() => {
-    const full = order.pickup?.address || '';
-    const parts = full.split(',').map(p => p.trim()).filter(Boolean);
-    if (parts.length >= 3) {
-      const city = parts[parts.length - 2];
-      const state = parts[parts.length - 1].split(' ')[0];
-      return `${city}, ${state}`;
-    }
-    return full || 'Location pending';
-  })();
+  const address = getCityState(order.pickup?.address) || 'Location pending';
   const distance = getRequestDistance(order);
   const vehicle = [order.vehicle?.year, order.vehicle?.make, order.vehicle?.model].filter(Boolean).join(' ');
   const isShop = serviceMode === 'shop';

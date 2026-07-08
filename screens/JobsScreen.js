@@ -26,8 +26,8 @@ export default function JobsScreen({ jobs, jobWorkflows = {}, onOpen, refreshCon
     || (job.customer?.name || '').toLowerCase().includes(q)
     || (job.pickup?.address || '').toLowerCase().includes(q)
     || String(job.number || '').includes(q);
-  const activeJobsList = jobsWithStatus.filter(job => job.displayStatus !== 'completed' && job.displayStatus !== 'scheduled' && job.displayStatus !== 'proposed' && matchesSearch(job));
-  const scheduledJobsList = jobsWithStatus.filter(job => (job.displayStatus === 'scheduled' || job.displayStatus === 'proposed') && matchesSearch(job));
+  const activeJobsList = jobsWithStatus.filter(job => job.displayStatus !== 'completed' && job.displayStatus !== 'scheduled' && job.displayStatus !== 'confirmed' && job.displayStatus !== 'proposed' && matchesSearch(job));
+  const scheduledJobsList = jobsWithStatus.filter(job => (job.displayStatus === 'scheduled' || job.displayStatus === 'confirmed' || job.displayStatus === 'proposed') && matchesSearch(job));
   const completedJobs = jobsWithStatus.filter(job => job.displayStatus === 'completed' && matchesSearch(job));
   const tabs = [
     { key: 'active', label: 'Active', icon: 'time-outline', color: '#2F80FF' },

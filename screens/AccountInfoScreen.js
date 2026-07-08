@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { authorizedFetch } from '../apiClient';
 import { API_URL, PROVIDER } from '../constants';
 
 export default function AccountInfoScreen({ visible, onClose, isDemoAccount, onSaved }) {
@@ -32,7 +33,7 @@ export default function AccountInfoScreen({ visible, onClose, isDemoAccount, onS
     try {
       const trimmed = companyName.trim();
       if (trimmed) {
-        await fetch(`${API_URL}/profiles/${PROVIDER.id}`, {
+        await authorizedFetch(`${API_URL}/profiles/${PROVIDER.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ name: trimmed, initials: trimmed.slice(0, 2).toUpperCase() }),

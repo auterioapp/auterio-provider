@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { authorizedFetch } from '../apiClient';
 import { API_URL, PROVIDER } from '../constants';
 import { savePricing, DEFAULT_PRICING } from '../utils/pricingStore';
 
@@ -302,7 +303,7 @@ export default function ProviderSetupScreen({ onComplete, onSkip }) {
         setStep(2);
 
       } else if (step === 2) {
-        const res = await fetch(`${API_URL}/profiles/${PROVIDER.id}`, {
+        const res = await authorizedFetch(`${API_URL}/profiles/${PROVIDER.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ services: buildServices() }),
@@ -311,7 +312,7 @@ export default function ProviderSetupScreen({ onComplete, onSkip }) {
         setStep(3);
 
       } else if (step === 3) {
-        const res = await fetch(`${API_URL}/schedules/${PROVIDER.id}`, {
+        const res = await authorizedFetch(`${API_URL}/schedules/${PROVIDER.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(buildSchedule()),
@@ -322,7 +323,7 @@ export default function ProviderSetupScreen({ onComplete, onSkip }) {
       } else if (step === 4) {
         await AsyncStorage.setItem('@service_radius', String(radius));
         if (address.trim()) {
-          const res = await fetch(`${API_URL}/profiles/${PROVIDER.id}`, {
+          const res = await authorizedFetch(`${API_URL}/profiles/${PROVIDER.id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ address: address.trim() }),
@@ -444,7 +445,7 @@ const s = StyleSheet.create({
 
   header: {
     flexDirection: 'row', alignItems: 'center',
-    paddingHorizontal: 20, paddingTop: 56, paddingBottom: 16,
+    paddingHorizontal: 20, paddingTop: 80, paddingBottom: 16,
     borderBottomWidth: 1, borderBottomColor: '#F3F4F6',
   },
   headerSide: { width: 44 },

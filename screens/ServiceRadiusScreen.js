@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import MapView, { Circle, Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { authorizedFetch } from '../apiClient';
 import { API_URL, GOOGLE_API_KEY, PROVIDER } from '../constants';
 
 const MIN = 5;
@@ -56,7 +57,7 @@ export default function ServiceRadiusScreen({ visible, onClose, onSave }) {
 
   useEffect(() => {
     if (!visible) return;
-    fetch(`${API_URL}/profiles/${PROVIDER.id}`)
+    authorizedFetch(`${API_URL}/profiles/${PROVIDER.id}`)
       .then(r => r.ok ? r.json() : null)
       .then(data => { if (data?.address) { setAddress(data.address); addressRef.current = data.address; } })
       .catch(() => {});
@@ -122,7 +123,7 @@ export default function ServiceRadiusScreen({ visible, onClose, onSave }) {
     const addr = addressRef.current.trim();
     if (addr) {
       try {
-        await fetch(`${API_URL}/profiles/${PROVIDER.id}`, {
+        await authorizedFetch(`${API_URL}/profiles/${PROVIDER.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ address: addr }),

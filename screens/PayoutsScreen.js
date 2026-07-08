@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, AppState, Linking, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { authorizedFetch } from '../apiClient';
 import { API_URL, PROVIDER } from '../constants';
 
 export default function PayoutsScreen({ visible, onClose, isDemo }) {
@@ -12,7 +13,7 @@ export default function PayoutsScreen({ visible, onClose, isDemo }) {
   const fetchAccount = useCallback(async () => {
     if (isDemo) return;
     try {
-      const res = await fetch(`${API_URL}/stripe/connect/account/${PROVIDER.id}`);
+      const res = await authorizedFetch(`${API_URL}/stripe/connect/account/${PROVIDER.id}`);
       const data = await res.json();
       setAccount(data);
     } catch {}
@@ -37,7 +38,7 @@ export default function PayoutsScreen({ visible, onClose, isDemo }) {
   const handleAddAccount = async () => {
     setConnecting(true);
     try {
-      const res = await fetch(`${API_URL}/stripe/connect/create-account`, {
+      const res = await authorizedFetch(`${API_URL}/stripe/connect/create-account`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ providerId: PROVIDER.id }),
@@ -58,7 +59,7 @@ export default function PayoutsScreen({ visible, onClose, isDemo }) {
   const handleManageDashboard = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/stripe/connect/dashboard-link`, {
+      const res = await authorizedFetch(`${API_URL}/stripe/connect/dashboard-link`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ providerId: PROVIDER.id }),

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { authorizedFetch } from '../apiClient';
 import PricingScreen from './PricingScreen';
 import { loadPricing } from '../utils/pricingStore';
 import { API_URL, PROVIDER } from '../constants';
@@ -136,18 +137,20 @@ function getAllShopServiceTitles(enabledIds) {
 
 export default function ServicesScreen({ visible, onClose }) {
   const [providerType, setProviderType] = useState('mobile');
-  const [mobileEnabled, setMobileEnabled] = useState(new Set(MOBILE_SERVICES.map(s => s.id)));
+  const [mobileEnabled, setMobileEnabled] = useState(new Set());
   const [shopEnabled, setShopEnabled] = useState(new Set());
   const [pricingOpen, setPricingOpen] = useState(false);
-  const [warrantyId, setWarrantyId] = useState('90d');
+  const [warrantyId, setWarrantyId] = useState('none');
   const [expandedCats, setExpandedCats] = useState(new Set());
 
   useEffect(() => {
     if (!visible) return;
+    setMobileEnabled(new Set());
+    setShopEnabled(new Set());
 
     Promise.all([
       loadPricing(),
-      fetch(`${API_URL}/profiles/${PROVIDER.id}`).then(r => r.ok ? r.json() : null).catch(() => null),
+      authorizedFetch(`${API_URL}/profiles/${PROVIDER.id}`).then(r => r.ok ? r.json() : null).catch(() => null),
     ]).then(([pricing, data]) => {
       const type = pricing.providerType || 'mobile';
       setProviderType(type);
@@ -186,7 +189,7 @@ export default function ServicesScreen({ visible, onClose }) {
       ? SHOP_CATEGORIES.filter(cat => cat.services.some(s => shopIds.has(s.id))).map(cat => cat.label)
       : [];
     const all = [...mobileTitles, ...shopCategoryLabels];
-    fetch(`${API_URL}/profiles/${PROVIDER.id}`, {
+    authorizedFetch(`${API_URL}/profiles/${PROVIDER.id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ services: all }),

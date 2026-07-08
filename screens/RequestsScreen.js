@@ -2,7 +2,7 @@ import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-nati
 import { Ionicons } from '@expo/vector-icons';
 import useScrollToTop from '../hooks/useScrollToTop';
 import SwipePager from '../components/SwipePager';
-import { getServiceMeta, formatMoney, getVehicleLabel, getRequestLocation, getRequestDistance, getServiceMode } from '../utils/serviceUtils';
+import { getServiceMeta, formatMoney, getVehicleLabel, getRequestLocation, getRequestDistance, getServiceMode, getCityState } from '../utils/serviceUtils';
 
 export default function RequestsScreen({ requests, acceptingId, filter, onFilterChange, onAccept, onDecline, onConfirm, onCounter, onScheduleAccept, onScheduleDecline, onOpen, allowScheduling, verificationStatus, refreshControl, scrollSignal }) {
   const scrollRef = useScrollToTop(scrollSignal);
@@ -92,7 +92,7 @@ function RequestCard({ order, accepting, onAccept, onDecline, onConfirm, onCount
   const icon = serviceMeta.icon;
   const title = serviceMeta.title;
   const vehicle = getVehicleLabel(order);
-  const location = getRequestLocation(order);
+  const location = getCityState(getRequestLocation(order));
   const distance = getRequestDistance(order);
   const serviceMode = getServiceMode(order);
   const mode = MODE_CONFIG[serviceMode] || MODE_CONFIG.mobile;

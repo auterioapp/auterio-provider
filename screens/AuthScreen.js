@@ -32,7 +32,7 @@ export default function AuthScreen({ mode = 'login', onLogin, onBack }) {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || data.error || 'Something went wrong');
-      onLogin(data.token, data.user);
+      onLogin(data.token, data.refreshToken || null, data.user);
     } catch (error) {
       alert(error.message || 'Something went wrong');
     }

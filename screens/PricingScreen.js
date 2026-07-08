@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Alert, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { authorizedFetch } from '../apiClient';
 import { loadPricing, savePricing, DEFAULT_PRICING } from '../utils/pricingStore';
 import { API_URL, PROVIDER } from '../constants';
 
@@ -119,7 +120,7 @@ export default function PricingScreen({ visible, onClose }) {
     await savePricing(v);
     const rate = parseFloat(v.laborRate);
     if (!isNaN(rate)) {
-      fetch(`${API_URL}/profiles/${PROVIDER.id}`, {
+      authorizedFetch(`${API_URL}/profiles/${PROVIDER.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ laborRate: rate }),

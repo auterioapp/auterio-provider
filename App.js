@@ -29,6 +29,7 @@ import { API_URL, PROVIDER, ACCEPT_BLUE, TAB_BAR_PADDING, TAB_INDICATOR_EXTRA_WI
 import { formatMoney, getServiceMeta, getServiceTitle, getOrderServiceType, getServiceFlowSchema, getDiagnosisSchema, getProviderIntakeItems, isTowingService, getDropoffAddress, getRequestLocation, getRequestDistance, getVehicleVin, normalizeComplaintItem, getCustomerComplaintItems, getAcceptedAtLabel, getVehicleLabel, getBackendStatusFromWorkflowStage } from './utils/serviceUtils';
 import { getRecommendedServicesFromDiagnosis, getDemoEstimate, getEstimateCatalog, getEstimatePriceCheck, sumAmounts, formatCurrency } from './utils/estimateUtils';
 import { loadPricing, savePricing, DEFAULT_PRICING } from './utils/pricingStore';
+import { setAuthFailureHandler as setApiAuthFailureHandler } from './apiClient';
 
 const DEMO_EMAIL = 'auterioapp@gmail.com';
 
@@ -172,7 +173,7 @@ export default function App() {
   const providerJobs = useMemo(() => isDemo ? [...DEMO_JOBS, ...acceptedJobs] : acceptedJobs, [acceptedJobs, isDemo]);
   const activeJobs = useMemo(() => providerJobs.filter(job =>
     ACTIVE_SHOP_STATUSES.includes(job.shopStatus) ||
-    (job.status !== 'completed' && job.status !== 'scheduled' && job.status !== 'proposed')
+    (job.status !== 'completed' && job.status !== 'scheduled' && job.status !== 'confirmed' && job.status !== 'proposed')
   ).length, [providerJobs]);
   const pendingCount = dashboardRequests.length;
   const tabWidth = tabBarWidth ? (tabBarWidth - TAB_BAR_PADDING * 2) / TABS.length : 0;
@@ -208,7 +209,7 @@ export default function App() {
       const data = await fetchJson(`${API_URL}/orders/provider/${providerId}`);
       if (!Array.isArray(data)) return;
       const active = data.filter(o =>
-        ['accepted', 'en_route', 'arrived', 'estimate_sent', 'estimate_approved', 'in_progress'].includes(o.status)
+        ['accepted', 'confirmed', 'scheduled', 'en_route', 'arrived', 'estimate_sent', 'estimate_approved', 'in_progress'].includes(o.status)
       );
       const done = data.filter(o => o.status === 'completed');
       if (active.length > 0) {
@@ -338,6 +339,11 @@ export default function App() {
   };
 
   useEffect(() => {
+    setApiAuthFailureHandler(handleLogout);
+    return () => setApiAuthFailureHandler(null);
+  }, []);
+
+  useEffect(() => {
     if (authState !== 'app') return;
     loadPricing().then(p => {
       const pt = p.providerType || 'mobile';
@@ -462,12 +468,20 @@ export default function App() {
         ? { ...job, shopStatus: newShopStatus, ...extra }
         : job
     ));
-    if (newShopStatus === 'waiting_approval' && extra?.estimate) {
+    const orderId = order.id || order._id;
+    const isReal = orderId && !String(orderId).startsWith('demo');
+    if (newShopStatus === 'checked_in' && isReal) {
+      fetchJson(`${API_URL}/orders/${orderId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'arrived' }),
+      }).catch(e => console.log('Check-in sync error:', e.message));
+    } else if (newShopStatus === 'waiting_approval' && extra?.estimate) {
       const { labor = 0, parts = 0, laborSubtotal = 0, partsSubtotal = 0, subtotal = 0, tax = 0, total = 0, note = '' } = extra.estimate;
-      const orderId = order.id || order._id;
-      if (orderId && !String(orderId).startsWith('demo')) {
+      if (isReal) {
         fetchJson(`${API_URL}/orders/${orderId}/status`, {
           method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             status: 'estimate_sent',
             estimate: { labor, parts, laborSubtotal, partsSubtotal, subtotal, tax, total, note },
@@ -1129,7 +1143,7 @@ export default function App() {
         >
           <View style={styles.requestModalOverlay}>
             <View style={styles.requestModalSheet}>
-              {!!selectedJob && (selectedJob.status === 'scheduled' || selectedJob.status === 'proposed' || !!selectedJob.shopStatus) ? (
+              {!!selectedJob && (selectedJob.status === 'scheduled' || selectedJob.status === 'confirmed' || selectedJob.status === 'proposed' || !!selectedJob.shopStatus) ? (
                 <ShopRequestDetailScreen
                   order={selectedJob}
                   isAccepted

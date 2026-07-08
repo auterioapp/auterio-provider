@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Modal, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { authorizedFetch } from '../apiClient';
 import { API_URL, PROVIDER } from '../constants';
 
 const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -64,7 +65,7 @@ export default function CalendarScreen({ visible, onClose, onOpenJob }) {
   async function loadAppointments(silent = false) {
     if (!silent) setLoading(true);
     try {
-      const scheduledRes = await fetch(`${API_URL}/orders?status=scheduled&providerId=${PROVIDER.id}`);
+      const scheduledRes = await authorizedFetch(`${API_URL}/orders?status=scheduled&providerId=${PROVIDER.id}`);
       const scheduled = scheduledRes.ok ? await scheduledRes.json() : [];
       const all = [...scheduled].sort((a, b) => {
         const ta = new Date(a.scheduledAt || 0).getTime();

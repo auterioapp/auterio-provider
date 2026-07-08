@@ -1,16 +1,30 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
+import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import { getServiceMeta, getVehicleLabel, getDropoffAddress, isTowingService, getProviderIntakeItems, getServiceMode } from '../utils/serviceUtils';
-import { REQUEST_MAP_REGION, REQUEST_ROUTE } from '../constants';
+
+const TIMER_SECONDS = 60;
+
+function formatTimer(s) {
+  return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
+}
 
 export default function RequestDetailScreen({ order, accepting, providerType = 'mobile', onBack, onAccept, onSchedule, onDecline, refreshControl }) {
   const [noteOpen, setNoteOpen] = useState(false);
   const [bottomPanelHeight, setBottomPanelHeight] = useState(0);
-  const accent = order.accent || '#42D463';
-  // Order mode takes priority over provider type for button logic
-  const orderMode = getServiceMode(order); // 'mobile' | 'shop'
+  const [timeLeft, setTimeLeft] = useState(TIMER_SECONDS);
+
+  useEffect(() => {
+    if (timeLeft <= 0) {
+      onDecline && onDecline(order);
+      return;
+    }
+    const id = setInterval(() => setTimeLeft(t => t - 1), 1000);
+    return () => clearInterval(id);
+  }, [timeLeft]);
+
+  const orderMode = getServiceMode(order);
   const isShopOrder = orderMode === 'shop';
   const isMobileOrder = orderMode === 'mobile';
   const serviceMeta = getServiceMeta(order);
@@ -18,20 +32,27 @@ export default function RequestDetailScreen({ order, accepting, providerType = '
   const title = serviceMeta.title;
   const vehicle = getVehicleLabel(order);
   const vehicleFallback = vehicle === 'Vehicle details pending' ? '' : vehicle;
-  const displayVehicle = [order.vehicle?.year, order.vehicle?.make, order.vehicle?.model].filter(Boolean).join(' ') || vehicleFallback || '2020 Honda Civic';
-  const address = order.pickup?.address || '456 Oak Ave, San Francisco, CA 94102';
+  const displayVehicle = [order.vehicle?.year, order.vehicle?.make, order.vehicle?.model].filter(Boolean).join(' ') || vehicleFallback || '—';
+  const address = order.pickup?.address || 'Location pending';
   const dropoffAddress = getDropoffAddress(order);
-  const payout = Number(order.payment?.totalHeld || order.payment?.total || 120);
-  const platformFee = Math.max(8, Math.round(payout * 0.1));
+  const payout = Number(order.payment?.totalHeld || order.payment?.total || 0);
+  const platformFee = payout > 0 ? Math.max(8, Math.round(payout * 0.1)) : 0;
   const net = Math.max(0, payout - platformFee);
+  const driveTime = order.eta || order.tracking?.eta || '—';
+  const distance = order.distance || '—';
   const customerNote = order.orderContext?.customerNote || order.customerNote || null;
-  const rawCustomerFiles = order.orderContext?.files || order.files || order.photos || [
-    { name: 'Front damage photo', type: 'image' },
-    { name: 'Warning light photo', type: 'image' },
-    { name: 'Customer note attachment', type: 'file' },
-  ];
-  const customerFiles = Array.isArray(rawCustomerFiles) ? rawCustomerFiles : [rawCustomerFiles].filter(Boolean);
+  const rawCustomerFiles = order.orderContext?.files || order.files || order.photos || [];
+  const customerFiles = Array.isArray(rawCustomerFiles) ? rawCustomerFiles.filter(Boolean) : [];
   const isTowing = isTowingService(order);
+
+  const hasCoords = order.pickup?.latitude != null && order.pickup?.longitude != null;
+  const customerCoord = hasCoords
+    ? { latitude: Number(order.pickup.latitude), longitude: Number(order.pickup.longitude) }
+    : null;
+  const mapRegion = customerCoord
+    ? { latitude: customerCoord.latitude, longitude: customerCoord.longitude, latitudeDelta: 0.018, longitudeDelta: 0.018 }
+    : null;
+
   const intakeRows = getProviderIntakeItems(order)
     .filter(item => item.value !== undefined && item.value !== null && String(item.value).trim())
     .map((item, index) => ({
@@ -45,8 +66,8 @@ export default function RequestDetailScreen({ order, accepting, providerType = '
   const locationRows = [
     { key: 'pickup', icon: 'location-outline', color: '#7C3AED', label: isTowing ? 'Pickup Location' : 'Service Location', value: address },
     ...(isTowing ? [{ key: 'dropoff', icon: 'flag-outline', color: '#EF4444', label: 'Drop-off Location', value: dropoffAddress }] : []),
-    { key: 'distance', icon: 'trail-sign-outline', color: '#42D463', label: 'Distance', value: order.distance || (isTowing ? '6.8 mi away' : '3.1 mi away') },
-    { key: 'payout', icon: 'cash-outline', color: '#EAB308', label: 'Est. Payout', value: `$${payout}` },
+    { key: 'distance', icon: 'trail-sign-outline', color: '#42D463', label: 'Distance', value: distance !== '—' ? `${distance}` : 'Calculating…' },
+    { key: 'payout', icon: 'cash-outline', color: '#EAB308', label: 'Est. Payout', value: payout > 0 ? `$${payout}` : 'See estimate' },
   ];
 
   return (
@@ -68,15 +89,15 @@ export default function RequestDetailScreen({ order, accepting, providerType = '
         <View style={styles.requestSummaryCard}>
           <View style={styles.earningsMain}>
             <Text style={styles.earningsLabel}>ESTIMATED{'\n'}EARNINGS</Text>
-            <Text style={styles.earningsAmount} numberOfLines={1}>${net}</Text>
+            <Text style={styles.earningsAmount} numberOfLines={1}>{net > 0 ? `$${net}` : '—'}</Text>
             <Text style={styles.earningsNet} numberOfLines={1}>Net earnings</Text>
           </View>
           <View style={styles.earningsDivider} />
-          <EarningStat icon="car-sport-outline" value="20 min" label="Drive time" />
+          <EarningStat icon="car-sport-outline" value={driveTime} label="Drive time" />
           <View style={styles.earningsDivider} />
-          <EarningStat icon="construct-outline" value="15 min" label="Work time" />
+          <EarningStat icon="map-outline" value={distance} label="Distance" />
           <View style={styles.earningsDivider} />
-          <EarningStat icon="time-outline" value="35 min" label="Total time" />
+          <EarningStat icon="cash-outline" value={payout > 0 ? `$${payout}` : '—'} label="Gross pay" />
         </View>
 
         <View style={styles.verifiedCard}>
@@ -106,7 +127,6 @@ export default function RequestDetailScreen({ order, accepting, providerType = '
           </View>
           <View style={styles.serviceInfo}>
             <Text style={styles.serviceType} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.75}>{displayVehicle}</Text>
-            <Text style={styles.serviceVehicle} numberOfLines={1}>Sedan - 92,000 mi</Text>
             <View style={[styles.trustedLine, styles.vehicleTrustedLine]}>
               <Ionicons name="checkmark-circle-outline" size={13} color="#F04416" />
               <Text style={styles.verifiedTrusted}>VIN verified</Text>
@@ -121,27 +141,36 @@ export default function RequestDetailScreen({ order, accepting, providerType = '
         </View>
 
         <View style={styles.mapPreview}>
-          <MapView
-            provider={PROVIDER_GOOGLE}
-            style={styles.mapView}
-            initialRegion={REQUEST_MAP_REGION}
-            scrollEnabled={false}
-            zoomEnabled={false}
-            rotateEnabled={false}
-            pitchEnabled={false}
-            toolbarEnabled={false}
-          >
-            <Polyline coordinates={REQUEST_ROUTE} strokeColor="#F04416" strokeWidth={4} />
-            <Marker coordinate={REQUEST_ROUTE[0]} anchor={{ x: 0.5, y: 0.5 }}>
-              <View style={styles.mapStartMarker} />
-            </Marker>
-            <Marker coordinate={REQUEST_ROUTE[REQUEST_ROUTE.length - 1]} anchor={{ x: 0.5, y: 1 }}>
-              <View style={styles.mapEndMarker}>
-                <Ionicons name="location" size={20} color="#FFFFFF" />
-              </View>
-            </Marker>
-          </MapView>
-          <View style={styles.mapBubble}><Text style={styles.mapBubbleText}>20 min{'\n'}6.8 mi</Text></View>
+          {mapRegion ? (
+            <MapView
+              provider={PROVIDER_GOOGLE}
+              style={styles.mapView}
+              initialRegion={mapRegion}
+              scrollEnabled={false}
+              zoomEnabled={false}
+              rotateEnabled={false}
+              pitchEnabled={false}
+              toolbarEnabled={false}
+            >
+              <Marker coordinate={customerCoord} anchor={{ x: 0.5, y: 1 }}>
+                <View style={styles.mapEndMarker}>
+                  <Ionicons name="location" size={20} color="#FFFFFF" />
+                </View>
+              </Marker>
+            </MapView>
+          ) : (
+            <View style={[styles.mapView, styles.mapPlaceholder]}>
+              <Ionicons name="map-outline" size={32} color="#C4C9D1" />
+              <Text style={styles.mapPlaceholderText}>Map unavailable</Text>
+            </View>
+          )}
+          <View style={styles.mapBubble}>
+            <Text style={styles.mapBubbleText}>
+              {driveTime !== '—' ? driveTime : ''}
+              {driveTime !== '—' && distance !== '—' ? '\n' : ''}
+              {distance !== '—' ? distance : ''}
+            </Text>
+          </View>
         </View>
 
         <View style={styles.requestBriefCard}>
@@ -180,8 +209,13 @@ export default function RequestDetailScreen({ order, accepting, providerType = '
         onLayout={(event) => setBottomPanelHeight(event.nativeEvent.layout.height)}
       >
         <View style={styles.acceptTimerBanner}>
-          <Ionicons name="time-outline" size={16} color="#F04416" />
-          <Text style={styles.acceptTimerText}>Auto-decline in <Text style={styles.acceptTimerTime}>00:55</Text></Text>
+          <Ionicons name="time-outline" size={16} color={timeLeft <= 10 ? '#EF4444' : '#F04416'} />
+          <Text style={styles.acceptTimerText}>
+            Auto-decline in{' '}
+            <Text style={[styles.acceptTimerTime, timeLeft <= 10 && { color: '#EF4444' }]}>
+              {formatTimer(timeLeft)}
+            </Text>
+          </Text>
         </View>
         <View style={styles.requestBottomActions}>
           <TouchableOpacity style={styles.largeDeclineButton} onPress={() => onDecline(order)} activeOpacity={0.84}>
@@ -216,7 +250,7 @@ export default function RequestDetailScreen({ order, accepting, providerType = '
 
             <Text style={styles.noteModalText}>{customerNote || 'No additional note from customer.'}</Text>
 
-            {!!customerFiles.length && (
+            {customerFiles.length > 0 && (
               <View style={styles.noteFilesBlock}>
                 <Text style={styles.noteFilesTitle}>Uploaded files</Text>
                 {customerFiles.map((file, index) => {
@@ -306,6 +340,8 @@ const styles = StyleSheet.create({
   requestSpecValue: { color: '#17191D', fontSize: 11, lineHeight: 14, fontWeight: '700', textAlign: 'center', flexShrink: 1 },
   mapPreview: { height: 148, borderRadius: 8, backgroundColor: '#F3F4F5', borderWidth: 1, borderColor: '#ECEEF0', marginBottom: 8, overflow: 'hidden', position: 'relative' },
   mapView: { ...StyleSheet.absoluteFillObject },
+  mapPlaceholder: { alignItems: 'center', justifyContent: 'center', gap: 6 },
+  mapPlaceholderText: { color: '#8B9098', fontSize: 12, fontWeight: '600' },
   mapStartMarker: { width: 18, height: 18, borderRadius: 9, backgroundColor: '#17191D', borderWidth: 3, borderColor: '#FFFFFF' },
   mapEndMarker: { width: 32, height: 38, borderRadius: 16, backgroundColor: '#F04416', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#FFFFFF' },
   mapBubble: { position: 'absolute', left: '45%', top: 34, borderRadius: 8, backgroundColor: 'rgba(23,25,29,0.9)', paddingHorizontal: 8, paddingVertical: 6 },
@@ -345,13 +381,6 @@ const styles = StyleSheet.create({
   noteModalTitle: { color: '#17191D', fontSize: 17, lineHeight: 21, fontWeight: '700' },
   noteCloseBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#F3F4F5', alignItems: 'center', justifyContent: 'center' },
   noteModalText: { color: '#17191D', fontSize: 14, lineHeight: 20, fontWeight: '500' },
-  noteSection: { marginBottom: 4 },
-  noteSectionBorder: { borderTopWidth: 1, borderTopColor: '#ECEEF0', paddingTop: 12, marginTop: 12 },
-  noteSectionLabel: { color: '#8B9098', fontSize: 10, fontWeight: '700', letterSpacing: 0.6, marginBottom: 8 },
-  noteAnswerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 8, marginBottom: 8 },
-  noteAnswerLabel: { color: '#5E646D', fontSize: 13, lineHeight: 18, flex: 1 },
-  noteAnswerValue: { color: '#17191D', fontSize: 13, lineHeight: 18, fontWeight: '700', textAlign: 'right', maxWidth: '50%' },
-  noteEmpty: { color: '#8B9098', fontSize: 13, lineHeight: 18, fontStyle: 'italic' },
   noteFilesBlock: { borderTopWidth: 1, borderTopColor: '#ECEEF0', paddingTop: 11, gap: 8 },
   noteFilesTitle: { color: '#5E646D', fontSize: 11, lineHeight: 14, fontWeight: '700' },
   noteFileRow: { minHeight: 38, borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', flexDirection: 'row', alignItems: 'center', gap: 9, paddingHorizontal: 10 },
