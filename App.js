@@ -13,6 +13,7 @@ import WelcomeScreen from './screens/WelcomeScreen';
 import AuthScreen from './screens/AuthScreen';
 import BusinessInfoScreen from './screens/BusinessInfoScreen';
 import ProviderSetupScreen from './screens/ProviderSetupScreen';
+import SetupSuccessScreen from './screens/SetupSuccessScreen';
 import HomeScreen from './screens/HomeScreen';
 import EarningsScreen from './screens/EarningsScreen';
 import ProfileScreen from './screens/ProfileScreen';
@@ -1039,19 +1040,31 @@ export default function App() {
       <SafeAreaProvider>
         <ProviderSetupScreen
           onComplete={async () => {
-            await AsyncStorage.setItem('@setup_completed_v1', 'true');
-            await AsyncStorage.setItem('@provider_verification_status', 'unverified');
-            fetchJson(`${API_URL}/profiles/${PROVIDER.id}`, {
+            const profile = await fetchJson(`${API_URL}/profiles/${PROVIDER.id}`, {
               method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
                 profileCompletion: 100,
                 setupCompleted: true,
+                verificationStatus: 'pending_review',
                 lastActivityAt: new Date().toISOString(),
               }),
-            }).catch(() => {});
-            setAuthState('app');
+            });
+            const nextStatus = profile?.verificationStatus || 'pending_review';
+            await AsyncStorage.setItem('@setup_completed_v1', 'true');
+            await AsyncStorage.setItem('@provider_verification_status', nextStatus);
+            setVerificationStatus(nextStatus);
+            setAuthState('setup-success');
           }}
         />
+      </SafeAreaProvider>
+    );
+  }
+
+  if (authState === 'setup-success') {
+    return (
+      <SafeAreaProvider>
+        <SetupSuccessScreen onContinue={() => setAuthState('app')} />
       </SafeAreaProvider>
     );
   }

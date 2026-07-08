@@ -27,6 +27,7 @@ export default function BusinessInfoScreen({ onContinue, onBack, loading }) {
         )}
 
         <View style={styles.titleWrap}>
+          <Text style={styles.progressLabel}>STEP 2 OF 7 | BUSINESS</Text>
           <Text style={styles.title}>Tell us about your business</Text>
           <Text style={styles.subtitle}>This helps us personalize your experience.</Text>
         </View>
@@ -97,6 +98,7 @@ const styles = StyleSheet.create({
   backBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', marginBottom: 24 },
 
   titleWrap: { marginBottom: 28 },
+  progressLabel: { color: '#FF6B00', fontSize: 11, fontWeight: '800', letterSpacing: 1.2, marginBottom: 10 },
   title: { fontSize: 26, fontWeight: '800', color: '#111827', marginBottom: 8 },
   subtitle: { fontSize: 14, color: '#6B7280', lineHeight: 20 },
 

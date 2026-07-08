@@ -244,7 +244,42 @@ function Step4_Zone({ providerType, radius, onRadiusChange, address, onAddressCh
 
 // ── Wizard ────────────────────────────────────────────────────────────────────
 
-const TOTAL_STEPS = 4;
+function ReviewRow({ icon, title, value, onEdit }) {
+  return (
+    <View style={s.reviewRow}>
+      <View style={s.reviewIcon}><Ionicons name={icon} size={19} color="#FF6B00" /></View>
+      <View style={s.reviewInfo}>
+        <Text style={s.reviewTitle}>{title}</Text>
+        <Text style={s.reviewValue}>{value}</Text>
+      </View>
+      <TouchableOpacity onPress={onEdit} style={s.reviewEdit}><Text style={s.reviewEditText}>Edit</Text></TouchableOpacity>
+    </View>
+  );
+}
+
+function Step5_Review({ providerType, services, days, radius, address, onEdit }) {
+  const typeLabel = providerType === 'mobile' ? 'Mobile Provider' : providerType === 'shop' ? 'Shop / Service Center' : 'Mobile + Shop';
+  const activeDays = days.filter(day => day.enabled).map(day => day.label.slice(0, 3)).join(', ');
+  const area = providerType === 'mobile' ? `${radius} mile service radius` : providerType === 'shop' ? address : `${radius} mile radius · ${address || 'No shop address'}`;
+  return (
+    <View style={s.stepContent}>
+      <Text style={s.stepTitle}>Review your profile</Text>
+      <Text style={s.stepDesc}>Confirm these details before submitting your provider profile for review.</Text>
+      <View style={s.reviewCard}>
+        <ReviewRow icon="business-outline" title="Business type" value={typeLabel} onEdit={() => onEdit(1)} />
+        <ReviewRow icon="construct-outline" title="Services" value={services.join(', ')} onEdit={() => onEdit(2)} />
+        <ReviewRow icon="time-outline" title="Availability" value={activeDays} onEdit={() => onEdit(3)} />
+        <ReviewRow icon="location-outline" title="Service area" value={area} onEdit={() => onEdit(4)} />
+      </View>
+      <View style={s.reviewNotice}>
+        <Ionicons name="shield-checkmark-outline" size={18} color="#2563EB" />
+        <Text style={s.reviewNoticeText}>You can update these details later from your profile.</Text>
+      </View>
+    </View>
+  );
+}
+
+const TOTAL_STEPS = 5;
 
 export default function ProviderSetupScreen({ onComplete, onSkip }) {
   const [step, setStep]                   = useState(1);
@@ -271,6 +306,7 @@ export default function ProviderSetupScreen({ onComplete, onSkip }) {
     if (step === 2) return (mobileEnabled.size + shopEnabled.size) > 0;
     if (step === 3) return days.some(d => d.enabled);
     if (step === 4) return providerType !== 'shop' || address.trim().length > 0;
+    if (step === 5) return true;
     return false;
   };
 
@@ -339,7 +375,9 @@ export default function ProviderSetupScreen({ onComplete, onSkip }) {
           });
           if (!res.ok) throw new Error('Could not save service area');
         }
-        onComplete();
+        setStep(5);
+      } else if (step === 5) {
+        await onComplete();
       }
     } catch (e) {
       Alert.alert('Error', e.message || 'Could not save. Check your connection.');
@@ -364,7 +402,7 @@ export default function ProviderSetupScreen({ onComplete, onSkip }) {
         </View>
 
         <View style={s.headerCenter}>
-          <Text style={s.headerStepText}>Step {step} of {TOTAL_STEPS}</Text>
+          <Text style={s.headerStepText}>Step {step + 2} of 7</Text>
           <View style={s.dots}>
             {Array.from({ length: TOTAL_STEPS }, (_, i) => (
               <View key={i} style={[s.dot, i + 1 === step && s.dotActive, i + 1 < step && s.dotDone]} />
@@ -412,6 +450,16 @@ export default function ProviderSetupScreen({ onComplete, onSkip }) {
               onAddressChange={setAddress}
             />
           )}
+          {step === 5 && (
+            <Step5_Review
+              providerType={providerType}
+              services={buildServices()}
+              days={days}
+              radius={radius}
+              address={address}
+              onEdit={setStep}
+            />
+          )}
         </ScrollView>
 
         {/* Footer */}
@@ -439,7 +487,7 @@ export default function ProviderSetupScreen({ onComplete, onSkip }) {
           >
             {saving
               ? <ActivityIndicator color="#fff" size="small" />
-              : <Text style={s.nextBtnText}>{step === TOTAL_STEPS ? 'Complete Setup' : 'Continue'}</Text>}
+              : <Text style={s.nextBtnText}>{step === TOTAL_STEPS ? 'Submit for Review' : 'Continue'}</Text>}
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
@@ -550,6 +598,17 @@ const s = StyleSheet.create({
     backgroundColor: '#fff', borderRadius: 10, padding: 14,
     fontSize: 14, color: '#111827', borderWidth: 1.5, borderColor: '#E5E7EB',
   },
+
+  reviewCard: { backgroundColor: '#F9FAFB', borderRadius: 16, borderWidth: 1, borderColor: '#E5E7EB', overflow: 'hidden' },
+  reviewRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderBottomWidth: 1, borderBottomColor: '#ECEEF0' },
+  reviewIcon: { width: 38, height: 38, borderRadius: 10, backgroundColor: 'rgba(255,107,0,0.1)', alignItems: 'center', justifyContent: 'center' },
+  reviewInfo: { flex: 1 },
+  reviewTitle: { color: '#8B9098', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', marginBottom: 3 },
+  reviewValue: { color: '#17191D', fontSize: 13, lineHeight: 18, fontWeight: '600' },
+  reviewEdit: { paddingHorizontal: 10, paddingVertical: 7, borderRadius: 10, backgroundColor: '#FFF3E8' },
+  reviewEditText: { color: '#FF6B00', fontSize: 12, fontWeight: '800' },
+  reviewNotice: { flexDirection: 'row', gap: 9, backgroundColor: '#EFF6FF', borderRadius: 12, padding: 13, marginTop: 16 },
+  reviewNoticeText: { flex: 1, color: '#2563EB', fontSize: 12, lineHeight: 17, fontWeight: '600' },
 
   // Footer
   footer: {

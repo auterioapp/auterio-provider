@@ -12,6 +12,7 @@ export default function AuthScreen({ mode = 'login', onLogin, onRegisterCredenti
 
   const handleSubmit = async () => {
     if (!loginValue || !password) { alert('Please fill in all fields'); return; }
+    if (!isLogin && password.length < 8) { alert('Password must be at least 8 characters'); return; }
 
     setLoading(true);
     try {
@@ -63,6 +64,7 @@ export default function AuthScreen({ mode = 'login', onLogin, onRegisterCredenti
 
         {/* Title */}
         <View style={styles.titleWrap}>
+          {!isLogin && <Text style={styles.progressLabel}>STEP 1 OF 7 | ACCOUNT</Text>}
           <Text style={styles.title}>
             {isLogin ? 'Welcome back' : 'Create your account'}
           </Text>
@@ -72,7 +74,6 @@ export default function AuthScreen({ mode = 'login', onLogin, onRegisterCredenti
               : 'Sign up to start your journey\nwith Auterio Provider.'}
           </Text>
         </View>
-
         {/* Social buttons — register only */}
         {!isLogin && (
           <>
@@ -127,6 +128,7 @@ export default function AuthScreen({ mode = 'login', onLogin, onRegisterCredenti
             <Ionicons name={showPassword ? 'eye-outline' : 'eye-off-outline'} size={20} color="#9CA3AF" />
           </TouchableOpacity>
         </View>
+        {!isLogin && <Text style={styles.passwordHint}>Use at least 8 characters</Text>}
 
         {/* Submit */}
         <TouchableOpacity style={styles.btn} onPress={handleSubmit} activeOpacity={0.88} disabled={loading}>
@@ -166,6 +168,7 @@ const styles = StyleSheet.create({
   backBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', marginBottom: 24 },
 
   titleWrap: { marginBottom: 28 },
+  progressLabel: { color: '#FF6B00', fontSize: 11, fontWeight: '800', letterSpacing: 1.2, marginBottom: 10 },
   title: { fontSize: 28, fontWeight: '800', color: '#111827', marginBottom: 10, lineHeight: 34 },
   subtitle: { fontSize: 15, color: '#6B7280', lineHeight: 22, textAlign: 'center' },
 
@@ -181,6 +184,7 @@ const styles = StyleSheet.create({
 
   passwordWrap: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 14, borderWidth: 1.5, borderColor: '#E5E7EB', marginBottom: 20, paddingRight: 12 },
   passwordInput: { flex: 1, padding: 16, fontSize: 15, color: '#111827' },
+  passwordHint: { color: '#8B9098', fontSize: 12, marginTop: -12, marginBottom: 18, marginLeft: 2 },
   eyeBtn: { padding: 4 },
 
   btn: { backgroundColor: '#FF6B00', borderRadius: 14, paddingVertical: 17, alignItems: 'center', marginBottom: 20 },
