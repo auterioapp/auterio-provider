@@ -117,6 +117,16 @@ function normalizeOrderToJob(order) {
   };
 }
 
+function isBookingOrder(order) {
+  return !!order && (
+    order.status === 'scheduled_pending' ||
+    order.status === 'scheduled' ||
+    order.status === 'confirmed' ||
+    order.isScheduledRequest ||
+    !!order.scheduledAt
+  );
+}
+
 const DEMO_JOBS = [
   { id: 'demo-job-001', status: 'on_the_way', eta: '12 min', icon: 'car-outline', service: { type: 'Oil Change' }, vehicle: { year: '2021', make: 'Toyota', model: 'Camry' }, pickup: { address: '142 Maple St, Austin TX' }, payment: { total: 89 }, distance: '3.2 mi' },
   { id: 'demo-job-002', status: 'waiting_approval', icon: 'construct-outline', service: { type: 'Brake Inspection' }, vehicle: { year: '2019', make: 'Honda', model: 'Civic' }, pickup: { address: '78 Oak Ave, Austin TX' }, payment: { total: 210 }, distance: '1.8 mi' },
@@ -1212,7 +1222,7 @@ export default function App() {
         >
           <View style={styles.requestModalOverlay}>
             <View style={styles.requestModalSheet}>
-              {!!selectedRequest && getServiceMode(selectedRequest) === 'shop' ? (
+              {!!selectedRequest && (isBookingOrder(selectedRequest) || getServiceMode(selectedRequest) === 'shop') ? (
                 <ShopRequestDetailScreen
                   order={selectedRequest}
                   accepting={acceptingId === selectedRequest.id}
