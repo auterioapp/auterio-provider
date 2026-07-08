@@ -14,17 +14,19 @@ export default function AccountInfoScreen({ visible, onClose, isDemoAccount, onS
 
   useEffect(() => {
     if (!visible) return;
-    AsyncStorage.getItem('providerUser').then(raw => {
-      if (!raw) return;
-      const user = JSON.parse(raw);
-      setName(user.name || '');
+    Promise.all([
+      authorizedFetch(`${API_URL}/profiles/${PROVIDER.id}`).then(response => response.ok ? response.json() : null).catch(() => null),
+      AsyncStorage.getItem('providerUser'),
+      AsyncStorage.getItem('@pricing_store'),
+    ]).then(([profile, userRaw, pricingRaw]) => {
+      const user = userRaw ? JSON.parse(userRaw) : {};
+      const pricing = pricingRaw ? JSON.parse(pricingRaw) : {};
+      const serverBusinessName = (profile?.businessName || profile?.name || '').trim();
+      setName(profile?.contactName || user.name || '');
       setEmail(user.email || '');
       setPhone(user.phone || '');
-    });
-    AsyncStorage.getItem('@pricing_store').then(raw => {
-      if (!raw) return;
-      try { setCompanyName(JSON.parse(raw).businessName || ''); } catch {}
-    });
+      setCompanyName(serverBusinessName || pricing.businessName || '');
+    }).catch(() => {});
   }, [visible]);
 
   const handleSave = async () => {

@@ -61,6 +61,7 @@ export default function ProfileScreen({ online, setOnline, refreshControl, scrol
           setBusinessName(serverBusinessName);
           PROVIDER.company = serverBusinessName;
           PROVIDER.initials = serverBusinessName.slice(0, 2).toUpperCase();
+          savePricing({ ...pricing, businessName: serverBusinessName });
         }
         if (profileRes.contactName) PROVIDER.name = profileRes.contactName;
         if (profileRes.verificationStatus) {
