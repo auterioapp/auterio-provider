@@ -295,7 +295,8 @@ const INCOMING_MODE = {
 
 function IncomingRequest({ order, accepting, onOpen, onAccept, onDecline, allowScheduling }) {
   const serviceMeta = getServiceMeta(order);
-  const serviceMode = getServiceMode(order);
+  const isScheduledBooking = order.status === 'scheduled_pending' || order.isScheduledRequest || !!order.scheduledAt;
+  const serviceMode = isScheduledBooking ? 'shop' : getServiceMode(order);
   const mode = INCOMING_MODE[serviceMode] || INCOMING_MODE.mobile;
   const address = getCityState(order.pickup?.address) || 'Location pending';
   const distance = getRequestDistance(order);
@@ -314,9 +315,9 @@ function IncomingRequest({ order, accepting, onOpen, onAccept, onDecline, allowS
       <View style={styles.incomingTop}>
         <View style={styles.incomingLabelWrap}>
           <View style={[styles.newBadge, { backgroundColor: mode.color }]}>
-            <Text style={styles.newBadgeText}>{mode.label.toUpperCase()}</Text>
+            <Text style={styles.newBadgeText}>{isScheduledBooking ? 'APPOINTMENT' : mode.label.toUpperCase()}</Text>
           </View>
-          <Text style={styles.incomingLabel}>New Request</Text>
+          <Text style={styles.incomingLabel}>{isScheduledBooking ? 'Booking Request' : 'New Request'}</Text>
         </View>
         <View style={styles.liveWrap}>
           <Text style={styles.justNow}>Just now</Text>

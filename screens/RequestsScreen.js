@@ -110,18 +110,18 @@ function RequestCard({ order, accepting, onAccept, onDecline, onConfirm, onCount
 
       {isScheduled && (
         <View style={styles.scheduledBanner}>
-          <Ionicons name="calendar-outline" size={12} color="#7C3AED" />
+          <Ionicons name="calendar-outline" size={12} color="#2563EB" />
           <Text style={styles.scheduledBannerText}>Appointment Request</Text>
           <Text style={styles.scheduledBannerTime}>{fmtScheduledTime(order.scheduledAt)}</Text>
         </View>
       )}
       <View style={[styles.requestCardTop, !isScheduled && styles.requestCardTopStripe]}>
         <View style={[styles.activeListIcon, !isScheduled && { borderColor: mode.bg, backgroundColor: mode.bg }]}>
-          <Ionicons name={icon} size={20} color={isScheduled ? '#7C3AED' : mode.color} />
+          <Ionicons name={icon} size={20} color={isScheduled ? '#2563EB' : mode.color} />
         </View>
         <View style={styles.activeListInfo}>
           <View style={styles.statusRow}>
-            <Text style={[styles.neutralListStatus, isScheduled && { color: '#7C3AED' }]}>
+            <Text style={[styles.neutralListStatus, isScheduled && { color: '#2563EB' }]}>
               {isScheduled ? 'APPOINTMENT' : 'NEW REQUEST'}
             </Text>
             {!isScheduled && (
@@ -159,7 +159,7 @@ function RequestCard({ order, accepting, onAccept, onDecline, onConfirm, onCount
               <Text style={styles.cardBtnDeclineText}>Decline</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.cardBtnSchedule} activeOpacity={0.82} onPress={(e) => { e.stopPropagation(); onCounter && onCounter(order); }}>
-              <Ionicons name="swap-horizontal-outline" size={14} color="#7C3AED" />
+              <Ionicons name="swap-horizontal-outline" size={14} color="#2563EB" />
               <Text style={styles.cardBtnScheduleText}>Suggest Time</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.cardBtnConfirm} activeOpacity={0.82} onPress={(e) => { e.stopPropagation(); onScheduleAccept && onScheduleAccept(order); }}>
@@ -184,7 +184,7 @@ function RequestCard({ order, accepting, onAccept, onDecline, onConfirm, onCount
             </TouchableOpacity>
             {allowScheduling && (
               <TouchableOpacity style={styles.cardBtnSchedule} activeOpacity={0.82} onPress={(e) => { e.stopPropagation(); onOpen && onOpen(order); }}>
-                <Ionicons name="calendar-outline" size={14} color="#7C3AED" />
+                <Ionicons name="calendar-outline" size={14} color="#2563EB" />
                 <Text style={styles.cardBtnScheduleText}>Schedule</Text>
               </TouchableOpacity>
             )}
@@ -235,21 +235,21 @@ const styles = StyleSheet.create({
   cardBtnDecline: { flex: 1, paddingVertical: 11, alignItems: 'center', justifyContent: 'center', borderRightWidth: 1, borderRightColor: '#ECEEF0' },
   cardBtnDeclineText: { color: '#EF4444', fontSize: 13, fontWeight: '700' },
   cardBtnSchedule: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, paddingVertical: 11, borderRightWidth: 1, borderRightColor: '#ECEEF0' },
-  cardBtnScheduleText: { color: '#7C3AED', fontSize: 13, fontWeight: '700' },
+  cardBtnScheduleText: { color: '#2563EB', fontSize: 13, fontWeight: '700' },
   cardBtnAccept: { flex: 1, paddingVertical: 11, alignItems: 'center', justifyContent: 'center', backgroundColor: '#16A34A' },
   cardBtnAcceptText: { color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
   cardBtnLocked: { flex: 1, paddingVertical: 11, alignItems: 'center', justifyContent: 'center', backgroundColor: '#F3F4F5', flexDirection: 'row', gap: 5 },
   cardBtnLockedText: { color: '#9CA3AF', fontSize: 13, fontWeight: '700' },
   verificationBanner: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 7, backgroundColor: 'rgba(217,119,6,0.06)', borderTopWidth: 1, borderTopColor: 'rgba(217,119,6,0.12)' },
   verificationBannerText: { flex: 1, color: '#D97706', fontSize: 11, fontWeight: '600' },
-  cardBtnConfirm: { flex: 2, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 11, backgroundColor: '#7C3AED' },
+  cardBtnConfirm: { flex: 2, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 11, backgroundColor: '#2563EB' },
   cardBtnConfirmText: { color: '#FFFFFF', fontSize: 13, fontWeight: '800' },
-  scheduledCardWrap: { borderColor: '#DDD6FE', borderWidth: 1.5 },
-  scheduledBanner: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#F5F0FF', paddingHorizontal: 12, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#EDE9FE' },
-  scheduledBannerText: { color: '#7C3AED', fontSize: 11, fontWeight: '700', flex: 1 },
-  scheduledBannerTime: { color: '#7C3AED', fontSize: 11, fontWeight: '600' },
-  apptTimeBadge: { backgroundColor: '#F5F0FF', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 3, marginTop: 4 },
-  apptTimeBadgeText: { color: '#7C3AED', fontSize: 10, fontWeight: '700' },
+  scheduledCardWrap: { borderColor: '#BFDBFE', borderWidth: 1.5 },
+  scheduledBanner: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#EFF6FF', paddingHorizontal: 12, paddingVertical: 6, borderBottomWidth: 1, borderBottomColor: '#DBEAFE' },
+  scheduledBannerText: { color: '#2563EB', fontSize: 11, fontWeight: '700', flex: 1 },
+  scheduledBannerTime: { color: '#2563EB', fontSize: 11, fontWeight: '600' },
+  apptTimeBadge: { backgroundColor: '#EFF6FF', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 3, marginTop: 4 },
+  apptTimeBadgeText: { color: '#2563EB', fontSize: 10, fontWeight: '700' },
   modeStripe: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 3 },
   requestCardTopStripe: { paddingLeft: 13 },
   statusRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 1 },
