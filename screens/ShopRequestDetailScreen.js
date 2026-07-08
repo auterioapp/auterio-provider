@@ -69,6 +69,9 @@ export default function ShopRequestDetailScreen({ order, accepting, onBack, onAc
   const payout      = Number(order.payment?.totalHeld || order.payment?.total || 145);
   const platformFee = Math.max(8, Math.round(payout * 0.1));
   const net         = Math.max(0, payout - platformFee);
+  const estimateRange = order.payment?.priceMin && order.payment?.priceMax
+    ? `$${order.payment.priceMin}–$${order.payment.priceMax}`
+    : 'After inspection';
   const preferredDateStr = order.scheduledSlotLabel || order.scheduledSlot || 'Tomorrow, 10:00 AM';
   const timeMatch = preferredDateStr.match(/(\d+:\d+\s*[AP]M)/i);
   const preferredTime = timeMatch ? timeMatch[1] : null;
@@ -86,6 +89,7 @@ export default function ShopRequestDetailScreen({ order, accepting, onBack, onAc
     .map((r, i) => ({ key: `ir-${i}`, label: r.label, value: String(r.value) }));
 
   const shopStatus = order.shopStatus || 'scheduled';
+  const isPendingBooking = !isAccepted && !isProposed && (order.status === 'scheduled_pending' || !!order.scheduledAt);
   const STEPPER_STATUS = shopStatus === 'estimate' || shopStatus === 'waiting_approval' ? 'inspection' : shopStatus;
   const shopStepIdx = SHOP_JOB_STEPS.findIndex(s => s.key === STEPPER_STATUS);
   const estimateTotal = (parseFloat(laborAmt) || 0) + (parseFloat(partsAmt) || 0);
@@ -298,8 +302,8 @@ export default function ShopRequestDetailScreen({ order, accepting, onBack, onAc
             </>
           ) : (
             <>
-              <Text style={s.headerTitle}>Service Request</Text>
-              <Text style={s.headerSub}>Review details and respond to the customer</Text>
+              <Text style={s.headerTitle}>{isPendingBooking ? 'Booking Request' : 'Service Request'}</Text>
+              <Text style={s.headerSub}>{isPendingBooking ? 'Review the requested appointment time' : 'Review details and respond to the customer'}</Text>
             </>
           )}
         </View>
@@ -309,11 +313,11 @@ export default function ShopRequestDetailScreen({ order, accepting, onBack, onAc
             <Ionicons name="close" size={20} color="#8B9098" />
           </TouchableOpacity>
         ) : (
-          <View style={s.timerBadge}>
-            <Text style={s.timerTop}>Respond within</Text>
+          <View style={[s.timerBadge, isPendingBooking && s.bookingStatusBadge]}>
+            <Text style={[s.timerTop, isPendingBooking && s.bookingStatusTop]}>{isPendingBooking ? 'Pending' : 'Respond within'}</Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-              <Ionicons name="time-outline" size={13} color="#F97316" />
-              <Text style={s.timerVal}>{timerStr}</Text>
+              <Ionicons name={isPendingBooking ? 'calendar-outline' : 'time-outline'} size={13} color={isPendingBooking ? '#2563EB' : '#F97316'} />
+              <Text style={[s.timerVal, isPendingBooking && s.bookingStatusVal]}>{isPendingBooking ? 'Confirm' : timerStr}</Text>
             </View>
           </View>
         )}
@@ -328,21 +332,24 @@ export default function ShopRequestDetailScreen({ order, accepting, onBack, onAc
 
         {/* Time card — only for new requests */}
         {!isAccepted && (
-          <View style={s.card}>
+          <View style={[s.card, isPendingBooking && s.bookingTimeCard]}>
             <View style={s.timeRow}>
               <View style={s.timeMain}>
+                <View style={[s.timeIconBox, isPendingBooking && s.bookingTimeIcon]}>
+                  <Ionicons name="calendar-outline" size={22} color="#2563EB" />
+                </View>
                 <View style={{ flex: 1 }}>
-                  <Text style={s.timeTopLabel}>Customer preferred time</Text>
-                  <Text style={s.timeBig}>{preferredDate}</Text>
-                  {!!preferredTime && <Text style={s.timeTime}>{preferredTime}</Text>}
+                  <Text style={[s.timeTopLabel, isPendingBooking && s.bookingTimeLabel]}>{isPendingBooking ? 'Requested appointment' : 'Customer preferred time'}</Text>
+                  <Text style={[s.timeBig, isPendingBooking && s.bookingTimeBig]}>{preferredDate}</Text>
+                  {!!preferredTime && <Text style={[s.timeTime, isPendingBooking && s.bookingTimeValue]}>{preferredTime}</Text>}
                 </View>
               </View>
               <View style={s.timeInfoBox}>
                 <View style={s.timeInfoHead}>
                   <Ionicons name="information-circle-outline" size={13} color="#2563EB" />
-                  <Text style={s.timeInfoBold} numberOfLines={1} adjustsFontSizeToFit>This is a preferred time.</Text>
+                  <Text style={s.timeInfoBold} numberOfLines={1} adjustsFontSizeToFit>{isPendingBooking ? 'Customer is waiting.' : 'This is a preferred time.'}</Text>
                 </View>
-                <Text style={s.timeInfoBody}>You can confirm or suggest another time.</Text>
+                <Text style={s.timeInfoBody}>{isPendingBooking ? 'Confirm this slot or suggest another time.' : 'You can confirm or suggest another time.'}</Text>
               </View>
             </View>
           </View>
@@ -397,7 +404,7 @@ export default function ShopRequestDetailScreen({ order, accepting, onBack, onAc
             </View>
             <View style={s.lockedContact}>
               <Ionicons name="lock-closed-outline" size={18} color="#5E646D" />
-              <Text style={s.lockedContactText}>Contact available{'\n'}after acceptance</Text>
+              <Text style={s.lockedContactText}>Contact unlocks{'\n'}after confirmation</Text>
             </View>
           </View>
         ))}
@@ -615,7 +622,7 @@ export default function ShopRequestDetailScreen({ order, accepting, onBack, onAc
         ) : (
           /* Request Details */
           <View style={s.card}>
-            <Text style={s.sectionTitle}>Request Details</Text>
+            <Text style={s.sectionTitle}>{isPendingBooking ? 'Booking Details' : 'Request Details'}</Text>
 
             <TouchableOpacity style={s.noteRow} activeOpacity={(customerNote || customerFiles.length) ? 0.82 : 1} onPress={(customerNote || customerFiles.length) ? () => setNoteOpen(true) : undefined}>
               <View style={[s.detailIconBox, { backgroundColor: '#EFF6FF' }]}>
@@ -628,17 +635,17 @@ export default function ShopRequestDetailScreen({ order, accepting, onBack, onAc
               {!!(customerNote || customerFiles.length) && <Ionicons name="chevron-forward" size={14} color="#8B9098" />}
             </TouchableOpacity>
             <Sep />
-            <DetailRow icon="calendar-outline" iconBg="#F3EEFF" iconColor="#7C3AED" label="Preferred Date & Time" value={preferredDateStr} />
+            <DetailRow icon="calendar-outline" iconBg="#EFF6FF" iconColor="#2563EB" label={isPendingBooking ? 'Requested Date & Time' : 'Preferred Date & Time'} value={preferredDateStr} />
             <Sep />
-            <DetailRow icon="time-outline" iconBg="#FFF7ED" iconColor="#F97316" label="Estimated Labor Time" value="60–90 min" />
+            <DetailRow icon="time-outline" iconBg="#EFF6FF" iconColor="#2563EB" label={isPendingBooking ? 'Appointment Length' : 'Estimated Labor Time'} value="60–90 min" />
             <Sep />
             <TouchableOpacity style={s.detailRow} activeOpacity={0.82} onPress={() => setPayoutOpen(o => !o)}>
               <View style={[s.detailIconBox, { backgroundColor: '#F0FDF4' }]}>
                 <Ionicons name="cash-outline" size={15} color="#16A34A" />
               </View>
-              <Text style={s.detailLabel}>Est. Payout (you'll earn) ⓘ</Text>
+              <Text style={s.detailLabel}>{isPendingBooking ? 'Estimate Range' : "Est. Payout (you'll earn) ⓘ"}</Text>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                <Text style={s.detailValueBold}>${net}</Text>
+                <Text style={s.detailValueBold}>{isPendingBooking ? estimateRange : `$${net}`}</Text>
                 <Ionicons name={payoutOpen ? 'chevron-up' : 'chevron-down'} size={14} color="#8B9098" />
               </View>
             </TouchableOpacity>
@@ -985,7 +992,7 @@ export default function ShopRequestDetailScreen({ order, accepting, onBack, onAc
                 <Text style={s.btnSub}>Propose new options</Text>
               </TouchableOpacity>
               <TouchableOpacity style={s.btnAccept} onPress={handleAccept} disabled={accepting} activeOpacity={0.84}>
-                <Text style={s.btnAcceptTitle}>{accepting ? 'Booking…' : 'Accept Request'}</Text>
+                <Text style={s.btnAcceptTitle}>{accepting ? 'Confirming…' : 'Confirm Booking'}</Text>
                 <Text style={s.btnAcceptSub}>{'Confirm preferred time\n'}{preferredDateStr}</Text>
               </TouchableOpacity>
             </>
@@ -1311,6 +1318,9 @@ const s = StyleSheet.create({
   },
   timerTop: { color: '#92400E', fontSize: 10, fontWeight: '600' },
   timerVal: { color: '#F97316', fontSize: 17, fontWeight: '800' },
+  bookingStatusBadge: { backgroundColor: '#EFF6FF', borderColor: '#BFDBFE' },
+  bookingStatusTop: { color: '#1D4ED8' },
+  bookingStatusVal: { color: '#2563EB', fontSize: 15 },
 
   acceptedHeader: { backgroundColor: '#020C1A' },
   acceptedHeaderTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 16, paddingBottom: 12 },
@@ -1349,6 +1359,7 @@ const s = StyleSheet.create({
 
   scroll: { flex: 1 },
   card: { ...CARD, padding: 14 },
+  bookingTimeCard: { backgroundColor: '#EFF6FF', borderColor: '#BFDBFE' },
 
   /* Time card */
   timeRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
@@ -1357,9 +1368,13 @@ const s = StyleSheet.create({
     width: 44, height: 44, borderRadius: 12, backgroundColor: '#F3EEFF',
     alignItems: 'center', justifyContent: 'center', flexShrink: 0,
   },
+  bookingTimeIcon: { backgroundColor: '#DBEAFE', borderWidth: 1, borderColor: '#BFDBFE' },
   timeTopLabel: { color: '#8B9098', fontSize: 11, fontWeight: '600', marginBottom: 4 },
+  bookingTimeLabel: { color: '#1D4ED8', fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.4 },
   timeBig: { color: '#17191D', fontSize: 18, fontWeight: '800', lineHeight: 22 },
+  bookingTimeBig: { color: '#17191D', fontSize: 20, lineHeight: 24, fontWeight: '900' },
   timeTime: { color: '#5E646D', fontSize: 16, fontWeight: '600', marginTop: 3 },
+  bookingTimeValue: { color: '#2563EB', fontSize: 24, lineHeight: 29, fontWeight: '900' },
   timeInfoBox: {
     width: 150, flexShrink: 0, backgroundColor: '#EFF6FF', borderRadius: 10,
     borderWidth: 1, borderColor: '#BFDBFE', padding: 10,
