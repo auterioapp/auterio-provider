@@ -1,4 +1,48 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(node -e ' *)",
+      "Bash(curl -s -m 60 \"http://localhost:8081/index.bundle?platform=ios&dev=true\" -o /tmp/bundle_notif3.js)",
+      "Bash(curl -s -m 60 \"http://localhost:8081/index.bundle?platform=ios&dev=true\" -o /tmp/bundle_notif4.js)",
+      "Bash(curl -s -m 60 \"http://localhost:8081/index.bundle?platform=ios&dev=true\" -o /tmp/bundle_notif5.js)",
+      "Bash(curl -s -m 60 \"http://localhost:8081/index.bundle?platform=android&dev=true\" -o /tmp/bundle_notif6.js)",
+      "Bash(curl -s -m 60 -w \"\\\\nHTTP_CODE:%{http_code}\\\\n\" \"http://localhost:8081/index.bundle?platform=android&dev=true\" -o /tmp/bundle_notif6b.js)",
+      "Bash(curl -s -m 60 \"http://localhost:8081/index.bundle?platform=ios&dev=true\" -o /tmp/bundle_notif7.js)",
+      "Bash(curl -s -m 60 \"http://localhost:8081/index.bundle?platform=ios&dev=true\" -o /tmp/bundle_notif8.js)",
+      "Bash(curl -s -m 60 \"http://localhost:8081/index.bundle?platform=ios&dev=true\" -o /tmp/bundle_notif9.js)",
+      "Bash(curl -s -m 60 \"http://localhost:8081/index.bundle?platform=ios&dev=true\" -o /tmp/bundle_notif10.js)",
+      "Bash(curl -s -m 60 \"http://localhost:8081/index.bundle?platform=ios&dev=true\" -o /tmp/bundle_notif11.js)",
+      "Bash(node --check \"c:/Users/PCUSER/auterio3/utils.js\")",
+      "Bash(awk 'NR==396,NR==650' \"c:/Users/PCUSER/auterio3/screens/ProfileScreen.js\")",
+      "Bash(awk 'NR==641,NR==730' \"c:/Users/PCUSER/auterio3/screens/ProfileScreen.js\")",
+      "Bash(node --check \"c:/Users/PCUSER/auterio3/screens/EditProfileScreen.js\")",
+      "Bash(curl -s -m 60 \"http://localhost:8081/index.bundle?platform=ios&dev=true\" -o /tmp/bundle_swipe1.js)",
+      "Bash(grep -n \"styles.container} {...swipeHandlers}\" \"c:/Users/PCUSER/auterio3/screens/ProfileScreen.js\")",
+      "Bash(awk -F: '$1>528 && $1<620')",
+      "Bash(awk '/^function OrderHistoryView/{f=1} f && /^}/{print NR; exit}' \"c:/Users/PCUSER/auterio3/screens/ProfileScreen.js\")",
+      "Bash(curl -s -m 60 \"http://localhost:8081/index.bundle?platform=ios&dev=true\" -o /tmp/bundle_swipe2.js)",
+      "Bash(node --check \"c:/Users/PCUSER/auterio3/App.js\")",
+      "Bash(node --check \"c:/Users/PCUSER/auterio3/components/SwipeBackView.js\")",
+      "Bash(curl -s -m 60 \"http://localhost:8081/index.bundle?platform=ios&dev=true\" -o /tmp/bundle_swipe3.js)",
+      "Bash(curl -s -m 60 \"http://localhost:8081/index.bundle?platform=ios&dev=true\" -o /tmp/bundle_swipe4.js)",
+      "Bash(curl -s -m 60 \"http://localhost:8081/index.bundle?platform=ios&dev=true\" -o /tmp/bundle_swipe5.js)",
+      "Bash(curl -s -m 60 \"http://localhost:8081/index.bundle?platform=ios&dev=true\" -o /tmp/bundle_haptic1.js)",
+      "Bash(curl -s -m 60 \"http://localhost:8081/index.bundle?platform=ios&dev=true\" -o /tmp/bundle_lock1.js)",
+      "Bash(curl -s -m 60 \"http://localhost:8081/index.bundle?platform=ios&dev=true\" -o /tmp/bundle_faceoff1.js)",
+      "Bash(curl -s -m 60 \"http://localhost:8081/index.bundle?platform=ios&dev=true\" -o /tmp/bundle_black1.js)",
+      "Bash(curl -s -m 60 \"http://localhost:8081/index.bundle?platform=ios&dev=true\" -o /tmp/bundle_phone1.js)",
+      "PowerShell(\\([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent\\(\\)\\).IsInRole\\([Security.Principal.WindowsBuiltInRole]::Administrator\\))",
+      "PowerShell(Get-NetFirewallRule -DisplayName \"Node.js JavaScript Runtime\" | ForEach-Object { $port = $_ | Get-NetFirewallPortFilter; $app = $_ | Get-NetFirewallApplicationFilter; [PSCustomObject]@{Profile=$_.Profile; Direction=$_.Direction; Action=$_.Action; Protocol=$port.Protocol; LocalPort=$port.LocalPort; Program=$app.Program} })",
+      "PowerShell(Start-Process powershell -ArgumentList '-NoProfile','-ExecutionPolicy','Bypass','-File','C:\\\\Users\\\\PCUSER\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-PCUSER-auterio-provider\\\\64bebc74-8dab-4c76-bee5-745a688192dd\\\\scratchpad\\\\fix-firewall.ps1' -Verb RunAs -Wait)",
+      "PowerShell(Stop-Process -Id 23112 -Force -ErrorAction SilentlyContinue)",
+      "PowerShell(netstat -ano)",
+      "Bash(npx expo *)",
+      "Bash(curl -s http://localhost:4040/api/tunnels)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\PCUSER\\AppData\\Local\\Temp\\claude\\c--Users-PCUSER-auterio-provider\\64bebc74-8dab-4c76-bee5-745a688192dd\\scratchpad"
+    ]
+  },
   "enabledPlugins": {
     "expo@claude-plugins-official": true
   }

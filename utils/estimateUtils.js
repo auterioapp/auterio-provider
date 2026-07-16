@@ -6,7 +6,8 @@ export function sumAmounts(items) {
 }
 
 export function formatCurrency(value) {
-  return `$${Number(value || 0).toFixed(2)}`;
+  const num = Number(value || 0);
+  return `$${num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
 export function getRecommendedServicesFromDiagnosis(answers, batteryVoltage, order) {

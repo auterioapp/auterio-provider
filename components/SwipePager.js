@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Animated, StyleSheet, TouchableOpacity, View } from 'react-native';
+import { Animated, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 
@@ -96,6 +96,11 @@ export default function SwipePager({ tabs, activeKey, onChange, children, tabBar
                 <Animated.Text pointerEvents="none" style={[tabTextStyle, styles.swipeTabLabelLayer, { opacity: inactiveOpacity }]}>{tab.label}</Animated.Text>
                 <Animated.Text pointerEvents="none" style={[tabTextStyle, styles.swipeTabMaskedText, activeTextStyle, styles.swipeTabLabelLayer, { opacity: activeOpacity }]}>{tab.label}</Animated.Text>
               </View>
+              {!!tab.count && (
+                <View style={[styles.swipeTabCount, { backgroundColor: (tab.color || '#17191D') + '1C' }]}>
+                  <Text style={[styles.swipeTabCountText, { color: tab.color || '#17191D' }]}>{tab.count}</Text>
+                </View>
+              )}
             </TouchableOpacity>
           );
         })}
@@ -135,6 +140,8 @@ const styles = StyleSheet.create({
   swipeTabLabelSizer: { opacity: 0 },
   swipeTabLabelLayer: { position: 'absolute', left: 0, right: 0, textAlign: 'center' },
   swipeTabMaskedText: { color: '#FFFFFF' },
+  swipeTabCount: { minWidth: 16, height: 16, borderRadius: 8, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
+  swipeTabCountText: { fontSize: 10, fontWeight: '800' },
   swipePager: { overflow: 'hidden' },
   swipePagerTrack: { flexDirection: 'row', alignItems: 'flex-start' },
   swipePagerPage: { flexShrink: 0 },

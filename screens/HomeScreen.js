@@ -334,9 +334,7 @@ function IncomingRequest({ order, accepting, onOpen, onAccept, onDecline, allowS
           {!!vehicle && <Text style={styles.incomingVehicle} numberOfLines={1}>{vehicle}</Text>}
           <View style={styles.incomingMetaRow}>
             <Ionicons name={mode.locIcon} size={15} color="#B7C1D7" />
-            <Text style={styles.incomingMeta} numberOfLines={1}>
-              {address}
-            </Text>
+            <Text style={styles.incomingMeta} numberOfLines={1}>{address}</Text>
           </View>
           {!isShop && (
             <View style={styles.incomingMetaRow}>

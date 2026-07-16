@@ -29,7 +29,13 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-secure-store"
+      "expo-secure-store",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Auterio Pro uses your location to share your live position with the customer while you're en route."
+        }
+      ]
     ]
   }
 }

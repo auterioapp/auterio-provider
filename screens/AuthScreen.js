@@ -7,12 +7,24 @@ export default function AuthScreen({ mode = 'login', onLogin, onRegisterCredenti
   const [isLogin, setIsLogin] = useState(mode !== 'register');
   const [loginValue, setLoginValue] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+
+  const [forgotStep, setForgotStep] = useState(null); // null | 'phone' | 'verify'
+  const [forgotPhone, setForgotPhone] = useState('');
+  const [forgotCode, setForgotCode] = useState('');
+  const [forgotNewPwd, setForgotNewPwd] = useState('');
+  const [forgotConfirmPwd, setForgotConfirmPwd] = useState('');
+  const [forgotError, setForgotError] = useState('');
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotDevCode, setForgotDevCode] = useState(null);
 
   const handleSubmit = async () => {
     if (!loginValue || !password) { alert('Please fill in all fields'); return; }
     if (!isLogin && password.length < 8) { alert('Password must be at least 8 characters'); return; }
+    if (!isLogin && password !== confirmPassword) { alert('Passwords do not match'); return; }
 
     setLoading(true);
     try {
@@ -44,6 +56,129 @@ export default function AuthScreen({ mode = 'login', onLogin, onRegisterCredenti
     setLoading(false);
   };
 
+  const sendResetCode = async () => {
+    if (!forgotPhone) { setForgotError('Please enter your phone number'); return; }
+    setForgotLoading(true);
+    setForgotError('');
+    try {
+      const res = await fetch(`${API_URL}/auth/password-reset/request`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: forgotPhone }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Could not send code');
+      setForgotDevCode(data.devCode || null);
+      setForgotStep('verify');
+    } catch (e) {
+      setForgotError(e.message || 'Could not send code');
+    }
+    setForgotLoading(false);
+  };
+
+  const confirmReset = async () => {
+    if (forgotCode.length !== 6) { setForgotError('Enter the 6-digit code'); return; }
+    if (!forgotNewPwd || forgotNewPwd.length < 8) { setForgotError('Password must be at least 8 characters'); return; }
+    if (forgotNewPwd !== forgotConfirmPwd) { setForgotError('Passwords do not match'); return; }
+    setForgotLoading(true);
+    setForgotError('');
+    try {
+      const res = await fetch(`${API_URL}/auth/password-reset/confirm`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: forgotPhone, code: forgotCode, newPassword: forgotNewPwd }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Something went wrong');
+      setForgotStep(null);
+      setForgotPhone(''); setForgotCode(''); setForgotNewPwd(''); setForgotConfirmPwd(''); setForgotDevCode(null);
+      setIsLogin(true);
+      alert('Password reset successfully. Please sign in with your new password.');
+    } catch (e) {
+      setForgotError(e.message || 'Something went wrong');
+    }
+    setForgotLoading(false);
+  };
+
+  if (forgotStep) {
+    return (
+      <KeyboardAvoidingView
+        style={styles.container}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
+      >
+        <ScrollView contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+          <TouchableOpacity onPress={() => forgotStep === 'verify' ? setForgotStep('phone') : setForgotStep(null)} style={styles.backBtn} activeOpacity={0.7}>
+            <Ionicons name="arrow-back" size={22} color="#17191D" />
+          </TouchableOpacity>
+
+          <View style={styles.titleWrap}>
+            <Text style={styles.title}>{forgotStep === 'phone' ? 'Reset password' : 'New password'}</Text>
+            <Text style={styles.subtitle}>
+              {forgotStep === 'phone'
+                ? 'Enter your phone number to receive a verification code.'
+                : `Enter the code sent to ${forgotPhone} and choose a new password.`}
+            </Text>
+          </View>
+
+          {forgotStep === 'phone' ? (
+            <TextInput
+              style={styles.input}
+              placeholder="Phone number"
+              placeholderTextColor="#9CA3AF"
+              value={forgotPhone}
+              onChangeText={setForgotPhone}
+              keyboardType="phone-pad"
+            />
+          ) : (
+            <>
+              <TextInput
+                style={styles.input}
+                placeholder="6-digit code"
+                placeholderTextColor="#9CA3AF"
+                value={forgotCode}
+                onChangeText={v => setForgotCode(v.replace(/[^\d]/g, '').slice(0, 6))}
+                keyboardType="number-pad"
+                maxLength={6}
+              />
+              <View style={styles.passwordWrap}>
+                <TextInput
+                  style={styles.passwordInput}
+                  placeholder="New password"
+                  placeholderTextColor="#9CA3AF"
+                  value={forgotNewPwd}
+                  onChangeText={setForgotNewPwd}
+                  secureTextEntry
+                />
+              </View>
+              <View style={styles.passwordWrap}>
+                <TextInput
+                  style={styles.passwordInput}
+                  placeholder="Confirm new password"
+                  placeholderTextColor="#9CA3AF"
+                  value={forgotConfirmPwd}
+                  onChangeText={setForgotConfirmPwd}
+                  secureTextEntry
+                />
+              </View>
+            </>
+          )}
+
+          {forgotError ? <Text style={styles.errorText}>{forgotError}</Text> : null}
+          {__DEV__ && forgotDevCode ? <Text style={styles.devHint}>Dev code: {forgotDevCode}</Text> : null}
+
+          <TouchableOpacity style={[styles.btn, forgotLoading && { opacity: 0.6 }]} onPress={forgotStep === 'phone' ? sendResetCode : confirmReset} activeOpacity={0.88} disabled={forgotLoading}>
+            <Text style={styles.btnText}>{forgotLoading ? 'Please wait...' : forgotStep === 'phone' ? 'Send Code' : 'Reset Password'}</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity onPress={() => setForgotStep(null)} style={styles.switchWrap}>
+            <Text style={styles.switchText}>Back to <Text style={styles.switchLink}>Sign In</Text></Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    );
+  }
+
   return (
     <KeyboardAvoidingView
       style={styles.container}
@@ -55,14 +190,12 @@ export default function AuthScreen({ mode = 'login', onLogin, onRegisterCredenti
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        {/* Back button */}
         {onBack && (
           <TouchableOpacity onPress={onBack} style={styles.backBtn} activeOpacity={0.7}>
             <Ionicons name="arrow-back" size={22} color="#17191D" />
           </TouchableOpacity>
         )}
 
-        {/* Title */}
         <View style={styles.titleWrap}>
           {!isLogin && <Text style={styles.progressLabel}>STEP 1 OF 7 | ACCOUNT</Text>}
           <Text style={styles.title}>
@@ -74,36 +207,8 @@ export default function AuthScreen({ mode = 'login', onLogin, onRegisterCredenti
               : 'Sign up to start your journey\nwith Auterio Provider.'}
           </Text>
         </View>
-        {/* Social buttons — register only */}
-        {!isLogin && (
-          <>
-            <TouchableOpacity
-              style={styles.socialBtn}
-              activeOpacity={0.84}
-              onPress={() => alert('Coming soon')}
-            >
-              <Ionicons name="logo-apple" size={20} color="#000" />
-              <Text style={styles.socialBtnText}>Continue with Apple</Text>
-            </TouchableOpacity>
 
-            <TouchableOpacity
-              style={styles.socialBtn}
-              activeOpacity={0.84}
-              onPress={() => alert('Coming soon')}
-            >
-              <Text style={styles.googleG}>G</Text>
-              <Text style={styles.socialBtnText}>Continue with Google</Text>
-            </TouchableOpacity>
 
-            <View style={styles.dividerRow}>
-              <View style={styles.dividerLine} />
-              <Text style={styles.dividerText}>or</Text>
-              <View style={styles.dividerLine} />
-            </View>
-          </>
-        )}
-
-        {/* Email / phone */}
         <TextInput
           style={styles.input}
           placeholder="Email or phone"
@@ -114,7 +219,6 @@ export default function AuthScreen({ mode = 'login', onLogin, onRegisterCredenti
           autoCapitalize="none"
         />
 
-        {/* Password */}
         <View style={styles.passwordWrap}>
           <TextInput
             style={styles.passwordInput}
@@ -130,24 +234,42 @@ export default function AuthScreen({ mode = 'login', onLogin, onRegisterCredenti
         </View>
         {!isLogin && <Text style={styles.passwordHint}>Use at least 8 characters</Text>}
 
-        {/* Submit */}
+        {!isLogin && (
+          <View style={styles.passwordWrap}>
+            <TextInput
+              style={styles.passwordInput}
+              placeholder="Confirm password"
+              placeholderTextColor="#9CA3AF"
+              value={confirmPassword}
+              onChangeText={setConfirmPassword}
+              secureTextEntry={!showConfirmPassword}
+            />
+            <TouchableOpacity onPress={() => setShowConfirmPassword(!showConfirmPassword)} style={styles.eyeBtn} activeOpacity={0.7}>
+              <Ionicons name={showConfirmPassword ? 'eye-outline' : 'eye-off-outline'} size={20} color="#9CA3AF" />
+            </TouchableOpacity>
+          </View>
+        )}
+
         <TouchableOpacity style={styles.btn} onPress={handleSubmit} activeOpacity={0.88} disabled={loading}>
           <Text style={styles.btnText}>
             {loading ? 'Please wait...' : isLogin ? 'Sign In' : 'Continue'}
           </Text>
         </TouchableOpacity>
 
-        {/* Switch to register — login screen only */}
         {isLogin && (
-          <TouchableOpacity onPress={() => setIsLogin(false)} style={styles.switchWrap}>
-            <Text style={styles.switchText}>
-              {"Don't have an account? "}
-              <Text style={styles.switchLink}>Sign Up</Text>
-            </Text>
-          </TouchableOpacity>
+          <>
+            <TouchableOpacity onPress={() => setForgotStep('phone')} style={{ alignItems: 'flex-end', marginTop: -10, marginBottom: 16 }}>
+              <Text style={styles.switchLink}>Forgot password?</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setIsLogin(false)} style={styles.switchWrap}>
+              <Text style={styles.switchText}>
+                {"Don't have an account? "}
+                <Text style={styles.switchLink}>Sign Up</Text>
+              </Text>
+            </TouchableOpacity>
+          </>
         )}
 
-        {/* Footer */}
         {!isLogin && (
           <Text style={styles.terms}>
             By continuing, you agree to our{'\n'}
@@ -170,15 +292,7 @@ const styles = StyleSheet.create({
   titleWrap: { marginBottom: 28 },
   progressLabel: { color: '#FF6B00', fontSize: 11, fontWeight: '800', letterSpacing: 1.2, marginBottom: 10 },
   title: { fontSize: 28, fontWeight: '800', color: '#111827', marginBottom: 10, lineHeight: 34 },
-  subtitle: { fontSize: 15, color: '#6B7280', lineHeight: 22, textAlign: 'center' },
-
-  socialBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12, borderWidth: 1.5, borderColor: '#E5E7EB', borderRadius: 14, paddingVertical: 14, marginBottom: 12, backgroundColor: '#fff' },
-  socialBtnText: { fontSize: 15, fontWeight: '700', color: '#111827' },
-  googleG: { fontSize: 17, fontWeight: '800', color: '#4285F4' },
-
-  dividerRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 20, marginTop: 4 },
-  dividerLine: { flex: 1, height: 1, backgroundColor: '#E5E7EB' },
-  dividerText: { color: '#9CA3AF', fontSize: 13, fontWeight: '500' },
+  subtitle: { fontSize: 15, color: '#6B7280', lineHeight: 22 },
 
   input: { backgroundColor: '#fff', borderRadius: 14, padding: 16, fontSize: 15, color: '#111827', marginBottom: 12, borderWidth: 1.5, borderColor: '#E5E7EB' },
 
@@ -192,7 +306,10 @@ const styles = StyleSheet.create({
 
   switchWrap: { alignItems: 'center', marginBottom: 24 },
   switchText: { fontSize: 14, color: '#6B7280' },
-  switchLink: { color: '#FF6B00', fontWeight: '700' },
+  switchLink: { color: '#FF6B00', fontWeight: '700', fontSize: 14 },
+
+  errorText: { color: '#DC2626', fontSize: 13, marginBottom: 12 },
+  devHint: { color: '#2563EB', fontSize: 12, marginBottom: 12 },
 
   terms: { fontSize: 12, color: '#9CA3AF', textAlign: 'center', lineHeight: 18 },
   termsLink: { color: '#2563EB', fontWeight: '600' },

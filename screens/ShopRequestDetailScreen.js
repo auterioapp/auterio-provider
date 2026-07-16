@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { KeyboardAvoidingView, Linking, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, KeyboardAvoidingView, Linking, Modal, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { authorizedFetch } from '../apiClient';
 import * as Haptics from 'expo-haptics';
@@ -8,17 +8,13 @@ function pulseTabChange() {
   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
 }
 import { getServiceMeta, getVehicleLabel, getProviderIntakeItems, getDiagnosisSchema } from '../utils/serviceUtils';
-import { getRecommendedServicesFromDiagnosis, getDemoEstimate, getEstimateCatalog, getEstimatePriceCheck, formatCurrency } from '../utils/estimateUtils';
+import { getRecommendedServicesFromDiagnosis, getDemoEstimate, getEstimateCatalog, getEstimatePriceCheck, formatCurrency, sumAmounts } from '../utils/estimateUtils';
 import { RequestInfoRow } from './RequestDetailScreen';
 import { SHOP_JOB_STEPS, API_URL } from '../constants';
 
-export default function ShopRequestDetailScreen({ order, accepting, onBack, onAccept, onSchedule, onDecline, onStepChange, isAccepted, isProposed }) {
+export default function ShopRequestDetailScreen({ order, accepting, onBack, onAccept, onSchedule, onDecline, onStepChange, onCancel, isAccepted, isProposed }) {
   const [payoutOpen, setPayoutOpen] = useState(false);
   const [noteOpen, setNoteOpen] = useState(false);
-  const [estimateOpen, setEstimateOpen] = useState(false);
-  const [laborAmt, setLaborAmt] = useState('');
-  const [partsAmt, setPartsAmt] = useState('');
-  const [estimateNote, setEstimateNote] = useState('');
   const [diagnosisAnswers, setDiagnosisAnswers] = useState({});
   const [diagnosisNotes, setDiagnosisNotes] = useState('');
   const [batteryVoltage, setBatteryVoltage] = useState('');
@@ -39,8 +35,18 @@ export default function ShopRequestDetailScreen({ order, accepting, onBack, onAc
   const [activeChecklistItem, setActiveChecklistItem] = useState(null);
   const [checklistDraft, setChecklistDraft] = useState('');
   const [requiredPhotos, setRequiredPhotos] = useState({});
-  const [bottomH, setBottomH] = useState(0);
+  const [bottomH, setBottomH] = useState(104);
   const [secondsLeft, setSecondsLeft] = useState(192);
+  const [additionalApprovals, setAdditionalApprovals] = useState((order.additionalApprovals || []).filter(item => item.kind === 'required'));
+  const [changeRequestOpen, setChangeRequestOpen] = useState(false);
+  const [changeRequestName, setChangeRequestName] = useState('');
+  const [changeRequestReason, setChangeRequestReason] = useState('');
+  const [changeRequestAmount, setChangeRequestAmount] = useState('');
+  const [changeRequestEvidence, setChangeRequestEvidence] = useState('');
+  const [workPhotos, setWorkPhotos] = useState(order.workPhotos || []);
+  const [workSummary, setWorkSummary] = useState(order.workSummary || '');
+  const [workTimer, setWorkTimer] = useState(0);
+  const [completeOpen, setCompleteOpen] = useState(false);
 
   useEffect(() => {
     const t = setInterval(() => setSecondsLeft(s => Math.max(0, s - 1)), 1000);
@@ -55,12 +61,48 @@ export default function ShopRequestDetailScreen({ order, accepting, onBack, onAc
         const res = await authorizedFetch(`${API_URL}/orders/${orderId}`);
         const data = await res.json();
         if (data.status === 'estimate_approved') {
-          advanceStep('in_progress');
+          advanceStep('in_progress', {
+            estimateApprovedAt: data.orderContext?.estimateApprovedAt || new Date().toISOString(),
+            approvedTotal: data.orderContext?.approvedTotal ?? null,
+            approveOptional: data.orderContext?.approveOptional ?? false,
+          });
         }
       } catch {}
     }, 8000);
     return () => clearInterval(interval);
   }, [shopStatus]);
+
+  useEffect(() => {
+    const orderId = order.id || order._id;
+    if (shopStatus !== 'in_progress' || !orderId || String(orderId).startsWith('demo')) return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await authorizedFetch(`${API_URL}/orders/${orderId}`);
+        const data = await res.json();
+        const liveApprovals = data?.orderContext?.additionalApprovals;
+        if (!Array.isArray(liveApprovals)) return;
+        setAdditionalApprovals(prev => {
+          const hasChange = liveApprovals.some(live => {
+            const local = prev.find(p => p.id === live.id);
+            return local && local.status !== live.status;
+          });
+          return hasChange ? liveApprovals.filter(item => item.kind === 'required') : prev;
+        });
+      } catch {}
+    }, 8000);
+    return () => clearInterval(interval);
+  }, [shopStatus]);
+
+  useEffect(() => {
+    if (shopStatus !== 'in_progress') return;
+    const startTs = order.estimateApprovedAt && !isNaN(new Date(order.estimateApprovedAt).getTime())
+      ? new Date(order.estimateApprovedAt).getTime()
+      : Date.now();
+    const tick = () => setWorkTimer(Math.floor((Date.now() - startTs) / 1000));
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [shopStatus, order.estimateApprovedAt]);
 
   const timerStr = `${String(Math.floor(secondsLeft / 60)).padStart(2, '0')}:${String(secondsLeft % 60).padStart(2, '0')}`;
 
@@ -70,12 +112,26 @@ export default function ShopRequestDetailScreen({ order, accepting, onBack, onAc
   const platformFee = Math.max(8, Math.round(payout * 0.1));
   const net         = Math.max(0, payout - platformFee);
   const estimateRange = order.payment?.priceMin && order.payment?.priceMax
-    ? `$${order.payment.priceMin}–$${order.payment.priceMax}`
+    ? `${formatCurrency(order.payment.priceMin)}–${formatCurrency(order.payment.priceMax)}`
     : 'After inspection';
-  const preferredDateStr = order.scheduledSlotLabel || order.scheduledSlot || 'Tomorrow, 10:00 AM';
-  const timeMatch = preferredDateStr.match(/(\d+:\d+\s*[AP]M)/i);
-  const preferredTime = timeMatch ? timeMatch[1] : null;
-  const preferredDate = timeMatch ? preferredDateStr.replace(/,?\s*\d+:\d+\s*[AP]M/i, '').trim() : preferredDateStr;
+  const scheduledAtDate = order.scheduledAt ? new Date(order.scheduledAt) : null;
+  const hasValidScheduledAt = scheduledAtDate && !isNaN(scheduledAtDate.getTime());
+  const legacyPreferredDateStr = order.scheduledSlotLabel || order.scheduledSlot || 'Tomorrow, 10:00 AM';
+  const legacyTimeMatch = legacyPreferredDateStr.match(/(\d+:\d+\s*[AP]M)/i);
+  const legacyPreferredDate = legacyTimeMatch ? legacyPreferredDateStr.replace(/,?\s*\d+:\d+\s*[AP]M/i, '').trim() : legacyPreferredDateStr;
+  const formatDayLabel = (date) => {
+    const startOfToday = new Date(); startOfToday.setHours(0, 0, 0, 0);
+    const startOfTarget = new Date(date); startOfTarget.setHours(0, 0, 0, 0);
+    const diffDays = Math.round((startOfTarget - startOfToday) / 86400000);
+    if (diffDays === 0) return 'Today';
+    if (diffDays === 1) return 'Tomorrow';
+    return date.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  };
+  const preferredDate = hasValidScheduledAt ? formatDayLabel(scheduledAtDate) : (legacyPreferredDate || 'Tomorrow');
+  const preferredTime = hasValidScheduledAt
+    ? scheduledAtDate.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+    : (legacyTimeMatch ? legacyTimeMatch[1] : null);
+  const preferredDateStr = preferredTime ? `${preferredDate}, ${preferredTime}` : preferredDate;
   const customerNote = order.orderContext?.customerNote || order.customerNote || null;
   const rawCustomerFiles = order.orderContext?.files || order.files || order.photos || [
     { name: 'Front damage photo', type: 'image' },
@@ -92,7 +148,6 @@ export default function ShopRequestDetailScreen({ order, accepting, onBack, onAc
   const isPendingBooking = !isAccepted && !isProposed && (order.status === 'scheduled_pending' || !!order.scheduledAt);
   const STEPPER_STATUS = shopStatus === 'estimate' || shopStatus === 'waiting_approval' ? 'inspection' : shopStatus;
   const shopStepIdx = SHOP_JOB_STEPS.findIndex(s => s.key === STEPPER_STATUS);
-  const estimateTotal = (parseFloat(laborAmt) || 0) + (parseFloat(partsAmt) || 0);
 
   const SHOP_PHOTO_ITEMS = [
     { key: 'front', label: 'Front of vehicle', hint: 'Clear view of front bumper & hood' },
@@ -144,10 +199,11 @@ export default function ShopRequestDetailScreen({ order, accepting, onBack, onAc
   const addEstimateItem = (item) => {
     const next = [...estimateItems, { ...item, scope: estimateItemScope, id: `${item.type}-${estimateItemScope}-${item.label}-${Date.now()}` }];
     setEstimateItems(next);
-    setEstimatePickerOpen(false);
-    setEstimateSearch(''); setEstimateItemScope('required');
     setCustomEstimateName(''); setCustomEstimateHours(''); setCustomEstimateAmount('');
   };
+  const findAddedCatalogItem = (item) => estimateItems.find(
+    added => added.type === item.type && added.label === item.label && added.scope === estimateItemScope
+  );
   const addCustomEstimateItem = () => {
     if (!canAddCustomEstimate) return;
     addEstimateItem({ type: estimatePickerMode === 'parts' ? 'parts' : 'labor', label: customEstimateName.trim(),
@@ -165,8 +221,13 @@ export default function ShopRequestDetailScreen({ order, accepting, onBack, onAc
       estimateSentAt: now.toISOString(),
       estimate: {
         labor: estimate.laborSubtotal, parts: estimate.partsSubtotal,
+        laborItems: estimate.labor, partsItems: estimate.parts,
+        optionalLabor: estimate.optionalLabor, optionalParts: estimate.optionalParts,
+        fees: estimate.fees,
         laborSubtotal: estimate.laborSubtotal, partsSubtotal: estimate.partsSubtotal,
         subtotal: estimate.subtotal, tax: estimate.tax, total: estimate.total,
+        optionalSubtotal: estimate.optionalSubtotal, optionalTax: estimate.optionalTax,
+        totalIfApproved: estimate.totalIfApproved,
       },
     });
   };
@@ -175,15 +236,61 @@ export default function ShopRequestDetailScreen({ order, accepting, onBack, onAc
     onStepChange?.(order, nextStatus, extra);
   };
 
-  const sendEstimate = () => {
-    advanceStep('awaiting_approval', { estimate: { labor: parseFloat(laborAmt) || 0, parts: parseFloat(partsAmt) || 0, note: estimateNote } });
-    setEstimateOpen(false);
-    setLaborAmt('');
-    setPartsAmt('');
-    setEstimateNote('');
+  const handleAccept = () => (onAccept ? onAccept(order) : onSchedule?.(order));
+
+  const formatWorkTimer = (secs) => {
+    const h = Math.floor(secs / 3600);
+    const m = Math.floor((secs % 3600) / 60);
+    const sec = secs % 60;
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
   };
 
-  const handleAccept = () => (onAccept ? onAccept(order) : onSchedule?.(order));
+  const openRequiredChangeRequest = () => {
+    setChangeRequestName('');
+    setChangeRequestReason('');
+    setChangeRequestAmount('');
+    setChangeRequestEvidence('');
+    setChangeRequestOpen(true);
+  };
+  const changeRequestParsedAmount = Number.parseFloat(String(changeRequestAmount || '').replace(',', '.'));
+  const canSubmitChangeRequest = changeRequestName.trim()
+    && changeRequestReason.trim()
+    && Number.isFinite(changeRequestParsedAmount)
+    && changeRequestParsedAmount > 0
+    && changeRequestEvidence.trim();
+  const submitRequiredChangeRequest = () => {
+    if (!canSubmitChangeRequest) return;
+    const nextItem = {
+      id: `required-change-${Date.now()}`,
+      kind: 'required',
+      status: 'pending',
+      title: changeRequestName.trim(),
+      description: changeRequestReason.trim(),
+      evidence: changeRequestEvidence.trim(),
+      amount: Math.round(changeRequestParsedAmount * 100) / 100,
+    };
+    const nextItems = [...additionalApprovals, nextItem];
+    setAdditionalApprovals(nextItems);
+    advanceStep('in_progress', { additionalApprovals: nextItems });
+    const orderId = order.id || order._id;
+    if (orderId && !String(orderId).startsWith('demo')) {
+      authorizedFetch(`${API_URL}/orders/${orderId}/change-request`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'add', changeRequest: nextItem }),
+      }).catch(() => {});
+    }
+    setChangeRequestOpen(false);
+  };
+  const addWorkPhoto = () => {
+    const nextPhotos = [...workPhotos, `Repair photo ${workPhotos.length + 1}`];
+    setWorkPhotos(nextPhotos);
+    advanceStep('in_progress', { workPhotos: nextPhotos, workSummary });
+  };
+  const updateWorkSummary = (value) => {
+    setWorkSummary(value);
+    advanceStep('in_progress', { workPhotos, workSummary: value });
+  };
 
   if (approvalOpen || shopStatus === 'waiting_approval') {
     const shopStepIdxApproval = SHOP_JOB_STEPS.findIndex(st => st.key === 'inspection');
@@ -197,16 +304,14 @@ export default function ShopRequestDetailScreen({ order, accepting, onBack, onAc
     return (
       <View style={s.shell}>
         <View style={s.approvalHeader}>
-          <TouchableOpacity onPress={() => { setApprovalOpen(false); advanceStep('estimate'); }} activeOpacity={0.8} style={s.approvalHeaderBtn}>
-            <Ionicons name="chevron-back" size={24} color="#17191D" />
+          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={s.approvalHeaderBtn}>
+            <Ionicons name="close" size={24} color="#17191D" />
           </TouchableOpacity>
           <View style={s.approvalHeaderTextWrap}>
             <Text style={s.approvalHeaderTitle}>Job #{jobNum}</Text>
             <Text style={s.approvalHeaderSub}>{acceptedLabel}</Text>
           </View>
-          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={[s.approvalHeaderBtn, { alignItems: 'flex-end' }]}>
-            <Ionicons name="close" size={24} color="#17191D" />
-          </TouchableOpacity>
+          <View style={s.approvalHeaderBtn} />
         </View>
 
         <ScrollView
@@ -275,19 +380,364 @@ export default function ShopRequestDetailScreen({ order, accepting, onBack, onAc
     );
   }
 
+  if (completeOpen) {
+    const completeIdx = SHOP_JOB_STEPS.findIndex(st => st.key === 'completed');
+    const jobNum = order.number || String(order.id || '').slice(-3).padStart(3, '0');
+    const originalTotal = order.approvedTotal ?? estimate.total;
+    const approvedRequiredChanges = additionalApprovals.filter(item => item.status === 'approved');
+    const pendingRequiredChanges = additionalApprovals.filter(item => item.status === 'pending');
+    const approvedAdditionalTotal = sumAmounts(approvedRequiredChanges);
+    const finalTotal = originalTotal + approvedAdditionalTotal;
+    const canSubmitCompletion = pendingRequiredChanges.length === 0;
+    const submitCompletion = () => {
+      if (!canSubmitCompletion) return;
+      advanceStep('completed', { workPhotos, workSummary, additionalApprovals });
+      setCompleteOpen(false);
+    };
+    return (
+      <View style={s.shell}>
+        <View style={s.approvalHeader}>
+          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={s.approvalHeaderBtn}>
+            <Ionicons name="close" size={24} color="#17191D" />
+          </TouchableOpacity>
+          <View style={s.approvalHeaderTextWrap}>
+            <Text style={s.approvalHeaderTitle}>Job #{jobNum}</Text>
+            <Text style={s.approvalHeaderSub}>Final review</Text>
+          </View>
+          <View style={s.approvalHeaderBtn} />
+        </View>
+
+        <ScrollView
+          style={[s.scroll, { backgroundColor: '#FFFFFF' }]}
+          contentContainerStyle={s.approvalContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={s.stepperCard}>
+            <ShopStepper steps={SHOP_JOB_STEPS} currentIndex={completeIdx} />
+          </View>
+
+          <View style={s.completeHeroCard}>
+            <View style={s.completeHeroIcon}>
+              <Ionicons name="clipboard-outline" size={20} color="#FFFFFF" />
+            </View>
+            <View style={s.completeHeroInfo}>
+              <Text style={s.completeHeroTitle}>Complete Job</Text>
+              <Text style={s.completeHeroSubtitle}>Review final photos, work summary, approvals, and total before submitting completion.</Text>
+            </View>
+          </View>
+
+          <View style={s.completeChecklistCard}>
+            <Text style={s.completeChecklistTitle}>Completion checklist</Text>
+            <CompletionCheckRow done={!pendingRequiredChanges.length} title="No pending approvals" detail={pendingRequiredChanges.length ? 'Resolve pending required changes first' : 'All change requests resolved'} />
+          </View>
+
+          <View style={s.repairNoteCard}>
+            <Text style={s.repairFieldLabel}>Work Summary (Optional)</Text>
+            <TextInput
+              style={s.repairSummaryInput}
+              value={workSummary}
+              onChangeText={updateWorkSummary}
+              multiline
+              placeholder="Describe completed work"
+              placeholderTextColor="#8B9098"
+            />
+          </View>
+
+          <View style={s.repairNoteCard}>
+            <Text style={s.repairFieldLabel}>Photos (Optional)</Text>
+            <View style={s.completePhotosGrid}>
+              {workPhotos.map((photo, index) => (
+                <View key={`${photo}-complete-${index}`} style={s.completePhotoTile}>
+                  <Ionicons name="image-outline" size={20} color="#F04416" />
+                  <Text style={s.repairPhotoText} numberOfLines={2}>{photo}</Text>
+                </View>
+              ))}
+              <TouchableOpacity style={s.completePhotoTile} activeOpacity={0.84} onPress={addWorkPhoto}>
+                <Ionicons name="add" size={20} color="#5E646D" />
+                <Text style={s.repairPhotoText}>Add Photo</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <View style={s.workSummaryCard}>
+            <EstimateLine label="Approved estimate" amount={originalTotal} strong />
+            <EstimateLine label="Approved required changes" amount={approvedAdditionalTotal} />
+            <EstimateLine label="Final total" amount={finalTotal} total />
+          </View>
+
+          {!canSubmitCompletion && (
+            <View style={s.completeBlockedCard}>
+              <Ionicons name="alert-circle-outline" size={18} color="#F04416" />
+              <Text style={s.completeBlockedText}>Resolve pending customer approvals before completing this job.</Text>
+            </View>
+          )}
+
+          <TouchableOpacity
+            style={[s.completeSubmitBtn, !canSubmitCompletion && s.changeRequestSubmitBtnDisabled]}
+            activeOpacity={canSubmitCompletion ? 0.86 : 1}
+            disabled={!canSubmitCompletion}
+            onPress={submitCompletion}
+          >
+            <Text style={s.completeSubmitText}>Submit Completion</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </View>
+    );
+  }
+
+  if (shopStatus === 'in_progress') {
+    const workingIdx = SHOP_JOB_STEPS.findIndex(st => st.key === 'in_progress');
+    const phone = order.customer?.phone || order.customer_phone;
+    const jobNum = order.number || String(order.id || '').slice(-3).padStart(3, '0');
+    const approvedLabel = order.estimateApprovedAt
+      ? 'Approved ' + new Date(order.estimateApprovedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ', ' + new Date(order.estimateApprovedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+      : 'Estimate approved';
+    // The locally-built `estimate` is recomputed from diagnosisAnswers/estimateItems state,
+    // which resets to empty every time this screen remounts — it does not reflect what was
+    // actually sent/approved. Prefer the persisted estimate from the backend for the preview.
+    const persistedEstimate = order.orderContext?.estimate || null;
+    const previewEstimate = persistedEstimate ? {
+      ...persistedEstimate,
+      labor: persistedEstimate.laborItems || [],
+      parts: persistedEstimate.partsItems || [],
+      fees: persistedEstimate.fees || [],
+      optionalLabor: persistedEstimate.optionalLabor || [],
+      optionalParts: persistedEstimate.optionalParts || [],
+    } : estimate;
+    return (
+      <View style={s.shell}>
+        <View style={s.approvalHeader}>
+          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={s.approvalHeaderBtn}>
+            <Ionicons name="close" size={24} color="#17191D" />
+          </TouchableOpacity>
+          <View style={s.approvalHeaderTextWrap}>
+            <Text style={s.approvalHeaderTitle}>Job #{jobNum}</Text>
+            <Text style={s.approvalHeaderSub}>{approvedLabel}</Text>
+          </View>
+          <View style={s.approvalHeaderBtn} />
+        </View>
+
+        <ScrollView
+          style={[s.scroll, { backgroundColor: '#FFFFFF' }]}
+          contentContainerStyle={s.approvalContent}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={s.stepperCard}>
+            <ShopStepper steps={SHOP_JOB_STEPS} currentIndex={workingIdx} />
+          </View>
+
+          <TouchableOpacity style={s.approvedEstimateCard} activeOpacity={0.84} onPress={() => setEstimatePreviewOpen(true)}>
+            <View style={s.approvedEstimateLeft}>
+              <View style={s.approvedEstimateIconWrap}>
+                <Ionicons name="checkmark-circle" size={20} color="#16A34A" />
+              </View>
+              <View>
+                <Text style={s.approvedEstimateTitle}>Estimate Approved</Text>
+                <Text style={s.approvedEstimateAmount}>{formatCurrency(order.approvedTotal ?? estimate.total)}</Text>
+              </View>
+            </View>
+            <View style={s.approvedEstimateRight}>
+              <View style={[s.approvedEstimateBadge, !order.approveOptional && s.approvedEstimateBadgePartial]}>
+                <Text style={[s.approvedEstimateBadgeText, !order.approveOptional && s.approvedEstimateBadgeTextPartial]}>
+                  {order.approveOptional ? 'Full Estimate' : 'Required Only'}
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={16} color="#8B9098" />
+            </View>
+          </TouchableOpacity>
+
+          <View style={s.changeRequestsCard}>
+            <Text style={s.changeRequestsTitle}>Required change requests</Text>
+            <Text style={s.changeRequestsSubtitle}>Use this only if the approved repair cannot be completed without an extra required item. Non-urgent recommendations should be saved for a future service.</Text>
+            <TouchableOpacity style={s.changeRequestsAddBtn} activeOpacity={0.86} onPress={openRequiredChangeRequest}>
+              <Ionicons name="alert-circle-outline" size={17} color="#FFFFFF" />
+              <Text style={s.changeRequestsAddBtnText}>Request required change</Text>
+            </TouchableOpacity>
+            {additionalApprovals.length === 0 ? (
+              <View style={s.changeRequestsEmpty}>
+                <Ionicons name="document-text-outline" size={20} color="#8B9098" />
+                <Text style={s.changeRequestsEmptyText}>No additional approvals yet.</Text>
+              </View>
+            ) : (
+              additionalApprovals.map(item => {
+                const isApproved = item.status === 'approved';
+                const isDeclined = item.status === 'declined';
+                return (
+                  <View key={item.id} style={[s.crItemCard, isApproved && s.crItemCardApproved, isDeclined && s.crItemCardDeclined]}>
+                    <View style={s.crItemHeader}>
+                      <Text style={s.crItemTitle}>Additional Work Required</Text>
+                      <Text style={[s.crItemAmount, isApproved && s.crItemAmountApproved, isDeclined && s.crItemAmountDeclined]}>
+                        {formatCurrency(item.amount)}
+                      </Text>
+                    </View>
+                    <View style={s.crItemFieldGroup}>
+                      <Text style={s.crItemFieldLabel}>Work or part needed</Text>
+                      <Text style={s.crItemSubtitle} numberOfLines={1}>{item.title}</Text>
+                    </View>
+                    {!!item.description && (
+                      <View style={s.crItemFieldGroup}>
+                        <Text style={s.crItemFieldLabel}>Why is it required?</Text>
+                        <Text style={s.crItemDesc}>{item.description}</Text>
+                      </View>
+                    )}
+                    <View style={s.crItemStatusRow}>
+                      <Ionicons
+                        name={isApproved ? 'checkmark-circle' : isDeclined ? 'close-circle' : 'time-outline'}
+                        size={14}
+                        color={isApproved ? '#16A34A' : isDeclined ? '#DC2626' : '#8B9098'}
+                      />
+                      <Text style={s.crItemStatusText}>
+                        {isApproved ? 'Approved by customer' : isDeclined ? 'Declined by customer' : 'Waiting for customer...'}
+                      </Text>
+                    </View>
+                  </View>
+                );
+              })
+            )}
+          </View>
+
+          <View style={s.repairProgressCard}>
+            <View style={s.repairProgressHeader}>
+              <Text style={s.repairProgressTitle}>Repair in Progress</Text>
+              <View style={s.repairLivePill}>
+                <View style={s.repairLiveDot} />
+                <Text style={s.repairLiveText}>In progress</Text>
+              </View>
+            </View>
+            <Text style={s.repairTimer}>{formatWorkTimer(workTimer)}</Text>
+          </View>
+
+          <View style={s.verifiedCard}>
+            <View style={s.verifiedIconCircle}>
+              <Text style={s.unlockedInitials}>
+                {(order.customer?.name || 'CU').split(' ').map(p => p[0]).join('').slice(0, 2).toUpperCase()}
+              </Text>
+            </View>
+            <View style={s.verifiedInfo}>
+              <Text style={s.verifiedTitle} numberOfLines={1}>{order.customer?.name || 'Customer'}</Text>
+              <View style={s.trustedLine}>
+                <Ionicons name="shield-checkmark-outline" size={13} color="#2563EB" />
+                <Text style={[s.trustedText, { color: '#2563EB', fontSize: 11, fontWeight: '600' }]}>Verified & trusted</Text>
+              </View>
+            </View>
+            <View style={s.unlockedDivider} />
+            <View style={s.unlockedActions}>
+              <TouchableOpacity style={s.unlockedCallBtn} activeOpacity={0.8} onPress={() => phone && Linking.openURL(`tel:${phone}`)}>
+                <Ionicons name="call-outline" size={22} color="#2563EB" />
+              </TouchableOpacity>
+              <TouchableOpacity style={s.unlockedMsgBtn} activeOpacity={0.8} onPress={() => phone && Linking.openURL(`sms:${phone}`)}>
+                <Ionicons name="chatbox-outline" size={22} color="#2563EB" />
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <TouchableOpacity style={[s.btnAccept, { backgroundColor: '#16A34A', marginTop: 14 }]} onPress={() => setCompleteOpen(true)} activeOpacity={0.84}>
+            <Text style={s.btnAcceptTitle}>Mark Complete</Text>
+            <Text style={s.btnAcceptSub}>Customer picks up vehicle</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={s.cancelJobBtn}
+            activeOpacity={0.86}
+            onPress={() => {
+              Alert.alert(
+                'Cancel Order?',
+                'The customer will be notified that this job was cancelled.',
+                [
+                  { text: 'Keep Job', style: 'cancel' },
+                  { text: 'Cancel Order', style: 'destructive', onPress: () => onCancel?.(order) },
+                ]
+              );
+            }}
+          >
+            <Text style={s.cancelJobBtnText}>Cancel Order</Text>
+          </TouchableOpacity>
+        </ScrollView>
+
+        <Modal visible={estimatePreviewOpen} transparent animationType="fade" onRequestClose={() => setEstimatePreviewOpen(false)}>
+          <CustomerEstimatePreview order={order} estimate={previewEstimate} onClose={() => setEstimatePreviewOpen(false)} />
+        </Modal>
+
+        <Modal visible={changeRequestOpen} transparent animationType="fade" onRequestClose={() => setChangeRequestOpen(false)}>
+          <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+            <View style={s.noteModalOverlay}>
+              <TouchableOpacity style={s.noteModalBackdrop} activeOpacity={1} onPress={() => setChangeRequestOpen(false)} />
+              <View style={[s.noteModalCard, { paddingBottom: 20 }]}>
+                <View style={s.noteModalHeader}>
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.noteModalTitle}>Required Change Request</Text>
+                    <Text style={s.changeRequestSubtitle}>Only use this if the approved repair cannot be completed without it.</Text>
+                  </View>
+                  <TouchableOpacity style={s.noteCloseBtn} activeOpacity={0.8} onPress={() => setChangeRequestOpen(false)}>
+                    <Ionicons name="close" size={20} color="#17191D" />
+                  </TouchableOpacity>
+                </View>
+
+                <Text style={s.changeRequestLabel}>Work or part needed</Text>
+                <TextInput
+                  style={s.changeRequestInput}
+                  value={changeRequestName}
+                  onChangeText={setChangeRequestName}
+                  placeholder="Example: Battery terminal replacement"
+                  placeholderTextColor="#8B9098"
+                />
+
+                <Text style={s.changeRequestLabel}>Why is it required?</Text>
+                <TextInput
+                  style={s.changeRequestTextArea}
+                  value={changeRequestReason}
+                  onChangeText={setChangeRequestReason}
+                  multiline
+                  placeholder="Explain why the approved repair cannot be completed without this change."
+                  placeholderTextColor="#8B9098"
+                />
+
+                <Text style={s.changeRequestLabel}>Price</Text>
+                <TextInput
+                  style={s.changeRequestInput}
+                  value={changeRequestAmount}
+                  onChangeText={setChangeRequestAmount}
+                  placeholder="64.00"
+                  placeholderTextColor="#8B9098"
+                  keyboardType="decimal-pad"
+                />
+
+                <Text style={s.changeRequestLabel}>Evidence</Text>
+                <TouchableOpacity style={s.changeRequestEvidenceBox} activeOpacity={0.84} onPress={() => setChangeRequestEvidence('Photo attached: damaged part')}>
+                  <Ionicons name={changeRequestEvidence ? 'checkmark-circle' : 'camera-outline'} size={20} color={changeRequestEvidence ? '#16A34A' : '#F04416'} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={s.changeRequestEvidenceTitle}>{changeRequestEvidence ? 'Evidence attached' : 'Add required photo'}</Text>
+                    <Text style={s.changeRequestEvidenceHint}>{changeRequestEvidence || 'Tap to attach a photo or note for the customer.'}</Text>
+                  </View>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[s.changeRequestSubmitBtn, !canSubmitChangeRequest && s.changeRequestSubmitBtnDisabled]}
+                  activeOpacity={canSubmitChangeRequest ? 0.86 : 1}
+                  disabled={!canSubmitChangeRequest}
+                  onPress={submitRequiredChangeRequest}
+                >
+                  <Text style={[s.changeRequestSubmitBtnText, !canSubmitChangeRequest && s.changeRequestSubmitBtnTextDisabled]}>Send to Customer</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </KeyboardAvoidingView>
+        </Modal>
+      </View>
+    );
+  }
+
   return (
     <View style={s.shell}>
 
       {/* ─── Header ─── */}
       <View style={s.header}>
         <TouchableOpacity
-          onPress={isAccepted && shopStepIdx > 0
-            ? () => advanceStep(SHOP_JOB_STEPS[shopStepIdx - 1].key)
-            : onBack}
+          onPress={onBack}
           activeOpacity={0.8}
           style={s.closeBtn}
         >
-          <Ionicons name={isAccepted ? 'chevron-back' : 'close'} size={isAccepted ? 26 : 22} color="#17191D" />
+          <Ionicons name="close" size={22} color="#17191D" />
         </TouchableOpacity>
 
         <View style={s.headerMid}>
@@ -309,9 +759,7 @@ export default function ShopRequestDetailScreen({ order, accepting, onBack, onAc
         </View>
 
         {isAccepted ? (
-          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={s.closeBtn}>
-            <Ionicons name="close" size={20} color="#8B9098" />
-          </TouchableOpacity>
+          <View style={[s.closeBtn, { backgroundColor: 'transparent' }]} />
         ) : (
           <View style={[s.timerBadge, isPendingBooking && s.bookingStatusBadge]}>
             <Text style={[s.timerTop, isPendingBooking && s.bookingStatusTop]}>{isPendingBooking ? 'Pending' : 'Respond within'}</Text>
@@ -326,7 +774,7 @@ export default function ShopRequestDetailScreen({ order, accepting, onBack, onAc
       {/* ─── Scroll ─── */}
       <ScrollView
         style={s.scroll}
-        contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: isAccepted ? 36 : bottomH + 36, gap: 12 }}
+        contentContainerStyle={{ paddingHorizontal: 16, paddingTop: 16, paddingBottom: isAccepted ? 36 : bottomH + 16, gap: 12 }}
         showsVerticalScrollIndicator={false}
       >
 
@@ -356,7 +804,7 @@ export default function ShopRequestDetailScreen({ order, accepting, onBack, onAc
         )}
 
         {/* Customer card */}
-        {shopStatus !== 'estimate' && (isAccepted ? (
+        {shopStatus !== 'estimate' && ((isAccepted || isPendingBooking) ? (
           <View style={s.verifiedCard}>
             <View style={s.verifiedIconCircle}>
               <Text style={s.unlockedInitials}>
@@ -373,7 +821,7 @@ export default function ShopRequestDetailScreen({ order, accepting, onBack, onAc
               </View>
               <View style={s.trustedLine}>
                 <Ionicons name="shield-checkmark-outline" size={13} color="#2563EB" />
-                <Text style={[s.trustedText, { color: '#2563EB', fontSize: 12 }]}>Verified & trusted</Text>
+                <Text style={[s.trustedText, { color: '#2563EB', fontSize: 11, fontWeight: '600' }]}>Verified & trusted</Text>
               </View>
             </View>
             <View style={s.unlockedDivider} />
@@ -645,17 +1093,17 @@ export default function ShopRequestDetailScreen({ order, accepting, onBack, onAc
               </View>
               <Text style={s.detailLabel}>{isPendingBooking ? 'Estimate Range' : "Est. Payout (you'll earn) ⓘ"}</Text>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                <Text style={s.detailValueBold}>{isPendingBooking ? estimateRange : `$${net}`}</Text>
+                <Text style={s.detailValueBold}>{isPendingBooking ? estimateRange : formatCurrency(net)}</Text>
                 <Ionicons name={payoutOpen ? 'chevron-up' : 'chevron-down'} size={14} color="#8B9098" />
               </View>
             </TouchableOpacity>
 
             {payoutOpen && (
               <View style={s.payoutBreak}>
-                <PRow label="Gross payout" value={`$${payout}`} />
-                <PRow label="Platform fee" value={`−$${platformFee}`} />
+                <PRow label="Gross payout" value={formatCurrency(payout)} />
+                <PRow label="Platform fee" value={`−${formatCurrency(platformFee)}`} />
                 <View style={s.payoutNetSep} />
-                <PRow label="Net earnings" value={`$${net}`} bold green />
+                <PRow label="Net earnings" value={formatCurrency(net)} bold green />
               </View>
             )}
 
@@ -664,7 +1112,7 @@ export default function ShopRequestDetailScreen({ order, accepting, onBack, onAc
               <Ionicons name="shield-checkmark-outline" size={16} color="#2563EB" />
               <View style={{ flex: 1 }}>
                 <Text style={s.cancelTitle}>Cancellation Fee</Text>
-                <Text style={s.cancelSub}>$35 if customer cancels after you accept ⓘ</Text>
+                <Text style={s.cancelSub}>{formatCurrency(35)} if customer cancels after you accept ⓘ</Text>
               </View>
             </View>
           </View>
@@ -687,6 +1135,24 @@ export default function ShopRequestDetailScreen({ order, accepting, onBack, onAc
                 <Ionicons name="lock-closed-outline" size={14} color="#8B9098" />
                 <Text style={s.estimateApprovalText}>Customer approval required to start work</Text>
               </View>
+            )}
+            {shopStatus !== 'completed' && (
+              <TouchableOpacity
+                style={s.cancelJobBtn}
+                activeOpacity={0.86}
+                onPress={() => {
+                  Alert.alert(
+                    'Cancel Order?',
+                    'The customer will be notified that this job was cancelled.',
+                    [
+                      { text: 'Keep Job', style: 'cancel' },
+                      { text: 'Cancel Order', style: 'destructive', onPress: () => onCancel?.(order) },
+                    ]
+                  );
+                }}
+              >
+                <Text style={s.cancelJobBtnText}>Cancel Order</Text>
+              </TouchableOpacity>
             )}
           </View>
         )}
@@ -728,90 +1194,6 @@ export default function ShopRequestDetailScreen({ order, accepting, onBack, onAc
       </Modal>
 
       {/* Estimate modal */}
-      <Modal visible={estimateOpen} transparent animationType="slide" onRequestClose={() => setEstimateOpen(false)}>
-        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <View style={s.noteModalOverlay}>
-            <TouchableOpacity style={s.noteModalBackdrop} activeOpacity={1} onPress={() => setEstimateOpen(false)} />
-            <View style={[s.noteModalCard, { paddingBottom: 20 }]}>
-              <View style={s.noteModalHeader}>
-                <Text style={s.noteModalTitle}>Send Estimate</Text>
-                <TouchableOpacity style={s.noteCloseBtn} activeOpacity={0.8} onPress={() => setEstimateOpen(false)}>
-                  <Ionicons name="close" size={20} color="#17191D" />
-                </TouchableOpacity>
-              </View>
-
-              <View style={s.estRow}>
-                <View style={[s.detailIconBox, { backgroundColor: '#EFF6FF' }]}>
-                  <Ionicons name="construct-outline" size={15} color="#2563EB" />
-                </View>
-                <Text style={s.estLabel}>Labor</Text>
-                <View style={s.estInputWrap}>
-                  <Text style={s.estCurrency}>$</Text>
-                  <TextInput
-                    style={s.estInput}
-                    value={laborAmt}
-                    onChangeText={setLaborAmt}
-                    keyboardType="decimal-pad"
-                    placeholder="0.00"
-                    placeholderTextColor="#C0C4CC"
-                  />
-                </View>
-              </View>
-              <View style={s.sep} />
-
-              <View style={s.estRow}>
-                <View style={[s.detailIconBox, { backgroundColor: '#F3EEFF' }]}>
-                  <Ionicons name="cube-outline" size={15} color="#7C3AED" />
-                </View>
-                <Text style={s.estLabel}>Parts & Materials</Text>
-                <View style={s.estInputWrap}>
-                  <Text style={s.estCurrency}>$</Text>
-                  <TextInput
-                    style={s.estInput}
-                    value={partsAmt}
-                    onChangeText={setPartsAmt}
-                    keyboardType="decimal-pad"
-                    placeholder="0.00"
-                    placeholderTextColor="#C0C4CC"
-                  />
-                </View>
-              </View>
-              <View style={s.sep} />
-
-              <View style={[s.estRow, { backgroundColor: '#F0FDF4', borderRadius: 8, paddingHorizontal: 10 }]}>
-                <View style={[s.detailIconBox, { backgroundColor: '#DCFCE7' }]}>
-                  <Ionicons name="cash-outline" size={15} color="#16A34A" />
-                </View>
-                <Text style={[s.estLabel, { color: '#15803D', fontWeight: '700' }]}>Total</Text>
-                <Text style={s.estTotal}>${estimateTotal.toFixed(2)}</Text>
-              </View>
-
-              <View style={[s.sep, { marginVertical: 8 }]} />
-
-              <Text style={[s.estLabel, { marginBottom: 6, marginLeft: 2 }]}>Notes to customer</Text>
-              <TextInput
-                style={s.estNoteInput}
-                value={estimateNote}
-                onChangeText={setEstimateNote}
-                placeholder="Describe the work, parts needed..."
-                placeholderTextColor="#C0C4CC"
-                multiline
-                numberOfLines={3}
-              />
-
-              <TouchableOpacity
-                style={[s.btnAccept, { marginTop: 14, height: 52, borderRadius: 12 }]}
-                onPress={sendEstimate}
-                activeOpacity={0.84}
-              >
-                <Ionicons name="send-outline" size={16} color="#fff" />
-                <Text style={s.btnAcceptTitle}>Send Estimate to Customer</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
-
       {/* Checklist modal (photos / arrival notes) */}
       <Modal visible={!!activeChecklistItem} transparent animationType="fade" onRequestClose={() => setActiveChecklistItem(null)}>
         <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
@@ -941,16 +1323,24 @@ export default function ShopRequestDetailScreen({ order, accepting, onBack, onAc
               </View>
 
               <ScrollView style={s.estimatePickerList} showsVerticalScrollIndicator={false}>
-                {filteredEstimateCatalog.map(item => (
-                  <TouchableOpacity key={`${item.type}-${item.label}`} style={s.estimatePickerRow} activeOpacity={0.84} onPress={() => addEstimateItem(item)}>
-                    <View style={s.estimatePickerRowInfo}>
-                      <Text style={s.estimatePickerRowTitle}>{item.label}</Text>
-                      <Text style={s.estimatePickerRowMeta}>{estimateItemScope === 'optional' ? 'Recommended — ' : 'Required — '}{item.type === 'labor' ? `${item.hours || '1.0 hr'} labor` : item.category || 'Part'}</Text>
-                    </View>
-                    <Text style={s.estimatePickerPrice}>{formatCurrency(item.amount)}</Text>
-                    <Ionicons name="add-circle-outline" size={21} color="#16A34A" />
-                  </TouchableOpacity>
-                ))}
+                {filteredEstimateCatalog.map(item => {
+                  const addedItem = findAddedCatalogItem(item);
+                  return (
+                    <TouchableOpacity
+                      key={`${item.type}-${item.label}`}
+                      style={s.estimatePickerRow}
+                      activeOpacity={0.84}
+                      onPress={() => (addedItem ? removeEstimateItem(addedItem) : addEstimateItem(item))}
+                    >
+                      <View style={s.estimatePickerRowInfo}>
+                        <Text style={s.estimatePickerRowTitle}>{item.label}</Text>
+                        <Text style={s.estimatePickerRowMeta}>{estimateItemScope === 'optional' ? 'Recommended — ' : 'Required — '}{item.type === 'labor' ? `${item.hours || '1.0 hr'} labor` : item.category || 'Part'}</Text>
+                      </View>
+                      <Text style={s.estimatePickerPrice}>{formatCurrency(item.amount)}</Text>
+                      <Ionicons name={addedItem ? 'close-circle' : 'add-circle-outline'} size={21} color={addedItem ? '#F04416' : '#16A34A'} />
+                    </TouchableOpacity>
+                  );
+                })}
                 {!filteredEstimateCatalog.length && (
                   <View style={s.estimatePickerEmpty}>
                     <Text style={[s.arrivedNextSubtitle, { textAlign: 'center' }]}>No items found</Text>
@@ -1104,14 +1494,6 @@ function ShopStepButtons({ shopStatus, order, onSchedule, onAdvance, onSendEstim
       </TouchableOpacity>
     );
   }
-  if (shopStatus === 'in_progress') {
-    return (
-      <TouchableOpacity style={[s.btnAccept, { flex: 1, backgroundColor: '#16A34A' }]} onPress={() => onAdvance('completed')} activeOpacity={0.84}>
-        <Text style={s.btnAcceptTitle}>Mark Complete</Text>
-        <Text style={s.btnAcceptSub}>Customer picks up vehicle</Text>
-      </TouchableOpacity>
-    );
-  }
   return (
     <TouchableOpacity style={[s.btnAccept, { flex: 1, backgroundColor: '#6B7280' }]} activeOpacity={1} disabled>
       <Text style={s.btnAcceptTitle}>Job Completed</Text>
@@ -1146,12 +1528,26 @@ function EstimateLine({ label, hours, amount, strong, total, mutedLabel, onRemov
       <Text style={[s.estimateLineLabel, strong && s.estimateLineStrong, mutedLabel && s.estimateLineMuted]} numberOfLines={1}>{label}</Text>
       {!!priceWarning && <Ionicons name="alert-circle-outline" size={14} color="#F04416" />}
       {!!hours && <Text style={s.estimateLineHours}>{hours}</Text>}
-      <Text style={[s.estimateLineAmount, strong && s.estimateLineStrong, total && s.estimateTotalAmount]}>{formatCurrency(amount)}</Text>
+      <Text style={[s.estimateLineAmount, strong && s.estimateLineStrong, total && s.estimateTotalAmount]} numberOfLines={1}>{formatCurrency(amount)}</Text>
       {!!onRemove && (
         <TouchableOpacity style={s.estimateRemoveBtn} activeOpacity={0.84} onPress={onRemove}>
           <Ionicons name="close" size={14} color="#F04416" />
         </TouchableOpacity>
       )}
+    </View>
+  );
+}
+
+function CompletionCheckRow({ done, title, detail }) {
+  return (
+    <View style={s.completionCheckRow}>
+      <View style={[s.completionCheckIcon, done && s.completionCheckIconDone]}>
+        <Ionicons name={done ? 'checkmark' : 'alert'} size={13} color={done ? '#FFFFFF' : '#F04416'} />
+      </View>
+      <View style={s.completionCheckInfo}>
+        <Text style={s.completionCheckTitle}>{title}</Text>
+        <Text style={s.completionCheckDetail}>{detail}</Text>
+      </View>
     </View>
   );
 }
@@ -1363,7 +1759,7 @@ const s = StyleSheet.create({
 
   /* Time card */
   timeRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
-  timeMain: { flex: 1, flexDirection: 'row', alignItems: 'flex-end', gap: 12 },
+  timeMain: { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 12 },
   timeIconBox: {
     width: 44, height: 44, borderRadius: 12, backgroundColor: '#F3EEFF',
     alignItems: 'center', justifyContent: 'center', flexShrink: 0,
@@ -1372,11 +1768,11 @@ const s = StyleSheet.create({
   timeTopLabel: { color: '#8B9098', fontSize: 11, fontWeight: '600', marginBottom: 4 },
   bookingTimeLabel: { color: '#1D4ED8', fontSize: 12, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.4 },
   timeBig: { color: '#17191D', fontSize: 18, fontWeight: '800', lineHeight: 22 },
-  bookingTimeBig: { color: '#17191D', fontSize: 20, lineHeight: 24, fontWeight: '900' },
+  bookingTimeBig: { color: '#2563EB', fontSize: 20, lineHeight: 24, fontWeight: '900' },
   timeTime: { color: '#5E646D', fontSize: 16, fontWeight: '600', marginTop: 3 },
   bookingTimeValue: { color: '#2563EB', fontSize: 24, lineHeight: 29, fontWeight: '900' },
   timeInfoBox: {
-    width: 150, flexShrink: 0, backgroundColor: '#EFF6FF', borderRadius: 10,
+    maxWidth: 130, flexShrink: 1, backgroundColor: '#EFF6FF', borderRadius: 10,
     borderWidth: 1, borderColor: '#BFDBFE', padding: 10,
     justifyContent: 'center',
   },
@@ -1385,8 +1781,8 @@ const s = StyleSheet.create({
   timeInfoBody: { color: '#374151', fontSize: 10, fontWeight: '500', lineHeight: 14, textAlign: 'center' },
 
   /* Vehicle card */
-  vehicleInfoCard: { height: 84, borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', padding: 10, flexDirection: 'row', alignItems: 'center', gap: 9 },
-  reqVehicleIcon: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E6E8EB', alignItems: 'center', justifyContent: 'center' },
+  vehicleInfoCard: { height: 86, borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', padding: 12, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  reqVehicleIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E6E8EB', alignItems: 'center', justifyContent: 'center' },
   vehicleInfo: { flex: 1, minWidth: 0 },
   vehicleName: { color: '#17191D', fontSize: 13, lineHeight: 17, fontWeight: '700', marginBottom: 2, flexShrink: 1 },
   vehicleSpec: { color: '#5E646D', fontSize: 12, lineHeight: 16, fontWeight: '600', marginBottom: 3 },
@@ -1397,7 +1793,7 @@ const s = StyleSheet.create({
   svcMetaValue: { color: '#17191D', fontSize: 11, lineHeight: 14, fontWeight: '700', textAlign: 'center', flexShrink: 1 },
 
   /* Verified customer card */
-  verifiedCard: { height: 94, borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', padding: 12, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  verifiedCard: { height: 86, borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', padding: 12, flexDirection: 'row', alignItems: 'center', gap: 10 },
   verifiedIconCircle: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E6E8EB', alignItems: 'center', justifyContent: 'center' },
   verifiedInfo: { flex: 1, minWidth: 0 },
   verifiedTitle: { color: '#17191D', fontSize: 13, lineHeight: 17, fontWeight: '700', marginBottom: 3 },
@@ -1550,7 +1946,7 @@ const s = StyleSheet.create({
   estimateLineLabel: { flex: 1, minWidth: 0, color: '#17191D', fontSize: 12, lineHeight: 16, fontWeight: '700' },
   estimateLineMuted: { color: '#5E646D' },
   estimateLineHours: { width: 52, color: '#17191D', fontSize: 11, lineHeight: 15, fontWeight: '700', textAlign: 'right' },
-  estimateLineAmount: { width: 74, color: '#17191D', fontSize: 12, lineHeight: 16, fontWeight: '800', textAlign: 'right' },
+  estimateLineAmount: { minWidth: 74, flexShrink: 0, color: '#17191D', fontSize: 12, lineHeight: 16, fontWeight: '800', textAlign: 'right' },
   estimateLineStrong: { fontWeight: '900' },
   estimateTotalAmount: { color: '#2563EB', fontSize: 14, fontWeight: '900' },
   estimateRemoveBtn: { width: 22, height: 22, borderRadius: 6, backgroundColor: 'rgba(240,68,22,0.1)', alignItems: 'center', justifyContent: 'center' },
@@ -1560,6 +1956,96 @@ const s = StyleSheet.create({
   estimateTotalCard: { borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', paddingHorizontal: 12, paddingVertical: 8 },
   estimateApprovalNote: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 10, marginBottom: 8 },
   estimateApprovalText: { color: '#5E646D', fontSize: 11, lineHeight: 15, fontWeight: '700', textAlign: 'center' },
+  cancelJobBtn: { height: 48, borderRadius: 10, borderWidth: 1.5, borderColor: '#FEE2E2', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', marginTop: 10 },
+  cancelJobBtnText: { color: '#DC2626', fontSize: 15, lineHeight: 19, fontWeight: '700' },
+
+  /* In-progress: approved estimate summary */
+  approvedEstimateCard: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', padding: 12, marginBottom: 10 },
+  approvedEstimateLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  approvedEstimateIconWrap: { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(22,163,74,0.1)', alignItems: 'center', justifyContent: 'center' },
+  approvedEstimateTitle: { color: '#17191D', fontSize: 13, fontWeight: '700' },
+  approvedEstimateAmount: { color: '#16A34A', fontSize: 17, fontWeight: '900', marginTop: 1 },
+  approvedEstimateRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  approvedEstimateBadge: { borderRadius: 6, backgroundColor: 'rgba(22,163,74,0.1)', paddingHorizontal: 8, paddingVertical: 4 },
+  approvedEstimateBadgePartial: { backgroundColor: '#F3F4F5' },
+  approvedEstimateBadgeText: { color: '#16A34A', fontSize: 11, fontWeight: '700' },
+  approvedEstimateBadgeTextPartial: { color: '#5E646D' },
+
+  /* In-progress: required change requests */
+  changeRequestsCard: { borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', padding: 14, marginBottom: 10 },
+  changeRequestsTitle: { color: '#17191D', fontSize: 15, fontWeight: '800', marginBottom: 4 },
+  changeRequestsSubtitle: { color: '#5E646D', fontSize: 12, lineHeight: 16, marginBottom: 12 },
+  changeRequestsAddBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, height: 46, borderRadius: 10, backgroundColor: '#F04416', marginBottom: 10 },
+  changeRequestsAddBtnText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700' },
+  changeRequestsEmpty: { alignItems: 'center', gap: 6, paddingVertical: 16 },
+  changeRequestsEmptyText: { color: '#8B9098', fontSize: 12, fontWeight: '600' },
+  crItemCard: { borderRadius: 10, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', padding: 12, marginTop: 8, gap: 10 },
+  crItemCardApproved: { borderColor: 'rgba(22,163,74,0.3)', backgroundColor: 'rgba(22,163,74,0.06)' },
+  crItemCardDeclined: { borderColor: 'rgba(220,38,38,0.3)', backgroundColor: 'rgba(220,38,38,0.06)' },
+  crItemHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  crItemTitle: { color: '#17191D', fontSize: 12, fontWeight: '700' },
+  crItemFieldGroup: { gap: 2 },
+  crItemSubtitle: { color: '#17191D', fontSize: 12, fontWeight: '500' },
+  crItemAmount: { color: '#F04416', fontSize: 14, fontWeight: '800' },
+  crItemAmountApproved: { color: '#16A34A' },
+  crItemAmountDeclined: { color: '#DC2626' },
+  crItemFieldLabel: { color: '#8B9098', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4 },
+  crItemDesc: { color: '#17191D', fontSize: 12, lineHeight: 16, fontWeight: '500' },
+  crItemStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  crItemStatusText: { color: '#8B9098', fontSize: 11, fontWeight: '600' },
+  repairNoteCard: { borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', padding: 14, marginBottom: 10 },
+  workSummaryCard: { borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', padding: 14, marginBottom: 10 },
+
+  /* In-progress: repair progress card */
+  repairProgressCard: { borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', padding: 14, marginBottom: 10, gap: 10 },
+  repairProgressHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  repairProgressTitle: { color: '#17191D', fontSize: 15, fontWeight: '800' },
+  repairLivePill: { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 6, backgroundColor: 'rgba(22,163,74,0.1)', paddingHorizontal: 8, paddingVertical: 4 },
+  repairLiveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#16A34A' },
+  repairLiveText: { color: '#16A34A', fontSize: 11, fontWeight: '700' },
+  repairTimer: { color: '#17191D', fontSize: 24, fontWeight: '900', letterSpacing: 1 },
+  repairFieldLabel: { color: '#8B9098', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4 },
+  repairSummaryInput: { minHeight: 60, borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', color: '#17191D', fontSize: 13, padding: 10, textAlignVertical: 'top' },
+  repairPhotosRow: { flexDirection: 'row', gap: 8 },
+  repairPhotoTile: { width: 84, height: 84, borderRadius: 10, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', alignItems: 'center', justifyContent: 'center', gap: 4, padding: 6 },
+  repairPhotoText: { color: '#5E646D', fontSize: 10, fontWeight: '600', textAlign: 'center' },
+  repairAddPhotoTile: { width: 84, height: 84, borderRadius: 10, borderWidth: 1.5, borderColor: '#E1E4E8', borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center', gap: 4 },
+  repairAddPhotoText: { color: '#5E646D', fontSize: 10, fontWeight: '600' },
+
+  /* Complete Job review screen */
+  completeHeroCard: { borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, marginBottom: 10 },
+  completeHeroIcon: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#17191D', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  completeHeroInfo: { flex: 1, minWidth: 0 },
+  completeHeroTitle: { color: '#17191D', fontSize: 15, fontWeight: '800' },
+  completeHeroSubtitle: { color: '#5E646D', fontSize: 12, lineHeight: 16, fontWeight: '500', marginTop: 3 },
+  completeChecklistCard: { borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', padding: 14, marginBottom: 10 },
+  completeChecklistTitle: { color: '#17191D', fontSize: 15, fontWeight: '800', marginBottom: 4 },
+  completionCheckRow: { minHeight: 54, borderTopWidth: 1, borderTopColor: '#ECEEF0', flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 9 },
+  completionCheckIcon: { width: 24, height: 24, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(240,68,22,0.22)', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  completionCheckIconDone: { borderColor: '#16A34A', backgroundColor: '#16A34A' },
+  completionCheckInfo: { flex: 1, minWidth: 0 },
+  completionCheckTitle: { color: '#17191D', fontSize: 13, fontWeight: '700' },
+  completionCheckDetail: { color: '#5E646D', fontSize: 11, lineHeight: 15, fontWeight: '500', marginTop: 2 },
+  completeSummaryText: { color: '#5E646D', fontSize: 12, lineHeight: 16, fontWeight: '500' },
+  completePhotosGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  completePhotoTile: { width: '31.5%', minHeight: 74, borderRadius: 10, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', alignItems: 'center', justifyContent: 'center', padding: 6, gap: 4 },
+  completeBlockedCard: { minHeight: 48, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(240,68,22,0.22)', backgroundColor: 'rgba(240,68,22,0.07)', flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 11, paddingVertical: 9, marginBottom: 10 },
+  completeBlockedText: { flex: 1, minWidth: 0, color: '#F04416', fontSize: 12, lineHeight: 16, fontWeight: '700' },
+  completeSubmitBtn: { height: 66, borderRadius: 12, backgroundColor: '#16A34A', alignItems: 'center', justifyContent: 'center' },
+  completeSubmitText: { color: '#FFFFFF', fontSize: 14, fontWeight: '800' },
+
+  /* Required change request modal */
+  changeRequestSubtitle: { color: '#5E646D', fontSize: 11, lineHeight: 15, marginTop: 2 },
+  changeRequestLabel: { color: '#8B9098', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4, marginTop: 12, marginBottom: 6 },
+  changeRequestInput: { height: 44, borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', color: '#17191D', fontSize: 14, paddingHorizontal: 12 },
+  changeRequestTextArea: { minHeight: 70, borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', color: '#17191D', fontSize: 14, padding: 12, textAlignVertical: 'top' },
+  changeRequestEvidenceBox: { flexDirection: 'row', alignItems: 'center', gap: 10, borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', padding: 12 },
+  changeRequestEvidenceTitle: { color: '#17191D', fontSize: 13, fontWeight: '700' },
+  changeRequestEvidenceHint: { color: '#8B9098', fontSize: 11, marginTop: 1 },
+  changeRequestSubmitBtn: { height: 50, borderRadius: 10, backgroundColor: '#F04416', alignItems: 'center', justifyContent: 'center', marginTop: 16 },
+  changeRequestSubmitBtnDisabled: { backgroundColor: '#E1E4E8' },
+  changeRequestSubmitBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
+  changeRequestSubmitBtnTextDisabled: { color: '#8B9098' },
   /* Estimate picker modal */
   estimatePickerOverlay: { flex: 1, justifyContent: 'flex-end', padding: 15 },
   estimatePickerCard: { maxHeight: '82%', borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', padding: 14, marginBottom: 18, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 12 },
@@ -1630,48 +2116,40 @@ const s = StyleSheet.create({
   customerEstimateSubtitle: { color: '#5E646D', fontSize: 11, lineHeight: 14, fontWeight: '700', marginTop: 1 },
   customerEstimateScroll: { flex: 1, backgroundColor: '#FFFFFF' },
   customerEstimateContent: { padding: 14, paddingBottom: 22 },
-  customerEstimateHero: { borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', flexDirection: 'row', alignItems: 'center', gap: 11, padding: 12, marginBottom: 10 },
+  customerEstimateHero: { borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', gap: 11, padding: 12, marginBottom: 10 },
   customerEstimateServiceIcon: { width: 48, height: 48, borderRadius: 10, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E6E8EB', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   customerEstimateHeroInfo: { flex: 1, minWidth: 0 },
   customerEstimateService: { color: '#17191D', fontSize: 17, lineHeight: 21, fontWeight: '900' },
   customerEstimateVehicle: { color: '#5E646D', fontSize: 13, lineHeight: 17, fontWeight: '700', marginTop: 2 },
   customerEstimateLocation: { color: '#5E646D', fontSize: 11, lineHeight: 15, fontWeight: '600', marginTop: 3 },
-  customerEstimateNotice: { minHeight: 48, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(22,163,74,0.18)', backgroundColor: 'rgba(22,163,74,0.08)', flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 11, paddingVertical: 9, marginBottom: 10 },
+  customerEstimateNotice: { minHeight: 48, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(22,163,74,0.18)', backgroundColor: 'rgba(22,163,74,0.08)', flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 11, paddingVertical: 9, marginBottom: 10 },
   customerEstimateNoticeText: { flex: 1, minWidth: 0, color: '#17191D', fontSize: 11, lineHeight: 15, fontWeight: '700' },
-  customerPreviewSection: { borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', paddingHorizontal: 12, paddingVertical: 10, marginBottom: 10 },
+  customerPreviewSection: { borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', paddingHorizontal: 12, paddingVertical: 10, marginBottom: 10 },
   customerPreviewSectionOptional: { borderColor: 'rgba(240,68,22,0.28)', backgroundColor: 'rgba(240,68,22,0.07)' },
   customerPreviewSectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 6 },
-  customerPreviewSectionTitle: { color: '#17191D', fontSize: 14, lineHeight: 18, fontWeight: '900' },
+  customerPreviewSectionTitle: { color: '#17191D', fontSize: 15, lineHeight: 19, fontWeight: '800' },
   customerPreviewOptionalPill: { color: '#F04416', fontSize: 10, lineHeight: 13, fontWeight: '900', borderWidth: 1, borderColor: 'rgba(240,68,22,0.22)', backgroundColor: '#FFFFFF', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
-  customerPreviewLine: { minHeight: 34, borderTopWidth: 1, borderTopColor: '#E1E4E8', flexDirection: 'row', alignItems: 'center', gap: 10 },
+  customerPreviewLine: { minHeight: 34, borderTopWidth: 1, borderTopColor: '#ECEEF0', flexDirection: 'row', alignItems: 'center', gap: 10 },
   customerPreviewLineInfo: { flex: 1, minWidth: 0 },
   customerPreviewLineLabel: { color: '#17191D', fontSize: 12, lineHeight: 16, fontWeight: '700' },
   customerPreviewLineMeta: { color: '#8B9098', fontSize: 10, lineHeight: 13, fontWeight: '700', marginTop: 1 },
-  customerPreviewLineAmount: { width: 86, color: '#17191D', fontSize: 12, lineHeight: 16, fontWeight: '800', textAlign: 'right' },
+  customerPreviewLineAmount: { minWidth: 74, flexShrink: 0, color: '#17191D', fontSize: 12, lineHeight: 16, fontWeight: '800', textAlign: 'right' },
   customerPreviewLineStrong: { fontWeight: '900' },
   customerPreviewTotalAmount: { color: '#16A34A', fontSize: 15, lineHeight: 19 },
-  customerEstimateTotals: { borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', paddingHorizontal: 12, paddingVertical: 8, marginBottom: 12 },
-  customerEstimateDivider: { height: 1, backgroundColor: '#E1E4E8', marginVertical: 6 },
-  customerPreviewOnlyNote: { minHeight: 42, borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingHorizontal: 10 },
+  customerEstimateTotals: { borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', paddingHorizontal: 12, paddingVertical: 8, marginBottom: 12 },
+  customerEstimateDivider: { height: 1, backgroundColor: '#ECEEF0', marginVertical: 6 },
+  customerPreviewOnlyNote: { minHeight: 42, borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingHorizontal: 10 },
   customerPreviewOnlyText: { color: '#5E646D', fontSize: 11, lineHeight: 15, fontWeight: '700', textAlign: 'center', flexShrink: 1 },
 
   /* Estimate modal fields */
-  estRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10 },
-  estLabel: { flex: 1, color: '#8B9098', fontSize: 13, fontWeight: '500' },
-  estInputWrap: { flexDirection: 'row', alignItems: 'center', gap: 3 },
-  estCurrency: { color: '#17191D', fontSize: 15, fontWeight: '700' },
-  estInput: { minWidth: 70, color: '#17191D', fontSize: 15, fontWeight: '700', textAlign: 'right', padding: 0 },
-  estTotal: { color: '#15803D', fontSize: 16, fontWeight: '800' },
-  estNoteInput: { backgroundColor: '#F3F4F5', borderRadius: 10, borderWidth: 1, borderColor: '#ECEEF0', paddingHorizontal: 12, paddingVertical: 10, color: '#17191D', fontSize: 13, fontWeight: '500', minHeight: 72, textAlignVertical: 'top' },
 
   scrollStepBtn: {},
 
   /* Bottom panel */
   bottomPanel: {
-    position: 'absolute', left: 10, right: 10, bottom: 22,
-    backgroundColor: '#FFF', borderRadius: 18, borderWidth: 1, borderColor: '#E4E6EA',
-    padding: 10,
-    shadowColor: '#000', shadowOpacity: 0.14, shadowRadius: 20, shadowOffset: { width: 0, height: 8 }, elevation: 14,
+    position: 'absolute', left: 0, right: 0, bottom: 0,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 10, paddingTop: 2, paddingBottom: 40,
   },
   bottomRow: { flexDirection: 'row', gap: 8 },
 
@@ -1695,5 +2173,5 @@ const s = StyleSheet.create({
   },
   btnAcceptTop: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   btnAcceptTitle: { color: '#FFF', fontSize: 14, fontWeight: '800' },
-  btnAcceptSub: { color: 'rgba(255,255,255,0.72)', fontSize: 9, fontWeight: '500', textAlign: 'center', lineHeight: 13 },
+  btnAcceptSub: { color: '#FFFFFF', fontSize: 9, fontWeight: '500', textAlign: 'center', lineHeight: 13 },
 });

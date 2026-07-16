@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import useScrollToTop from '../hooks/useScrollToTop';
 import EarningsPayoutScreen from './EarningsPayoutScreen';
 import RevenueBreakdownScreen, { DATA_BY_PERIOD } from './RevenueBreakdownScreen';
+import { formatCurrency } from '../utils/estimateUtils';
 
 const EARN_PERIODS = ['Today', 'This Week', 'This Month'];
 
@@ -75,14 +76,14 @@ function buildRealData(completedOrders) {
 
   const makeKpis = (orders, total) => [
     { label: 'Completed Jobs', value: String(orders.length), icon: 'briefcase-outline', color: '#F04416', bg: 'rgba(240,68,22,0.10)' },
-    { label: 'Avg Ticket', value: orders.length ? `$${(total / orders.length).toFixed(0)}` : '$0', icon: 'ticket-outline', color: '#2F80FF', bg: 'rgba(47,128,255,0.10)' },
+    { label: 'Avg Ticket', value: orders.length ? formatCurrency(total / orders.length) : '$0.00', icon: 'ticket-outline', color: '#2F80FF', bg: 'rgba(47,128,255,0.10)' },
     { label: 'Total Earned', value: fmt(total), icon: 'cash-outline', color: '#16A34A', bg: 'rgba(22,163,74,0.10)' },
   ];
 
   return {
-    Today:       { total: `$${sumTotal(todayOrders).toFixed(2)}`,  trend: `${todayOrders.length} jobs today`,      trendUp: todayOrders.length > 0,  kpis: makeKpis(todayOrders,  sumTotal(todayOrders)),  values: [0,0,0,0,0,0,0], labels: ['9AM','10AM','11AM','12PM','1PM','2PM','3PM'], chartMax: 1, axisLabels: ['—','—','—','$0'], activeLabel: '' },
-    'This Week': { total: `$${sumTotal(weekOrders).toFixed(2)}`,   trend: `${weekOrders.length} jobs this week`,   trendUp: weekOrders.length > 0,   kpis: makeKpis(weekOrders,   sumTotal(weekOrders)),   values: [0,0,0,0,0,0,0], labels: ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],  chartMax: 1, axisLabels: ['—','—','—','$0'], activeLabel: '' },
-    'This Month': { total: `$${sumTotal(monthOrders).toFixed(2)}`, trend: `${monthOrders.length} jobs this month`, trendUp: monthOrders.length > 0,  kpis: makeKpis(monthOrders,  sumTotal(monthOrders)),  values: [0,0,0,0,0,0,0], labels: ['Jun 1','5','9','13','17','21','25'],         chartMax: 1, axisLabels: ['—','—','—','$0'], activeLabel: '' },
+    Today:       { total: formatCurrency(sumTotal(todayOrders)),  trend: `${todayOrders.length} jobs today`,      trendUp: todayOrders.length > 0,  kpis: makeKpis(todayOrders,  sumTotal(todayOrders)),  values: [0,0,0,0,0,0,0], labels: ['9AM','10AM','11AM','12PM','1PM','2PM','3PM'], chartMax: 1, axisLabels: ['—','—','—','$0'], activeLabel: '' },
+    'This Week': { total: formatCurrency(sumTotal(weekOrders)),   trend: `${weekOrders.length} jobs this week`,   trendUp: weekOrders.length > 0,   kpis: makeKpis(weekOrders,   sumTotal(weekOrders)),   values: [0,0,0,0,0,0,0], labels: ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'],  chartMax: 1, axisLabels: ['—','—','—','$0'], activeLabel: '' },
+    'This Month': { total: formatCurrency(sumTotal(monthOrders)), trend: `${monthOrders.length} jobs this month`, trendUp: monthOrders.length > 0,  kpis: makeKpis(monthOrders,  sumTotal(monthOrders)),  values: [0,0,0,0,0,0,0], labels: ['Jun 1','5','9','13','17','21','25'],         chartMax: 1, axisLabels: ['—','—','—','$0'], activeLabel: '' },
   };
 }
 
@@ -102,7 +103,7 @@ export default function EarningsScreen({ refreshControl, scrollSignal, isDemo = 
   const revenueCards = isDemo
     ? periodRevData.slice(0, 4).map((seg, i) => ({
         title: seg.label,
-        value: `$${seg.amount.toLocaleString('en-US')}.00`,
+        value: formatCurrency(seg.amount),
         meta: `${seg.pct}% of revenue`,
         icon: METRIC_ICONS[i],
         color: METRIC_COLORS[i][0],
@@ -119,7 +120,7 @@ export default function EarningsScreen({ refreshControl, scrollSignal, isDemo = 
     icon: 'briefcase-outline',
     title: `${o.vehicle?.make || ''} ${o.vehicle?.model || ''} - ${o.service?.type || 'Service'}`.trim(),
     meta: new Date(o.completedAt || o.updatedAt || o.createdAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }),
-    amount: `+$${Number(o.payment?.total || o.payment?.totalHeld || o.payment?.priceMax || 0).toFixed(2)}`,
+    amount: `+${formatCurrency(o.payment?.total || o.payment?.totalHeld || o.payment?.priceMax || 0)}`,
   }));
 
   const payouts = [

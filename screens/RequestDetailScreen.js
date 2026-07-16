@@ -3,6 +3,7 @@ import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'rea
 import { Ionicons } from '@expo/vector-icons';
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import { getServiceMeta, getVehicleLabel, getDropoffAddress, isTowingService, getProviderIntakeItems, getServiceMode } from '../utils/serviceUtils';
+import { formatCurrency } from '../utils/estimateUtils';
 
 const TIMER_SECONDS = 60;
 
@@ -67,7 +68,7 @@ export default function RequestDetailScreen({ order, accepting, providerType = '
     { key: 'pickup', icon: 'location-outline', color: '#7C3AED', label: isTowing ? 'Pickup Location' : 'Service Location', value: address },
     ...(isTowing ? [{ key: 'dropoff', icon: 'flag-outline', color: '#EF4444', label: 'Drop-off Location', value: dropoffAddress }] : []),
     { key: 'distance', icon: 'trail-sign-outline', color: '#42D463', label: 'Distance', value: distance !== '—' ? `${distance}` : 'Calculating…' },
-    { key: 'payout', icon: 'cash-outline', color: '#EAB308', label: 'Est. Payout', value: payout > 0 ? `$${payout}` : 'See estimate' },
+    { key: 'payout', icon: 'cash-outline', color: '#EAB308', label: 'Est. Payout', value: payout > 0 ? formatCurrency(payout) : 'See estimate' },
   ];
 
   return (
@@ -89,7 +90,7 @@ export default function RequestDetailScreen({ order, accepting, providerType = '
         <View style={styles.requestSummaryCard}>
           <View style={styles.earningsMain}>
             <Text style={styles.earningsLabel}>ESTIMATED{'\n'}EARNINGS</Text>
-            <Text style={styles.earningsAmount} numberOfLines={1}>{net > 0 ? `$${net}` : '—'}</Text>
+            <Text style={styles.earningsAmount} numberOfLines={1}>{net > 0 ? formatCurrency(net) : '—'}</Text>
             <Text style={styles.earningsNet} numberOfLines={1}>Net earnings</Text>
           </View>
           <View style={styles.earningsDivider} />
@@ -97,7 +98,7 @@ export default function RequestDetailScreen({ order, accepting, providerType = '
           <View style={styles.earningsDivider} />
           <EarningStat icon="map-outline" value={distance} label="Distance" />
           <View style={styles.earningsDivider} />
-          <EarningStat icon="cash-outline" value={payout > 0 ? `$${payout}` : '—'} label="Gross pay" />
+          <EarningStat icon="cash-outline" value={payout > 0 ? formatCurrency(payout) : '—'} label="Gross pay" />
         </View>
 
         <View style={styles.verifiedCard}>

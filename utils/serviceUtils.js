@@ -1,8 +1,8 @@
 export function formatMoney(order) {
   const rawValue = order.pricing?.total ?? order.payment?.totalHeld ?? order.price ?? order.total ?? order.estimate ?? order.service?.price;
-  if (typeof rawValue === 'number') return `$${Math.round(rawValue)}`;
+  if (typeof rawValue === 'number') return `$${rawValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   if (typeof rawValue === 'string' && rawValue.trim()) return rawValue.startsWith('$') ? rawValue : `$${rawValue}`;
-  return '$89';
+  return '$89.00';
 }
 
 export const SERVICE_TYPES = [
@@ -194,8 +194,8 @@ function getRawServiceTitle(order) {
     order.recommendedService ||
     order.issue?.name ||
     order.issue?.title ||
-    order.service?.type ||
     order.service?.issueName ||
+    order.service?.type ||
     order.service?.recommendedService ||
     order.service?.name ||
     order.problem ||
@@ -311,6 +311,17 @@ export function isTowingService(order) {
   return serviceText.includes('tow');
 }
 
+// Drops a trailing "United States"/"USA" segment while keeping the rest of the
+// address intact (street, city, state, ZIP) — unlike a city/state-only summary,
+// the provider still needs the full street address here to actually navigate to it.
+// (COUNTRY_NAMES is declared once below, reused by getCityState too.)
+export function stripCountryFromAddress(address) {
+  if (!address) return address;
+  const parts = String(address).split(',').map(p => p.trim()).filter(Boolean);
+  if (parts.length > 1 && COUNTRY_NAMES.test(parts[parts.length - 1])) parts.pop();
+  return parts.join(', ');
+}
+
 export function getDropoffAddress(order) {
   return (
     (typeof order.dropoff === 'string' ? order.dropoff : '') ||
@@ -333,12 +344,16 @@ function getDemoRequestDetails(order) {
 }
 
 // Extracts "City, State" from a full address string like "123 Main St, Los Angeles, CA, US"
+const COUNTRY_NAMES = /^(united states( of america)?|usa|u\.s\.a\.?|us|u\.s\.?)$/i;
+
 export function getCityState(address) {
   if (!address) return address;
-  const parts = address.split(',').map(p => p.trim()).filter(Boolean);
-  if (parts.length >= 3) {
-    // city is 3rd from end, state/region is 2nd from end (last part is country)
-    return `${parts[parts.length - 3]}, ${parts[parts.length - 2]}`;
+  let parts = address.split(',').map(p => p.trim()).filter(Boolean);
+  if (parts.length > 2 && COUNTRY_NAMES.test(parts[parts.length - 1])) {
+    parts = parts.slice(0, -1);
+  }
+  if (parts.length >= 2) {
+    return `${parts[parts.length - 2]}, ${parts[parts.length - 1]}`;
   }
   return address;
 }
@@ -476,7 +491,8 @@ export async function fetchJson(url, options) {
 
 export function getBackendStatusFromWorkflowStage(stage) {
   if (stage === 'route') return 'en_route';
-  if (stage === 'arrived' || stage === 'diagnosis' || stage === 'estimate') return 'arrived';
+  if (stage === 'arrived') return 'arrived';
+  if (stage === 'diagnosis' || stage === 'estimate') return 'inspection';
   if (stage === 'approval') return 'estimate_sent';
   if (stage === 'working' || stage === 'complete_review') return 'in_progress';
   if (stage === 'completed') return 'completed';

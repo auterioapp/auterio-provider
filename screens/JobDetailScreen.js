@@ -2,19 +2,20 @@ import { useEffect, useState } from 'react';
 import { Linking, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { isTowingService, getDropoffAddress, getProviderIntakeItems } from '../utils/serviceUtils';
+import { formatCurrency } from '../utils/estimateUtils';
 import { JOB_STEPS, ACCEPT_BLUE } from '../constants';
 import { RequestInfoRow } from './RequestDetailScreen';
 
-export default function JobDetailScreen({ job, onBack, refreshControl }) {
-  const [currentStepIndex, setCurrentStepIndex] = useState(
-    Math.max(0, JOB_STEPS.findIndex(s => s.key === 'on_the_way'))
-  );
+export default function JobDetailScreen({ job, onBack, onStatusChange, refreshControl }) {
+  const initialStepIndex = Math.max(0, JOB_STEPS.findIndex(s => s.key === (job.status || 'on_the_way')));
+  const [currentStepIndex, setCurrentStepIndex] = useState(initialStepIndex);
   const [mapOpen, setMapOpen] = useState(false);
   const [noteOpen, setNoteOpen] = useState(false);
 
   useEffect(() => {
-    setCurrentStepIndex(Math.max(0, JOB_STEPS.findIndex(s => s.key === 'on_the_way')));
-  }, [job.id]);
+    const idx = Math.max(0, JOB_STEPS.findIndex(s => s.key === (job.status || 'on_the_way')));
+    setCurrentStepIndex(idx);
+  }, [job.id, job.status]);
 
   const isComplete = currentStepIndex >= JOB_STEPS.length - 1;
   const nextStep = JOB_STEPS[Math.min(currentStepIndex + 1, JOB_STEPS.length - 1)];
@@ -31,12 +32,15 @@ export default function JobDetailScreen({ job, onBack, refreshControl }) {
     { key: 'pickup', icon: 'location-outline', color: '#7C3AED', label: isTowing ? 'Pickup Location' : 'Service Location', value: address },
     ...(isTowing ? [{ key: 'dropoff', icon: 'flag-outline', color: '#EF4444', label: 'Drop-off Location', value: dropoffAddress }] : []),
     { key: 'payment', icon: 'card-outline', color: '#EAB308', label: 'Payment', value: job.payment?.method ? `${job.payment.method} · Card on file` : 'Card on file' },
-    { key: 'payout', icon: 'cash-outline', color: '#EAB308', label: 'Est. Payout', value: total ? `$${total}` : 'TBD' },
+    { key: 'payout', icon: 'cash-outline', color: '#EAB308', label: 'Est. Payout', value: total ? formatCurrency(total) : 'TBD' },
   ];
 
   const arrivedIndex = Math.max(0, JOB_STEPS.findIndex(s => s.key === 'arrived'));
   const isArrived = currentStepIndex >= arrivedIndex;
-  const markArrived = () => setCurrentStepIndex(arrivedIndex);
+  const markArrived = () => {
+    setCurrentStepIndex(arrivedIndex);
+    onStatusChange?.(job.id, 'arrived');
+  };
 
   const openMapApp = async (provider) => {
     const destination = encodeURIComponent(address);
@@ -96,10 +100,24 @@ export default function JobDetailScreen({ job, onBack, refreshControl }) {
               <Text style={styles.customerPhone}>{job.customer.phone}</Text>
             </View>
             <View style={styles.customerActions}>
-              <TouchableOpacity style={styles.callBtn} activeOpacity={0.8}>
+              <TouchableOpacity
+                style={styles.callBtn}
+                activeOpacity={0.8}
+                onPress={() => {
+                  const phone = job.customer?.phone;
+                  if (phone) Linking.openURL(`tel:${phone}`);
+                }}
+              >
                 <Ionicons name="call" size={20} color="#42D463" />
               </TouchableOpacity>
-              <TouchableOpacity style={styles.msgBtn} activeOpacity={0.8}>
+              <TouchableOpacity
+                style={styles.msgBtn}
+                activeOpacity={0.8}
+                onPress={() => {
+                  const phone = job.customer?.phone;
+                  if (phone) Linking.openURL(`sms:${phone}`);
+                }}
+              >
                 <Ionicons name="chatbox" size={20} color="#2F80FF" />
               </TouchableOpacity>
             </View>

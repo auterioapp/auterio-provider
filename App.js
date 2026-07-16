@@ -1,13 +1,15 @@
 ﻿import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Animated, Dimensions, Easing, KeyboardAvoidingView, Linking, Modal, PanResponder, Platform, RefreshControl, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Animated, Dimensions, Easing, KeyboardAvoidingView, Linking, Modal, PanResponder, Platform, RefreshControl, ScrollView, Share, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
+import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
+import { GestureHandlerRootView, PanGestureHandler, State as GestureState } from 'react-native-gesture-handler';
 import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
 import WelcomeScreen from './screens/WelcomeScreen';
 import AuthScreen from './screens/AuthScreen';
@@ -26,7 +28,7 @@ import JobDetailScreen, { JobStepper } from './screens/JobDetailScreen';
 import { getJobProgressIndex } from './utils/jobUtils';
 import { API_URL, PROVIDER, ACCEPT_BLUE, TAB_BAR_PADDING, TAB_INDICATOR_EXTRA_WIDTH, TAB_INDICATOR_DROP_SCALE, TABS, REQUEST_ROUTE, REQUEST_MAP_REGION, JOB_STEPS, ACTIVE_SHOP_STATUSES } from './constants';
 
-import { formatMoney, getServiceMeta, getServiceTitle, getOrderServiceType, getServiceFlowSchema, getDiagnosisSchema, getProviderIntakeItems, isTowingService, getDropoffAddress, getRequestLocation, getRequestDistance, getVehicleVin, normalizeComplaintItem, getCustomerComplaintItems, getAcceptedAtLabel, getVehicleLabel, getBackendStatusFromWorkflowStage } from './utils/serviceUtils';
+import { formatMoney, getServiceMeta, getServiceTitle, getOrderServiceType, getServiceFlowSchema, getDiagnosisSchema, getProviderIntakeItems, isTowingService, getDropoffAddress, getRequestLocation, getRequestDistance, getVehicleVin, normalizeComplaintItem, getCustomerComplaintItems, getAcceptedAtLabel, getVehicleLabel, getBackendStatusFromWorkflowStage, stripCountryFromAddress } from './utils/serviceUtils';
 import { getRecommendedServicesFromDiagnosis, getDemoEstimate, getEstimateCatalog, getEstimatePriceCheck, sumAmounts, formatCurrency } from './utils/estimateUtils';
 import { loadPricing, savePricing, DEFAULT_PRICING } from './utils/pricingStore';
 import { setAuthFailureHandler as setApiAuthFailureHandler } from './apiClient';
@@ -68,6 +70,34 @@ async function registerPushToken(providerId) {
 }
 
 
+// order.shopStatus only ever exists locally (set by updateShopStep while the app is
+// open) — it is never persisted to the backend. Whenever a job is (re)built from a
+// fresh server response (initial load, polling), shopStatus is missing and must be
+// derived from the real order.status, otherwise ShopRequestDetailScreen falls back
+// to 'scheduled' and shows stale step buttons even though work has already started.
+const SHOP_STATUS_FROM_ORDER_STATUS = {
+  arrived: 'checked_in',
+  inspection: 'inspection',
+  estimate_sent: 'waiting_approval',
+  estimate_approved: 'in_progress',
+  in_progress: 'in_progress',
+  completed: 'completed',
+};
+
+// jobWorkflows[job.id].stage only ever exists locally (set while the app is open,
+// via onWorkflowChange) — it is pure in-memory state, never persisted. If it's
+// missing (app reload, or the customer advanced the order while this screen wasn't
+// open), JobPopupScreen falls back to its default "Accepted" view even though the
+// real order.status has already moved past that. Derive a fallback stage from the
+// real status so the correct step screen opens instead.
+const MOBILE_STAGE_FROM_STATUS = {
+  en_route: 'route',
+  arrived: 'arrived',
+  inspection: 'diagnosis',
+  estimate_sent: 'approval',
+  in_progress: 'working',
+};
+
 function normalizeOrderToJob(order) {
   const serviceMeta = getServiceMeta(order);
   const requestId = order.id || order._id || `local-${Date.now()}`;
@@ -77,12 +107,25 @@ function normalizeOrderToJob(order) {
   const customerName = order.customer?.name || order.contactInfo?.name || 'Customer';
   const initials = customerName.split(' ').map(part => part[0]).join('').slice(0, 2).toUpperCase() || 'CU';
   const total = Number(order.payment?.total || order.payment?.totalHeld || order.payment?.priceMax || order.price || order.total || 89);
+  const shopStatus = order.shopStatus || (getServiceMode(order) === 'shop' ? SHOP_STATUS_FROM_ORDER_STATUS[order.status] : undefined);
+  // approvedTotal/approveOptional/estimateApprovedAt/additionalApprovals live under
+  // orderContext on the backend but are read as top-level job fields in the provider
+  // UI — same fallback pattern as shopStatus, otherwise they vanish on every poll.
+  const approvedTotal = order.approvedTotal ?? order.orderContext?.approvedTotal ?? null;
+  const approveOptional = order.approveOptional ?? order.orderContext?.approveOptional ?? false;
+  const estimateApprovedAt = order.estimateApprovedAt || order.orderContext?.estimateApprovedAt || null;
+  const additionalApprovals = order.additionalApprovals || order.orderContext?.additionalApprovals || [];
 
   return {
     ...order,
     id: requestId,
     number,
     status: order.status && order.status !== 'pending' ? order.status : 'accepted',
+    shopStatus,
+    approvedTotal,
+    approveOptional,
+    estimateApprovedAt,
+    additionalApprovals,
     eta: order.tracking?.eta || order.eta || '20-30 min',
     accent: order.accent || '#F04416',
     icon: order.icon || serviceMeta.icon,
@@ -165,6 +208,12 @@ export default function App() {
   const [allowScheduling, setAllowScheduling] = useState(false);
   const [appointmentOrder, setAppointmentOrder] = useState(null);
   const [jobWorkflows, setJobWorkflows] = useState({});
+  const getJobWorkflowFor = (job) => {
+    const existing = jobWorkflows[job?.id];
+    if (existing?.stage) return existing;
+    const fallbackStage = MOBILE_STAGE_FROM_STATUS[job?.status];
+    return fallbackStage ? { ...existing, stage: fallbackStage } : (existing || {});
+  };
   const [toastMsg, setToastMsg] = useState(null);
   const toastAnim = useRef(new Animated.Value(0)).current;
   const toastTimer = useRef(null);
@@ -179,18 +228,18 @@ export default function App() {
   const tabIndicatorTarget = useRef(0);
   const tabDragFrame = useRef(null);
 
+  const [isDemo, setIsDemo] = useState(false);
+  const [completedOrders, setCompletedOrders] = useState([]);
+
   const dashboardRequests = requests;
-  const providerJobs = useMemo(() => isDemo ? [...DEMO_JOBS, ...acceptedJobs] : acceptedJobs, [acceptedJobs, isDemo]);
+  const providerJobs = useMemo(() => isDemo ? [...DEMO_JOBS, ...acceptedJobs] : [...acceptedJobs, ...completedOrders], [acceptedJobs, completedOrders, isDemo]);
   const activeJobs = useMemo(() => providerJobs.filter(job =>
     ACTIVE_SHOP_STATUSES.includes(job.shopStatus) ||
-    (job.status !== 'completed' && job.status !== 'scheduled' && job.status !== 'confirmed' && job.status !== 'proposed')
+    (job.status !== 'completed' && job.status !== 'scheduled' && job.status !== 'confirmed' && job.status !== 'proposed' && job.status !== 'cancelled' && job.status !== 'declined')
   ).length, [providerJobs]);
   const pendingCount = dashboardRequests.length;
   const tabWidth = tabBarWidth ? (tabBarWidth - TAB_BAR_PADDING * 2) / TABS.length : 0;
   const isLightVisible = !!selectedRequest || (!selectedRequest && (activeScreen === 'home' || activeScreen === 'requests' || activeScreen === 'jobs' || activeScreen === 'earnings' || activeScreen === 'profile'));
-
-  const [isDemo, setIsDemo] = useState(false);
-  const [completedOrders, setCompletedOrders] = useState([]);
   const [verificationStatus, setVerificationStatus] = useState('unverified');
   const [profileComplete, setProfileComplete] = useState(false);
   const profileCompleteRef = useRef(false);
@@ -219,14 +268,12 @@ export default function App() {
       const data = await fetchJson(`${API_URL}/orders/provider/${providerId}`);
       if (!Array.isArray(data)) return;
       const active = data.filter(o =>
-        ['accepted', 'confirmed', 'scheduled', 'en_route', 'arrived', 'estimate_sent', 'estimate_approved', 'in_progress'].includes(o.status)
+        ['accepted', 'confirmed', 'scheduled', 'en_route', 'arrived', 'inspection', 'estimate_sent', 'estimate_approved', 'in_progress'].includes(o.status)
       );
       const done = data.filter(o => o.status === 'completed');
-      if (active.length > 0) {
-        setAcceptedJobs(active.map(o => normalizeOrderToJob(o)));
-        setAcceptedRequestIds(active.map(o => String(o.id || o._id)));
-      }
-      setCompletedOrders(done);
+      setAcceptedJobs(active.map(o => normalizeOrderToJob(o)));
+      setAcceptedRequestIds(active.map(o => String(o.id || o._id)));
+      setCompletedOrders(done.map(o => normalizeOrderToJob(o)));
     } catch (e) {
       console.log('Load provider jobs error:', e.message);
     }
@@ -297,7 +344,7 @@ export default function App() {
       // Fresh account — wipe all previous user's local data before applying new user
       PROVIDER.id = 'provider-demo-001';
       PROVIDER.company = 'Auterio Provider';
-      PROVIDER.name = 'Alex';
+      PROVIDER.name = user?.name || '';
       PROVIDER.initials = 'AP';
       setProfileComplete(false);
       profileCompleteRef.current = false;
@@ -366,7 +413,7 @@ export default function App() {
     profileCompleteRef.current = false;
     PROVIDER.id = 'provider-demo-001';
     PROVIDER.company = 'Auterio Provider';
-    PROVIDER.name = 'Alex';
+    PROVIDER.name = '';
     PROVIDER.initials = 'AP';
     await Promise.all([
       SecureStore.deleteItemAsync('providerToken'),
@@ -567,6 +614,12 @@ export default function App() {
   }, [online, acceptedRequestIds, verificationStatus]);
 
   useEffect(() => {
+    if (isDemo || !PROVIDER.id) return;
+    const timer = setInterval(() => loadProviderJobsFromBackend(PROVIDER.id), 10000);
+    return () => clearInterval(timer);
+  }, [isDemo]);
+
+  useEffect(() => {
     if (isDemo) return;
     const subscription = Notifications.addNotificationReceivedListener(notification => {
       const data = notification.request.content.data;
@@ -600,15 +653,20 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status: 'arrived' }),
       }).catch(e => console.log('Check-in sync error:', e.message));
+    } else if (newShopStatus === 'inspection' && isReal) {
+      fetchJson(`${API_URL}/orders/${orderId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'inspection' }),
+      }).catch(e => console.log('Inspection sync error:', e.message));
     } else if (newShopStatus === 'waiting_approval' && extra?.estimate) {
-      const { labor = 0, parts = 0, laborSubtotal = 0, partsSubtotal = 0, subtotal = 0, tax = 0, total = 0, note = '' } = extra.estimate;
       if (isReal) {
         fetchJson(`${API_URL}/orders/${orderId}/status`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             status: 'estimate_sent',
-            estimate: { labor, parts, laborSubtotal, partsSubtotal, subtotal, tax, total, note },
+            estimate: extra.estimate,
           }),
         }).catch(e => console.log('Estimate sync error:', e.message));
       }
@@ -616,6 +674,24 @@ export default function App() {
     } else if (newShopStatus === 'completed') {
       showToast('Job completed!');
     }
+  };
+
+  const cancelShopJob = async (order) => {
+    const orderId = order.id || order._id;
+    const isReal = orderId && !String(orderId).startsWith('demo');
+    if (isReal) {
+      try {
+        await fetchJson(`${API_URL}/orders/${orderId}/cancel`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ reason: 'Cancelled by provider' }),
+        });
+      } catch (e) {
+        console.log('Cancel job error:', e.message);
+      }
+    }
+    setAcceptedJobs(current => current.filter(job => String(job.id) !== String(orderId)));
+    setAcceptedRequestIds(current => current.filter(id => String(id) !== String(orderId)));
   };
 
   const addAcceptedJob = (order, patch = {}) => {
@@ -830,6 +906,7 @@ export default function App() {
 
     const currentWorkflow = { ...(jobWorkflows[jobId] || {}), ...patch };
     const body = { status: nextStatus, estimate: patch?.estimate };
+    if (patch?.providerLocation) body.providerLocation = patch.providerLocation;
 
     if (nextStatus === 'completed') {
       body.serviceDetails = {
@@ -927,7 +1004,7 @@ export default function App() {
       if (isDemo) {
         setAcceptedJobs(current => current.map(job => {
           if (job.status === 'proposed') return { ...job, status: 'scheduled' };
-          if (job.shopStatus === 'awaiting_approval') return { ...job, shopStatus: 'in_progress' };
+          if (job.shopStatus === 'waiting_approval') return { ...job, shopStatus: 'in_progress' };
           return job;
         }));
       }
@@ -1292,7 +1369,7 @@ export default function App() {
         >
           <View style={styles.requestModalOverlay}>
             <View style={styles.requestModalSheet}>
-              {!!selectedJob && (selectedJob.status === 'scheduled' || selectedJob.status === 'confirmed' || selectedJob.status === 'proposed' || !!selectedJob.shopStatus) ? (
+              {!!selectedJob && (selectedJob.status === 'proposed' || getServiceMode(selectedJob) === 'shop' || !!selectedJob.shopStatus) ? (
                 <ShopRequestDetailScreen
                   order={selectedJob}
                   isAccepted
@@ -1303,13 +1380,21 @@ export default function App() {
                     updateShopStep(o, nextStatus, extra);
                     setSelectedJob(prev => prev ? { ...prev, shopStatus: nextStatus, ...extra } : prev);
                   }}
+                  onCancel={async (o) => {
+                    setSelectedJob(null);
+                    await cancelShopJob(o);
+                  }}
                 />
               ) : !!selectedJob && (
                 <JobPopupScreen
                   job={selectedJob}
-                  workflow={jobWorkflows[selectedJob.id] || {}}
+                  workflow={getJobWorkflowFor(selectedJob)}
                   onWorkflowChange={(patch) => updateJobWorkflow(selectedJob.id, patch)}
                   onBack={() => setSelectedJob(null)}
+                  onCancel={async (o) => {
+                    setSelectedJob(null);
+                    await cancelShopJob(o);
+                  }}
                   refreshControl={refreshControl}
                 />
               )}
@@ -1354,28 +1439,87 @@ function pulseTabChange() {
   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
 }
 
-function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshControl }) {
+function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel, refreshControl }) {
   const [noteOpen, setNoteOpen] = useState(false);
   const [routeOpen, setRouteOpen] = useState(workflow.stage === 'route');
+
+  // While en route, periodically push the provider's live GPS position to the
+  // backend (order.tracking.providerLatitude/Longitude) so the customer's app can
+  // compute a real distance-based ETA instead of a static dispatch estimate.
+  useEffect(() => {
+    if (!routeOpen) return;
+    let cancelled = false;
+    const sendLocation = async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted' || cancelled) return;
+        const position = await Location.getCurrentPositionAsync({});
+        if (cancelled) return;
+        onWorkflowChange?.({
+          stage: 'route',
+          providerLocation: { latitude: position.coords.latitude, longitude: position.coords.longitude },
+        });
+      } catch (error) {
+        console.log('Provider location send error:', error.message);
+      }
+    };
+    sendLocation();
+    const interval = setInterval(sendLocation, 20000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [routeOpen]);
   const [arrivedOpen, setArrivedOpen] = useState(workflow.stage === 'arrived');
   const [diagnosisOpen, setDiagnosisOpen] = useState(workflow.stage === 'diagnosis');
   const [estimateOpen, setEstimateOpen] = useState(workflow.stage === 'estimate');
   const [approvalOpen, setApprovalOpen] = useState(workflow.stage === 'approval');
   const [estimateDeclinedOpen, setEstimateDeclinedOpen] = useState(workflow.stage === 'estimate_declined');
   const [workOpen, setWorkOpen] = useState(workflow.stage === 'working');
-  const [completeOpen, setCompleteOpen] = useState(workflow.stage === 'complete_review');
-  const [invoiceOpen, setInvoiceOpen] = useState(workflow.stage === 'invoice');
+  const [completeOpen, setCompleteOpen] = useState(workflow.stage === 'complete_review' || workflow.stage === 'invoice');
   const [estimateItems, setEstimateItems] = useState(workflow.estimateItems || []);
   const [estimateRemovedItems, setEstimateRemovedItems] = useState(workflow.estimateRemovedItems || []);
   const [estimatePickerOpen, setEstimatePickerOpen] = useState(false);
   const [estimatePickerMode, setEstimatePickerMode] = useState('labor');
   const [estimateItemScope, setEstimateItemScope] = useState('required');
   const [estimatePreviewOpen, setEstimatePreviewOpen] = useState(false);
+  const [completeInvoicePreviewOpen, setCompleteInvoicePreviewOpen] = useState(false);
+  const [completedInvoicePreviewOpen, setCompletedInvoicePreviewOpen] = useState(false);
+  const [completedServiceDetailsOpen, setCompletedServiceDetailsOpen] = useState(false);
+  const [customerProfileOpen, setCustomerProfileOpen] = useState(false);
+  const [jobActionsOpen, setJobActionsOpen] = useState(false);
+  const cpPanX = useRef(new Animated.Value(0)).current;
+  const openCustomerProfile = () => {
+    cpPanX.setValue(Dimensions.get('window').width);
+    setCustomerProfileOpen(true);
+  };
+  const closeCustomerProfile = (velocity = 1200) => {
+    Animated.spring(cpPanX, {
+      toValue: Dimensions.get('window').width,
+      velocity,
+      bounciness: 0,
+      useNativeDriver: true,
+    }).start(() => {
+      setCustomerProfileOpen(false);
+      cpPanX.setValue(0);
+    });
+  };
+  const onCpGestureEvent = Animated.event(
+    [{ nativeEvent: { translationX: cpPanX } }],
+    { useNativeDriver: true }
+  );
+  const onCpHandlerStateChange = (event) => {
+    if (event.nativeEvent.oldState === GestureState.ACTIVE) {
+      const { translationX, velocityX } = event.nativeEvent;
+      if (translationX > 90 || velocityX > 700) {
+        closeCustomerProfile(Math.max(velocityX, 1200));
+      } else {
+        Animated.spring(cpPanX, { toValue: 0, velocity: velocityX, useNativeDriver: true, bounciness: 0 }).start();
+      }
+    }
+  };
   const [estimateSearch, setEstimateSearch] = useState('');
   const [customEstimateName, setCustomEstimateName] = useState('');
   const [customEstimateHours, setCustomEstimateHours] = useState('');
   const [customEstimateAmount, setCustomEstimateAmount] = useState('');
-  const [additionalApprovals, setAdditionalApprovals] = useState((workflow.additionalApprovals || []).filter(item => item.kind === 'required'));
+  const [additionalApprovals, setAdditionalApprovals] = useState((job.additionalApprovals || workflow.additionalApprovals || []).filter(item => item.kind === 'required'));
   const [changeRequestOpen, setChangeRequestOpen] = useState(false);
   const [changeRequestName, setChangeRequestName] = useState('');
   const [changeRequestReason, setChangeRequestReason] = useState('');
@@ -1393,17 +1537,28 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
   const [includeCallFee, setIncludeCallFee] = useState(true);
   const [providerTypeCached, setProviderTypeCached] = useState('mobile');
   const [workTimer, setWorkTimer] = useState(0);
+  const addWorkPhoto = () => {
+    pulseTabChange();
+    const nextPhotos = [...workPhotos, `Repair photo ${workPhotos.length + 1}`];
+    setWorkPhotos(nextPhotos);
+    onWorkflowChange?.({ stage: completeOpen ? 'complete_review' : 'working', workPhotos: nextPhotos, workSummary, workCustomerNote, additionalApprovals });
+  };
+  const updateWorkSummary = (value) => {
+    setWorkSummary(value);
+    onWorkflowChange?.({ stage: completeOpen ? 'complete_review' : 'working', workSummary: value, workCustomerNote, workPhotos, additionalApprovals });
+  };
   useEffect(() => { loadPricing().then(p => { const t = p.providerType || 'mobile'; setProviderTypeCached(t); setIncludeCallFee(t !== 'shop'); }); }, []);
   useEffect(() => {
     if (!workOpen) return;
-    const startTs = workflow.estimateApprovedAt && !isNaN(new Date(workflow.estimateApprovedAt).getTime())
-      ? new Date(workflow.estimateApprovedAt).getTime()
+    const approvedAt = job.estimateApprovedAt ?? workflow.estimateApprovedAt;
+    const startTs = approvedAt && !isNaN(new Date(approvedAt).getTime())
+      ? new Date(approvedAt).getTime()
       : Date.now();
     const tick = () => setWorkTimer(Math.floor((Date.now() - startTs) / 1000));
     tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
-  }, [workOpen, workflow.estimateApprovedAt]);
+  }, [workOpen, job.estimateApprovedAt, workflow.estimateApprovedAt]);
   const formatWorkTimer = (s) => {
     const h = Math.floor(s / 3600);
     const m = Math.floor((s % 3600) / 60);
@@ -1480,8 +1635,8 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
   const [checklistDraft, setChecklistDraft] = useState('');
   const [navigationChoiceOpen, setNavigationChoiceOpen] = useState(false);
   const currentStepIndex = getJobProgressIndex(job.status);
-  const isCompleted = job.status === 'completed';
-  const address = job.pickup?.address || 'Location pending';
+  const isCompleted = job.status === 'completed' || workflow.stage === 'completed';
+  const address = stripCountryFromAddress(job.pickup?.address) || 'Location pending';
   const isTowing = isTowingService(job);
   const dropoffAddress = getDropoffAddress(job);
   const vin = getVehicleVin(job);
@@ -1517,7 +1672,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
     ...(isTowing ? [{ key: 'dropoff', icon: 'flag-outline', color: '#EF4444', label: 'Drop-off Location', value: dropoffAddress }] : []),
     ...(!isCompleted ? [
       { key: 'distance', icon: 'trail-sign-outline', color: '#42D463', label: 'Distance', value: job.distance || '5.2 mi away' },
-      { key: 'payout', icon: 'cash-outline', color: '#EAB308', label: 'Est. Payout', value: `$${job.payment?.total || 0}` },
+      { key: 'payout', icon: 'cash-outline', color: '#EAB308', label: 'Est. Payout', value: formatCurrency(job.payment?.total || 0) },
     ] : []),
   ];
   const openNavigationApp = async (provider) => {
@@ -1566,13 +1721,13 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
       const nextItems = [...estimateItems, { ...item, scope: estimateItemScope, id: `${item.type}-${estimateItemScope}-${item.label}-${Date.now()}` }];
       setEstimateItems(nextItems);
       onWorkflowChange?.({ stage: 'estimate', estimateItems: nextItems, estimateRemovedItems });
-      setEstimatePickerOpen(false);
-      setEstimateSearch('');
-      setEstimateItemScope('required');
       setCustomEstimateName('');
       setCustomEstimateHours('');
       setCustomEstimateAmount('');
     };
+    const findAddedCatalogItem = (item) => estimateItems.find(
+      added => added.type === item.type && added.label === item.label && added.scope === estimateItemScope
+    );
     const customAmount = Number.parseFloat(String(customEstimateAmount || '').replace(',', '.'));
     const customHours = Number.parseFloat(String(customEstimateHours || '').replace(',', '.'));
     const customPriceCheck = getEstimatePriceCheck(estimatePickerMode, customEstimateName, customAmount);
@@ -1611,8 +1766,10 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
         estimateRemovedItems,
         estimateSentAt: workflow.estimateSentAt || 'Sent just now',
         estimate: {
-          labor: estimate.labor,
-          parts: estimate.parts,
+          labor: estimate.laborSubtotal,
+          parts: estimate.partsSubtotal,
+          laborItems: estimate.labor,
+          partsItems: estimate.parts,
           optionalLabor: estimate.optionalLabor,
           optionalParts: estimate.optionalParts,
           fees: estimate.fees,
@@ -1630,16 +1787,14 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
     return (
       <View style={styles.requestDetailShell}>
         <View style={styles.requestDetailHeader}>
-          <TouchableOpacity onPress={() => { setEstimateOpen(false); setDiagnosisOpen(true); onWorkflowChange?.({ stage: 'diagnosis' }); }} activeOpacity={0.8} style={styles.requestHeaderIconBtn}>
-            <Ionicons name="chevron-back" size={24} color="#17191D" />
+          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={styles.requestHeaderIconBtn}>
+            <Ionicons name="close" size={24} color="#17191D" />
           </TouchableOpacity>
           <View style={styles.jobPopupHeaderTextWrap}>
             <Text style={styles.jobPopupHeaderTitle}>Job #{job.number}</Text>
             <Text style={styles.jobPopupAcceptedText}>{acceptedLabel}</Text>
           </View>
-          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={[styles.requestHeaderIconBtn, { alignItems: 'flex-end' }]}>
-            <Ionicons name="close" size={24} color="#17191D" />
-          </TouchableOpacity>
+          <View style={styles.requestHeaderIconBtn} />
         </View>
 
         <ScrollView style={[styles.container, styles.requestDetailScroll]} contentContainerStyle={styles.estimateContent} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
@@ -1827,16 +1982,24 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
               </View>
 
               <ScrollView style={styles.estimatePickerList} showsVerticalScrollIndicator={false}>
-                {filteredEstimateCatalog.map(item => (
-                  <TouchableOpacity key={`${item.type}-${item.label}`} style={styles.estimatePickerRow} activeOpacity={0.84} onPress={() => addEstimateItem(item)}>
-                    <View style={styles.estimatePickerRowInfo}>
-                      <Text style={styles.estimatePickerRowTitle}>{item.label}</Text>
-                      <Text style={styles.estimatePickerRowMeta}>{estimateItemScope === 'optional' ? 'Recommended - ' : 'Required - '}{item.type === 'labor' ? `${item.hours || '1.0 hr'} labor` : item.category || 'Part'}</Text>
-                    </View>
-                    <Text style={styles.estimatePickerPrice}>{formatCurrency(item.amount)}</Text>
-                    <Ionicons name="add-circle-outline" size={21} color="#16A34A" />
-                  </TouchableOpacity>
-                ))}
+                {filteredEstimateCatalog.map(item => {
+                  const addedItem = findAddedCatalogItem(item);
+                  return (
+                    <TouchableOpacity
+                      key={`${item.type}-${item.label}`}
+                      style={styles.estimatePickerRow}
+                      activeOpacity={0.84}
+                      onPress={() => (addedItem ? removeEstimateItem(addedItem) : addEstimateItem(item))}
+                    >
+                      <View style={styles.estimatePickerRowInfo}>
+                        <Text style={styles.estimatePickerRowTitle}>{item.label}</Text>
+                        <Text style={styles.estimatePickerRowMeta}>{estimateItemScope === 'optional' ? 'Recommended - ' : 'Required - '}{item.type === 'labor' ? `${item.hours || '1.0 hr'} labor` : item.category || 'Part'}</Text>
+                      </View>
+                      <Text style={styles.estimatePickerPrice}>{formatCurrency(item.amount)}</Text>
+                      <Ionicons name={addedItem ? 'close-circle' : 'add-circle-outline'} size={21} color={addedItem ? '#F04416' : '#16A34A'} />
+                    </TouchableOpacity>
+                  );
+                })}
                 {!filteredEstimateCatalog.length && (
                   <View style={styles.estimatePickerEmpty}>
                     <Text style={styles.requestEmptyText}>No items found</Text>
@@ -1860,14 +2023,14 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
     return (
       <View style={styles.requestDetailShell}>
         <View style={styles.requestDetailHeader}>
-          <View style={styles.requestHeaderIconBtn} />
+          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={styles.requestHeaderIconBtn}>
+            <Ionicons name="close" size={22} color="#17191D" />
+          </TouchableOpacity>
           <View style={styles.jobPopupHeaderTextWrap}>
             <Text style={styles.jobPopupHeaderTitle}>Job #{job.number}</Text>
             <Text style={styles.jobPopupAcceptedText}>{acceptedLabel}</Text>
           </View>
-          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={[styles.requestHeaderIconBtn, { alignItems: 'flex-end' }]}>
-            <Ionicons name="close" size={22} color="#17191D" />
-          </TouchableOpacity>
+          <View style={styles.requestHeaderIconBtn} />
         </View>
         <ScrollView style={styles.requestDetailScroll} contentContainerStyle={styles.requestDetailContent} showsVerticalScrollIndicator={false}>
           <View style={styles.declinedNoticeCard}>
@@ -1939,16 +2102,14 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
     return (
       <View style={styles.requestDetailShell}>
         <View style={styles.requestDetailHeader}>
-          <TouchableOpacity onPress={() => { setApprovalOpen(false); setEstimateOpen(true); onWorkflowChange?.({ stage: 'estimate' }); }} activeOpacity={0.8} style={styles.requestHeaderIconBtn}>
-            <Ionicons name="chevron-back" size={24} color="#17191D" />
+          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={styles.requestHeaderIconBtn}>
+            <Ionicons name="close" size={24} color="#17191D" />
           </TouchableOpacity>
           <View style={styles.jobPopupHeaderTextWrap}>
             <Text style={styles.jobPopupHeaderTitle}>Job #{job.number}</Text>
             <Text style={styles.jobPopupAcceptedText}>{acceptedLabel}</Text>
           </View>
-          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={[styles.requestHeaderIconBtn, { alignItems: 'flex-end' }]}>
-            <Ionicons name="close" size={24} color="#17191D" />
-          </TouchableOpacity>
+          <View style={styles.requestHeaderIconBtn} />
         </View>
 
         <ScrollView style={[styles.container, styles.requestDetailScroll]} contentContainerStyle={styles.approvalContent} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
@@ -2016,8 +2177,22 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
   if (workOpen) {
     const workingIndex = Math.max(0, JOB_STEPS.findIndex(step => step.key === 'inspection'));
     const estimate = getDemoEstimate(diagnosisAnswers, batteryVoltage, estimateItems, estimateRemovedItems, job);
-    const approveOptional = workflow.approveOptional ?? false;
-    const originalTotal = workflow.approvedTotal ?? (approveOptional ? estimate.totalIfApproved : estimate.total);
+    // job.approveOptional/approvedTotal are restored from orderContext in normalizeOrderToJob
+    // and are reliable regardless of whether this screen's approvalOpen polling ever ran.
+    // workflow.* is ephemeral local state — only trust it if the job-level value is missing.
+    const approveOptional = job.approveOptional ?? workflow.approveOptional ?? false;
+    const originalTotal = job.approvedTotal ?? workflow.approvedTotal ?? (approveOptional ? estimate.totalIfApproved : estimate.total);
+    // Prefer the persisted, actually-sent estimate for the "Full Estimate" preview over the
+    // locally recomputed one, which resets whenever diagnosisAnswers/estimateItems aren't restored.
+    const persistedEstimate = job.orderContext?.estimate || null;
+    const previewEstimate = persistedEstimate ? {
+      ...persistedEstimate,
+      labor: persistedEstimate.laborItems || [],
+      parts: persistedEstimate.partsItems || [],
+      fees: persistedEstimate.fees || [],
+      optionalLabor: persistedEstimate.optionalLabor || [],
+      optionalParts: persistedEstimate.optionalParts || [],
+    } : estimate;
     const approvedAdditionalTotal = sumAmounts(additionalApprovals.filter(item => item.status === 'approved'));
     const pendingAdditionalTotal = sumAmounts(additionalApprovals.filter(item => item.status === 'pending'));
     const saveAdditionalApprovals = (nextItems) => {
@@ -2062,16 +2237,6 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
       pulseTabChange();
       saveAdditionalApprovals(additionalApprovals.map(item => item.id === id ? { ...item, status } : item));
     };
-    const addWorkPhoto = () => {
-      pulseTabChange();
-      const nextPhotos = [...workPhotos, `Repair photo ${workPhotos.length + 1}`];
-      setWorkPhotos(nextPhotos);
-      onWorkflowChange?.({ stage: 'working', workPhotos: nextPhotos, workSummary, workCustomerNote, additionalApprovals });
-    };
-    const updateWorkSummary = (value) => {
-      setWorkSummary(value);
-      onWorkflowChange?.({ stage: 'working', workSummary: value, workCustomerNote, workPhotos, additionalApprovals });
-    };
     const updateWorkCustomerNote = (value) => {
       setWorkCustomerNote(value);
       onWorkflowChange?.({ stage: 'working', workCustomerNote: value, workSummary, workPhotos, additionalApprovals });
@@ -2085,16 +2250,21 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
     return (
       <View style={styles.requestDetailShell}>
         <View style={styles.requestDetailHeader}>
-          <TouchableOpacity onPress={() => { setWorkOpen(false); setApprovalOpen(true); onWorkflowChange?.({ stage: 'approval' }); }} activeOpacity={0.8} style={styles.requestHeaderIconBtn}>
-            <Ionicons name="chevron-back" size={24} color="#17191D" />
+          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={styles.requestHeaderIconBtn}>
+            <Ionicons name="close" size={24} color="#17191D" />
           </TouchableOpacity>
           <View style={styles.jobPopupHeaderTextWrap}>
             <Text style={styles.jobPopupHeaderTitle}>Job #{job.number}</Text>
-            <Text style={styles.jobPopupAcceptedText}>{workflow.estimateApprovedAt || 'Estimate approved'}</Text>
+            <Text style={styles.jobPopupAcceptedText}>
+              {(() => {
+                const approvedAt = job.estimateApprovedAt ?? workflow.estimateApprovedAt;
+                return approvedAt && !isNaN(new Date(approvedAt).getTime())
+                  ? 'Approved ' + new Date(approvedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ', ' + new Date(approvedAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+                  : 'Estimate approved';
+              })()}
+            </Text>
           </View>
-          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={[styles.requestHeaderIconBtn, { alignItems: 'flex-end' }]}>
-            <Ionicons name="close" size={24} color="#17191D" />
-          </TouchableOpacity>
+          <View style={styles.requestHeaderIconBtn} />
         </View>
 
         <ScrollView style={[styles.container, styles.requestDetailScroll]} contentContainerStyle={styles.workContent} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
@@ -2123,7 +2293,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
           </TouchableOpacity>
 
           <View style={styles.additionalApprovalCard}>
-            <Text style={styles.approvalNextTitle}>Required change requests</Text>
+            <Text style={styles.changeRequestsSectionTitle}>Required change requests</Text>
             <Text style={styles.additionalApprovalSubtitle}>Use this only if the approved repair cannot be completed without an extra required item. Non-urgent recommendations should be saved for a future service.</Text>
             <View style={styles.additionalActionRow}>
               <TouchableOpacity style={styles.additionalRequiredBtn} activeOpacity={0.86} onPress={openRequiredChangeRequest}>
@@ -2144,29 +2314,23 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
                 return (
                   <View key={item.id} style={[styles.crCard, isApproved && styles.crCardApproved, isDeclined && styles.crCardDeclined]}>
                     <View style={styles.crHeader}>
-                      <View style={[styles.crIconWrap, isApproved && styles.crIconWrapApproved, isDeclined && styles.crIconWrapDeclined]}>
-                        <Ionicons
-                          name={isApproved ? 'checkmark-circle-outline' : isDeclined ? 'close-circle-outline' : 'construct-outline'}
-                          size={18}
-                          color={isApproved ? '#16A34A' : isDeclined ? '#DC2626' : '#F04416'}
-                        />
-                      </View>
-                      <View style={styles.crHeaderText}>
-                        <Text style={styles.crTitle}>Additional Work Required</Text>
-                        <Text style={styles.crSubtitle} numberOfLines={1}>{item.title}</Text>
-                      </View>
+                      <Text style={styles.crTitle}>Additional Work Required</Text>
                       <Text style={[styles.crAmount, isApproved && styles.crAmountApproved, isDeclined && styles.crAmountDeclined]}>
                         {formatCurrency(item.amount)}
                       </Text>
                     </View>
+                    <View style={styles.crFieldGroup}>
+                      <Text style={styles.crFieldLabel}>Work or part needed</Text>
+                      <Text style={styles.crSubtitle} numberOfLines={1}>{item.title}</Text>
+                    </View>
                     {item.description ? (
-                      <View>
+                      <View style={styles.crFieldGroup}>
                         <Text style={styles.crFieldLabel}>Why is it required?</Text>
                         <Text style={styles.crDesc}>{item.description}</Text>
                       </View>
                     ) : null}
                     {item.evidence ? (
-                      <View>
+                      <View style={styles.crFieldGroup}>
                         <Text style={styles.crFieldLabel}>Evidence</Text>
                         <View style={styles.crEvidenceRow}>
                           <Ionicons name="camera-outline" size={13} color="#8B9098" />
@@ -2202,27 +2366,6 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
                 <Text style={styles.repairLiveText}>In progress</Text>
               </View>
             </View>
-
-            <View style={styles.repairFieldBlock}>
-              <Text style={styles.repairFieldLabel}>Work Description</Text>
-              <Text style={styles.repairFieldText}>Replacing battery and testing system.</Text>
-            </View>
-
-            <View style={styles.repairFieldBlock}>
-              <Text style={styles.repairFieldLabel}>Photos</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.repairPhotosRow}>
-                {workPhotos.map((photo, index) => (
-                  <View key={`${photo}-${index}`} style={styles.repairPhotoTile}>
-                    <Ionicons name={index === 2 ? 'speedometer-outline' : 'battery-charging-outline'} size={22} color="#F04416" />
-                    <Text style={styles.repairPhotoText} numberOfLines={2}>{photo}</Text>
-                  </View>
-                ))}
-                <TouchableOpacity style={styles.repairAddPhotoTile} activeOpacity={0.84} onPress={addWorkPhoto}>
-                  <Ionicons name="add" size={22} color="#5E646D" />
-                  <Text style={styles.repairAddPhotoText}>Add More</Text>
-                </TouchableOpacity>
-              </ScrollView>
-            </View>
           </View>
 
           <View style={styles.workContactCard}>
@@ -2241,18 +2384,6 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
                 <Ionicons name="chatbubble-outline" size={18} color="#17191D" />
               </TouchableOpacity>
             </View>
-          </View>
-
-          <View style={styles.repairNoteCard}>
-            <Text style={styles.repairFieldLabel}>Work Summary</Text>
-            <TextInput
-              style={styles.repairSummaryInput}
-              value={workSummary}
-              onChangeText={updateWorkSummary}
-              multiline
-              placeholder="Describe completed work"
-              placeholderTextColor="#8B9098"
-            />
           </View>
 
           <View style={styles.repairNoteCard}>
@@ -2277,7 +2408,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
         <Modal visible={estimatePreviewOpen} transparent animationType="fade" onRequestClose={() => setEstimatePreviewOpen(false)}>
           <CustomerEstimatePreview
             job={job}
-            estimate={approveOptional ? estimate : { ...estimate, optionalLabor: [], optionalParts: [], optionalSubtotal: 0, optionalTax: 0, totalIfApproved: estimate.total }}
+            estimate={approveOptional ? previewEstimate : { ...previewEstimate, optionalLabor: [], optionalParts: [], optionalSubtotal: 0, optionalTax: 0, totalIfApproved: previewEstimate.total }}
             onClose={() => setEstimatePreviewOpen(false)}
           />
         </Modal>
@@ -2346,19 +2477,17 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
     );
   }
 
-  if (invoiceOpen) {
-    const completedIndex = Math.max(0, JOB_STEPS.findIndex(step => step.key === 'completed'));
+  if (completeOpen) {
+    const completeIndex = Math.max(0, JOB_STEPS.findIndex(step => step.key === 'completed'));
     const estimate = getDemoEstimate(diagnosisAnswers, batteryVoltage, estimateItems, estimateRemovedItems, job, { includeServiceCallFee: includeCallFee });
-    const approvedRequiredChanges = additionalApprovals.filter(item => item.status === 'approved');
-    const approvedAdditionalTotal = sumAmounts(approvedRequiredChanges);
-    const invoiceTotal = estimate.total + approvedAdditionalTotal;
-    const invoiceTax = Math.round((estimate.tax + approvedAdditionalTotal * 0.0675) * 100) / 100;
-    const invoiceSubtotal = estimate.subtotal + approvedAdditionalTotal - estimate.tax;
-    const invoiceNumber = `INV-${job.number || '00000'}`;
-    const invoiceDate = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-    const paymentMethod = job.payment?.method ? `${job.payment.method} ••••${job.payment.last4 || '****'}` : 'Card on file';
+    const pendingRequiredChanges = additionalApprovals.filter(item => item.status === 'pending');
+    const canSubmitCompletion = pendingRequiredChanges.length === 0;
+    const {
+      invoiceEstimate, invoiceNumber, paymentMethod, invoiceTax, invoiceSubtotal, finalTotal, approvedRequiredChanges,
+    } = getInvoiceData(job, workflow, additionalApprovals, estimate);
 
-    const collectPayment = async () => {
+    const submitCompletion = async () => {
+      if (!canSubmitCompletion) return;
       pulseTabChange();
       const startedAt = job?.startedAt ? new Date(job.startedAt) : null;
       const durationMins = startedAt ? Math.round((Date.now() - startedAt.getTime()) / 60000) : null;
@@ -2387,185 +2516,14 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
     return (
       <View style={styles.requestDetailShell}>
         <View style={styles.requestDetailHeader}>
-          <TouchableOpacity onPress={() => { setInvoiceOpen(false); setCompleteOpen(true); onWorkflowChange?.({ stage: 'complete_review' }); }} activeOpacity={0.8} style={styles.requestHeaderIconBtn}>
-            <Ionicons name="chevron-back" size={24} color="#17191D" />
-          </TouchableOpacity>
-          <View style={styles.jobPopupHeaderTextWrap}>
-            <Text style={styles.jobPopupHeaderTitle}>Job #{job.number}</Text>
-            <Text style={styles.jobPopupAcceptedText}>{invoiceNumber}</Text>
-          </View>
-          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={[styles.requestHeaderIconBtn, { alignItems: 'flex-end' }]}>
+          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={styles.requestHeaderIconBtn}>
             <Ionicons name="close" size={24} color="#17191D" />
-          </TouchableOpacity>
-        </View>
-
-        <ScrollView style={[styles.container, styles.requestDetailScroll]} contentContainerStyle={styles.completeContent} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
-          <View style={styles.jobProgressCard}>
-            <JobStepper steps={JOB_STEPS} currentIndex={completedIndex} />
-          </View>
-
-          {/* Invoice header */}
-          <View style={styles.invoiceHeaderCard}>
-            <View style={styles.invoiceHeaderTop}>
-              <View style={styles.invoiceIconWrap}>
-                <Ionicons name="document-text-outline" size={20} color="#7C3AED" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.invoiceTitle}>Invoice</Text>
-                <Text style={styles.invoiceMeta}>{invoiceNumber} · {invoiceDate}</Text>
-              </View>
-              <View style={styles.invoiceStatusBadge}>
-                <Text style={styles.invoiceStatusText}>Ready</Text>
-              </View>
-            </View>
-          </View>
-
-          {/* From / To */}
-          <View style={styles.invoicePartyCard}>
-            <View style={styles.invoicePartyRow}>
-              <Text style={styles.invoicePartyLabel}>FROM</Text>
-              <Text style={styles.invoicePartyName}>Auterio Provider</Text>
-              <Text style={styles.invoicePartySub}>+1 (555) 123-4567</Text>
-            </View>
-            <View style={styles.invoiceDivider} />
-            <View style={styles.invoicePartyRow}>
-              <Text style={styles.invoicePartyLabel}>TO</Text>
-              <Text style={styles.invoicePartyName}>{job.customer?.name || 'Customer'}</Text>
-              <Text style={styles.invoicePartySub}>{job.vehicle?.make} {job.vehicle?.model} {job.vehicle?.year}</Text>
-              {!!vin && <Text style={styles.invoicePartySub}>VIN: {vin}</Text>}
-            </View>
-          </View>
-
-          {/* Labor */}
-          {estimate.labor.length > 0 && (
-            <View style={styles.invoiceSection}>
-              <Text style={styles.invoiceSectionLabel}>LABOR</Text>
-              {estimate.labor.map((item, i) => (
-                <View key={item.id || i} style={[styles.invoiceLineRow, i > 0 && styles.invoiceLineRowBorder]}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.invoiceLineName}>{item.label}</Text>
-                    {!!item.hours && <Text style={styles.invoiceLineSub}>{item.hours}</Text>}
-                  </View>
-                  <Text style={styles.invoiceLineAmount}>{formatCurrency(item.amount)}</Text>
-                </View>
-              ))}
-            </View>
-          )}
-
-          {/* Parts */}
-          {estimate.parts.length > 0 && (
-            <View style={styles.invoiceSection}>
-              <Text style={styles.invoiceSectionLabel}>PARTS & MATERIALS</Text>
-              {estimate.parts.map((item, i) => (
-                <View key={item.id || i} style={[styles.invoiceLineRow, i > 0 && styles.invoiceLineRowBorder]}>
-                  <Text style={[styles.invoiceLineName, { flex: 1 }]}>{item.label}</Text>
-                  <Text style={styles.invoiceLineAmount}>{formatCurrency(item.amount)}</Text>
-                </View>
-              ))}
-            </View>
-          )}
-
-          {/* Fees */}
-          {estimate.fees.length > 0 && (
-            <View style={styles.invoiceSection}>
-              <Text style={styles.invoiceSectionLabel}>FEES</Text>
-              {estimate.fees.map((item, i) => (
-                <View key={i} style={[styles.invoiceLineRow, i > 0 && styles.invoiceLineRowBorder]}>
-                  <Text style={[styles.invoiceLineName, { flex: 1 }]}>{item.label}</Text>
-                  <Text style={styles.invoiceLineAmount}>{formatCurrency(item.amount)}</Text>
-                </View>
-              ))}
-            </View>
-          )}
-
-          {/* Change requests */}
-          {approvedRequiredChanges.length > 0 && (
-            <View style={styles.invoiceSection}>
-              <Text style={styles.invoiceSectionLabel}>ADDITIONAL WORK</Text>
-              {approvedRequiredChanges.map((item, i) => (
-                <View key={i} style={[styles.invoiceLineRow, i > 0 && styles.invoiceLineRowBorder]}>
-                  <Text style={[styles.invoiceLineName, { flex: 1 }]}>{item.name || item.label}</Text>
-                  <Text style={styles.invoiceLineAmount}>{formatCurrency(item.amount)}</Text>
-                </View>
-              ))}
-            </View>
-          )}
-
-          {/* Totals */}
-          <View style={styles.invoiceTotalsCard}>
-            <View style={styles.invoiceTotalRow}>
-              <Text style={styles.invoiceTotalLabel}>Subtotal</Text>
-              <Text style={styles.invoiceTotalValue}>{formatCurrency(invoiceSubtotal)}</Text>
-            </View>
-            <View style={[styles.invoiceTotalRow, styles.invoiceLineRowBorder]}>
-              <Text style={styles.invoiceTotalLabel}>Tax (6.75%)</Text>
-              <Text style={styles.invoiceTotalValue}>{formatCurrency(invoiceTax)}</Text>
-            </View>
-            <View style={[styles.invoiceTotalRow, styles.invoiceLineRowBorder]}>
-              <Text style={styles.invoiceTotalLabelBold}>Total</Text>
-              <Text style={styles.invoiceTotalValueBold}>{formatCurrency(invoiceTotal)}</Text>
-            </View>
-          </View>
-
-          {/* Payment method */}
-          <View style={styles.invoicePaymentRow}>
-            <Ionicons name="card-outline" size={16} color="#6B7280" />
-            <Text style={styles.invoicePaymentText}>Payment method: <Text style={{ color: '#17191D', fontWeight: '700' }}>{paymentMethod}</Text></Text>
-          </View>
-
-          {/* Collect Payment button */}
-          <TouchableOpacity style={styles.collectPaymentBtn} activeOpacity={0.86} onPress={collectPayment}>
-            <Ionicons name="checkmark-circle-outline" size={20} color="#FFFFFF" />
-            <Text style={styles.collectPaymentText}>Collect Payment · {formatCurrency(invoiceTotal)}</Text>
-          </TouchableOpacity>
-
-          {/* Warranty note */}
-          <View style={styles.invoiceWarrantyRow}>
-            <Ionicons name="shield-checkmark-outline" size={14} color="#16A34A" />
-            <Text style={styles.invoiceWarrantyText}>90-day / 4,000-mile warranty on parts and labor</Text>
-          </View>
-        </ScrollView>
-      </View>
-    );
-  }
-
-  if (completeOpen) {
-    const completeIndex = Math.max(0, JOB_STEPS.findIndex(step => step.key === 'completed'));
-    const estimate = getDemoEstimate(diagnosisAnswers, batteryVoltage, estimateItems, estimateRemovedItems, job);
-    const originalTotal = estimate.optionalSubtotal > 0 ? estimate.totalIfApproved : estimate.total;
-    const approvedRequiredChanges = additionalApprovals.filter(item => item.status === 'approved');
-    const pendingRequiredChanges = additionalApprovals.filter(item => item.status === 'pending');
-    const approvedAdditionalTotal = sumAmounts(approvedRequiredChanges);
-    const finalTotal = originalTotal + approvedAdditionalTotal;
-    const hasFinalPhotos = workPhotos.length > 0;
-    const hasSummary = workSummary.trim().length > 0;
-    const canSubmitCompletion = hasFinalPhotos && hasSummary && pendingRequiredChanges.length === 0;
-    const submitCompletion = () => {
-      if (!canSubmitCompletion) return;
-      pulseTabChange();
-      onWorkflowChange?.({
-        stage: 'invoice',
-        workPhotos,
-        workSummary,
-        workCustomerNote,
-        additionalApprovals,
-      });
-      setCompleteOpen(false);
-      setInvoiceOpen(true);
-    };
-    return (
-      <View style={styles.requestDetailShell}>
-        <View style={styles.requestDetailHeader}>
-          <TouchableOpacity onPress={() => { setCompleteOpen(false); setWorkOpen(true); onWorkflowChange?.({ stage: 'working' }); }} activeOpacity={0.8} style={styles.requestHeaderIconBtn}>
-            <Ionicons name="chevron-back" size={24} color="#17191D" />
           </TouchableOpacity>
           <View style={styles.jobPopupHeaderTextWrap}>
             <Text style={styles.jobPopupHeaderTitle}>Job #{job.number}</Text>
             <Text style={styles.jobPopupAcceptedText}>Final review</Text>
           </View>
-          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={[styles.requestHeaderIconBtn, { alignItems: 'flex-end' }]}>
-            <Ionicons name="close" size={24} color="#17191D" />
-          </TouchableOpacity>
+          <View style={styles.requestHeaderIconBtn} />
         </View>
 
         <ScrollView style={[styles.container, styles.requestDetailScroll]} contentContainerStyle={styles.completeContent} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
@@ -2584,15 +2542,20 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
           </View>
 
           <View style={styles.completeChecklistCard}>
-            <Text style={styles.approvalNextTitle}>Completion checklist</Text>
-            <CompletionCheckRow done={hasFinalPhotos} title="Final photos added" detail={`${workPhotos.length} photo${workPhotos.length === 1 ? '' : 's'} attached`} />
-            <CompletionCheckRow done={hasSummary} title="Work summary completed" detail={hasSummary ? 'Ready for customer review' : 'Add a summary before completing'} />
+            <Text style={styles.completeChecklistTitle}>Completion checklist</Text>
             <CompletionCheckRow done={!pendingRequiredChanges.length} title="No pending approvals" detail={pendingRequiredChanges.length ? 'Resolve pending required changes first' : 'All change requests resolved'} />
           </View>
 
           <View style={styles.repairNoteCard}>
-            <Text style={styles.repairFieldLabel}>Final Work Summary</Text>
-            <Text style={styles.completeSummaryText}>{workSummary}</Text>
+            <Text style={styles.repairFieldLabel}>Work Summary (Optional)</Text>
+            <TextInput
+              style={styles.repairSummaryInput}
+              value={workSummary}
+              onChangeText={updateWorkSummary}
+              multiline
+              placeholder="Describe completed work"
+              placeholderTextColor="#8B9098"
+            />
             {!!workCustomerNote.trim() && (
               <>
                 <View style={styles.customerEstimateDivider} />
@@ -2603,7 +2566,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
           </View>
 
           <View style={styles.repairNoteCard}>
-            <Text style={styles.repairFieldLabel}>Final Photos</Text>
+            <Text style={styles.repairFieldLabel}>Photos (Optional)</Text>
             <View style={styles.completePhotosGrid}>
               {workPhotos.map((photo, index) => (
                 <View key={`${photo}-complete-${index}`} style={styles.completePhotoTile}>
@@ -2611,28 +2574,56 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
                   <Text style={styles.repairPhotoText} numberOfLines={2}>{photo}</Text>
                 </View>
               ))}
+              <TouchableOpacity style={styles.completePhotoTile} activeOpacity={0.84} onPress={addWorkPhoto}>
+                <Ionicons name="add" size={20} color="#5E646D" />
+                <Text style={styles.repairPhotoText}>Add Photo</Text>
+              </TouchableOpacity>
             </View>
           </View>
 
-          <View style={styles.workSummaryCard}>
-            <EstimateLine label="Approved estimate" amount={originalTotal} strong />
-            <EstimateLine label="Approved required changes" amount={approvedAdditionalTotal} />
-            <EstimateLine label="Final total" amount={finalTotal} total />
-          </View>
+          {/* Compact invoice summary — tap to review the exact invoice the customer sees */}
+          <TouchableOpacity style={styles.approvedEstimateCard} activeOpacity={0.84} onPress={() => setCompleteInvoicePreviewOpen(true)}>
+            <View style={styles.approvedEstimateLeft}>
+              <View style={[styles.approvedEstimateIconWrap, { backgroundColor: 'rgba(124,58,237,0.12)' }]}>
+                <Ionicons name="document-text-outline" size={20} color="#7C3AED" />
+              </View>
+              <View>
+                <Text style={styles.approvedEstimateTitle}>Invoice · {invoiceNumber}</Text>
+                <Text style={styles.approvedEstimateAmount}>{formatCurrency(finalTotal)}</Text>
+              </View>
+            </View>
+            <View style={styles.approvedEstimateRight}>
+              <Text style={{ color: '#8B9098', fontSize: 11, fontWeight: '700' }}>Review</Text>
+              <Ionicons name="chevron-forward" size={16} color="#8B9098" />
+            </View>
+          </TouchableOpacity>
 
           {!canSubmitCompletion && (
             <View style={styles.completeBlockedCard}>
               <Ionicons name="alert-circle-outline" size={18} color="#F04416" />
-              <Text style={styles.completeBlockedText}>
-                {pendingRequiredChanges.length ? 'Resolve pending customer approvals before completing this job.' : 'Add final photos and work summary before completing this job.'}
-              </Text>
+              <Text style={styles.completeBlockedText}>Resolve pending customer approvals before completing this job.</Text>
             </View>
           )}
 
           <TouchableOpacity style={[styles.completeSubmitBtn, !canSubmitCompletion && styles.startInspectionBtnDisabled]} activeOpacity={canSubmitCompletion ? 0.86 : 1} disabled={!canSubmitCompletion} onPress={submitCompletion}>
-            <Text style={[styles.completeSubmitText, !canSubmitCompletion && styles.startInspectionTextDisabled]}>Submit Completion</Text>
+            <Text style={[styles.completeSubmitText, !canSubmitCompletion && styles.startInspectionTextDisabled]}>Complete & Collect Payment · {formatCurrency(finalTotal)}</Text>
           </TouchableOpacity>
         </ScrollView>
+
+        {/* Full invoice preview — exactly what the customer will see, read-only */}
+        <InvoicePreviewModal
+          visible={completeInvoicePreviewOpen}
+          onClose={() => setCompleteInvoicePreviewOpen(false)}
+          job={job}
+          vin={vin}
+          invoiceEstimate={invoiceEstimate}
+          invoiceNumber={invoiceNumber}
+          invoiceSubtotal={invoiceSubtotal}
+          invoiceTax={invoiceTax}
+          finalTotal={finalTotal}
+          paymentMethod={paymentMethod}
+          approvedRequiredChanges={approvedRequiredChanges}
+        />
       </View>
     );
   }
@@ -2658,16 +2649,14 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
     return (
       <View style={styles.requestDetailShell}>
         <View style={styles.requestDetailHeader}>
-          <TouchableOpacity onPress={() => { setDiagnosisOpen(false); setArrivedOpen(true); onWorkflowChange?.({ stage: 'arrived' }); }} activeOpacity={0.8} style={styles.requestHeaderIconBtn}>
-            <Ionicons name="chevron-back" size={24} color="#17191D" />
+          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={styles.requestHeaderIconBtn}>
+            <Ionicons name="close" size={24} color="#17191D" />
           </TouchableOpacity>
           <View style={styles.jobPopupHeaderTextWrap}>
             <Text style={styles.jobPopupHeaderTitle}>Job #{job.number}</Text>
             <Text style={styles.jobPopupAcceptedText}>{acceptedLabel}</Text>
           </View>
-          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={[styles.requestHeaderIconBtn, { alignItems: 'flex-end' }]}>
-            <Ionicons name="close" size={24} color="#17191D" />
-          </TouchableOpacity>
+          <View style={styles.requestHeaderIconBtn} />
         </View>
 
         <ScrollView style={[styles.container, styles.requestDetailScroll]} contentContainerStyle={styles.diagnosisContent} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
@@ -2802,16 +2791,14 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
     return (
       <View style={styles.requestDetailShell}>
         <View style={styles.requestDetailHeader}>
-          <TouchableOpacity onPress={() => { setArrivedOpen(false); setRouteOpen(true); onWorkflowChange?.({ stage: 'route' }); }} activeOpacity={0.8} style={styles.requestHeaderIconBtn}>
-            <Ionicons name="chevron-back" size={24} color="#17191D" />
+          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={styles.requestHeaderIconBtn}>
+            <Ionicons name="close" size={24} color="#17191D" />
           </TouchableOpacity>
           <View style={styles.jobPopupHeaderTextWrap}>
             <Text style={styles.jobPopupHeaderTitle}>Job #{job.number}</Text>
             <Text style={styles.jobPopupAcceptedText}>{acceptedLabel}</Text>
           </View>
-          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={[styles.requestHeaderIconBtn, { alignItems: 'flex-end' }]}>
-            <Ionicons name="close" size={24} color="#17191D" />
-          </TouchableOpacity>
+          <View style={styles.requestHeaderIconBtn} />
         </View>
 
         <ScrollView style={[styles.container, styles.requestDetailScroll]} contentContainerStyle={styles.arrivedContent} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
@@ -2967,16 +2954,14 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
     return (
       <View style={styles.requestDetailShell}>
         <View style={styles.requestDetailHeader}>
-          <TouchableOpacity onPress={() => { setRouteOpen(false); onWorkflowChange?.({ stage: 'details' }); }} activeOpacity={0.8} style={styles.requestHeaderIconBtn}>
-            <Ionicons name="chevron-back" size={24} color="#17191D" />
+          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={styles.requestHeaderIconBtn}>
+            <Ionicons name="close" size={24} color="#17191D" />
           </TouchableOpacity>
           <View style={styles.jobPopupHeaderTextWrap}>
             <Text style={styles.jobPopupHeaderTitle}>Job #{job.number}</Text>
             <Text style={styles.jobPopupAcceptedText}>{acceptedLabel}</Text>
           </View>
-          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={[styles.requestHeaderIconBtn, { alignItems: 'flex-end' }]}>
-            <Ionicons name="close" size={24} color="#17191D" />
-          </TouchableOpacity>
+          <View style={styles.requestHeaderIconBtn} />
         </View>
 
         <ScrollView style={[styles.container, styles.requestDetailScroll]} contentContainerStyle={styles.jobRouteContent} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
@@ -3080,6 +3065,514 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
     );
   }
 
+  const cancelJob = () => {
+    Alert.alert(
+      'Cancel Order?',
+      'The customer will be notified that this job was cancelled.',
+      [
+        { text: 'Keep Job', style: 'cancel' },
+        { text: 'Cancel Order', style: 'destructive', onPress: () => onCancel?.(job) },
+      ]
+    );
+  };
+  const {
+    invoiceEstimate: completedInvoiceEstimate, invoiceNumber: completedInvoiceNumber, paymentMethod: completedPaymentMethod,
+    invoiceTax: completedInvoiceTax, invoiceSubtotal: completedInvoiceSubtotal, finalTotal: completedFinalTotal,
+    approvedRequiredChanges: completedApprovedRequiredChanges,
+  } = getInvoiceData(job, workflow, additionalApprovals);
+
+  if (isCompleted) {
+    const startedDate = job.startedAt && !isNaN(new Date(job.startedAt).getTime()) ? new Date(job.startedAt) : null;
+    const completedDate = job.completedAt && job.completedAt !== 'Completed just now' && !isNaN(new Date(job.completedAt).getTime())
+      ? new Date(job.completedAt) : null;
+    const timeLabel = (d) => d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    const dateLabel = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+    const durationLabel = job.orderContext?.serviceDetails?.duration || workflow?.workDuration || jobDuration;
+    const completedPhotos = job.orderContext?.serviceDetails?.photos || [];
+    const warranty = job.orderContext?.serviceDetails?.warranty;
+    const servicesPerformed = completedInvoiceEstimate.labor.map(item => item.label);
+    const shareInvoice = async () => {
+      setJobActionsOpen(false);
+      try {
+        await Share.share({
+          message: `Invoice ${completedInvoiceNumber} · ${job.service?.issueName || job.service?.type || 'Service'} · ${formatCurrency(completedFinalTotal)}`,
+        });
+      } catch { }
+    };
+
+    return (
+      <View style={styles.detailScreen}>
+        {/* Nav bar */}
+        <View style={styles.detailNavBar}>
+          <TouchableOpacity style={styles.detailBackBtn} onPress={onBack} activeOpacity={0.8}>
+            <Ionicons name="chevron-back" size={22} color="#17191D" />
+          </TouchableOpacity>
+          <Text style={styles.detailNavTitle}>Order Details</Text>
+          <TouchableOpacity style={styles.detailBackBtn} onPress={() => setJobActionsOpen(true)}>
+            <Ionicons name="ellipsis-horizontal" size={20} color="#17191D" />
+          </TouchableOpacity>
+        </View>
+
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.detailContent} refreshControl={refreshControl}>
+
+          {/* Completed badge + title */}
+          <View style={styles.detailCompletedBadge}>
+            <Ionicons name="checkmark-circle" size={15} color="#16A34A" />
+            <Text style={styles.detailCompletedBadgeText}>Completed</Text>
+          </View>
+          <Text style={styles.detailTitle}>{job.service?.issueName || job.service?.type || 'Service'}</Text>
+          <Text style={styles.detailSubtitle}>{completedDate ? dateLabel(completedDate) : 'Recently completed'}{'  ·  Order #'}{job.number || '00000'}</Text>
+
+          {/* Customer card */}
+          <View style={styles.detailProviderCard}>
+            <View style={styles.detailProviderMain}>
+              <View style={styles.detailProviderLogo}>
+                <Text style={styles.detailProviderInitials}>{job.customer?.initials || 'CU'}</Text>
+              </View>
+              <View style={{ flex: 1 }}>
+                <View style={styles.detailProviderNameRow}>
+                  <Text style={styles.detailProviderName}>{job.customer?.name || 'Customer'}</Text>
+                  <View style={styles.detailProviderReturningPill}>
+                    <Ionicons name="bag-outline" size={11} color="#16A34A" />
+                    <Text style={styles.detailProviderReturningText}>Returning</Text>
+                  </View>
+                </View>
+                <View style={styles.detailProviderBadgeRow}>
+                  <View style={styles.detailProviderVerifiedPill}>
+                    <Ionicons name="shield-checkmark-outline" size={11} color="#2563EB" />
+                    <Text style={styles.detailProviderVerifiedText}>Verified</Text>
+                  </View>
+                  <Ionicons name="star" size={11} color="#FFC107" />
+                  <Text style={styles.detailProviderRatingValue}>4.9</Text>
+                </View>
+              </View>
+              <View style={styles.detailProviderActions}>
+                <TouchableOpacity style={styles.detailProviderBtn} onPress={openCustomerProfile}>
+                  <View style={styles.detailProviderBtnIcon}><Ionicons name="person-outline" size={17} color="#5E646D" /></View>
+                  <Text style={styles.detailProviderBtnText}>View Profile</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+
+          {/* Payment card */}
+          <View style={styles.detailPriceCard}>
+            <View style={styles.detailPriceTop}>
+              <Text style={styles.detailPriceLabel}>Total Paid</Text>
+              <View style={styles.detailPaidBadge}>
+                <Ionicons name="checkmark-circle" size={13} color="#16A34A" />
+                <Text style={styles.detailPaidText}>PAID</Text>
+              </View>
+            </View>
+            <Text style={styles.detailPriceValue}>{formatCurrency(completedFinalTotal)}</Text>
+            <View style={styles.detailPaymentRow}>
+              <View style={styles.detailPaymentLeft}>
+                <View style={styles.detailVisaBadge}><Text style={styles.detailVisaText}>VISA</Text></View>
+                <Text style={styles.detailPaymentMethod}>•••• 4821</Text>
+              </View>
+              <TouchableOpacity style={styles.detailInvoiceLink} onPress={() => setCompletedInvoicePreviewOpen(true)}>
+                <Ionicons name="document-text-outline" size={14} color="#FF6B00" />
+                <Text style={styles.detailInvoiceLinkText}>View Invoice</Text>
+                <Ionicons name="chevron-forward" size={13} color="#FF6B00" />
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* Vehicle + Location grid */}
+          <View style={styles.detailGrid}>
+            <View style={styles.detailGridCard}>
+              <View style={styles.detailGridHeader}>
+                <Ionicons name="car-outline" size={15} color="#5E646D" />
+                <Text style={styles.detailGridTitle}>Vehicle</Text>
+              </View>
+              <Text style={styles.detailGridMain}>{job.vehicle?.year} {job.vehicle?.make} {job.vehicle?.model}</Text>
+              <View style={styles.detailVinPill}>
+                <Text style={styles.detailVinPillText}>VIN {vin}</Text>
+              </View>
+            </View>
+            <View style={styles.detailGridCard}>
+              <View style={styles.detailGridHeader}>
+                <Ionicons name="location-outline" size={15} color="#5E646D" />
+                <Text style={styles.detailGridTitle}>Service Location</Text>
+              </View>
+              <Text style={styles.detailGridMain} numberOfLines={2}>{address}</Text>
+            </View>
+          </View>
+
+          {/* Service details link row */}
+          <TouchableOpacity style={styles.detailServiceLink} onPress={() => setCompletedServiceDetailsOpen(true)} activeOpacity={0.7}>
+            <Ionicons name="construct-outline" size={17} color="#5E646D" />
+            <Text style={styles.detailServiceLinkText}>Service Details</Text>
+            <Ionicons name="chevron-forward" size={17} color="#8B9098" style={{ marginLeft: 'auto' }} />
+          </TouchableOpacity>
+
+          {/* Warranty */}
+          {(() => {
+            if (!warranty || (!warranty.days && !warranty.miles)) return null;
+            const daysLabel = warranty.days === 365 ? '1 Year' : `${warranty.days} Days`;
+            const milesLabel = `${(warranty.miles || 0).toLocaleString()} Miles`;
+            return (
+              <TouchableOpacity style={styles.detailWarrantyCard} activeOpacity={0.8}>
+                <Ionicons name="shield-checkmark-outline" size={22} color="#16A34A" />
+                <Text style={styles.detailWarrantyLabel}>Warranty</Text>
+                <View style={styles.detailWarrantyRange}>
+                  <Text style={styles.detailWarrantyDays}>{daysLabel}</Text>
+                  <Text style={styles.detailWarrantyOr}>or</Text>
+                  <Text style={styles.detailWarrantyMiles}>{milesLabel}</Text>
+                </View>
+                <View style={{ flex: 1 }} />
+                <Text style={styles.detailWarrantyCovered}>What's Covered</Text>
+                <Ionicons name="chevron-forward" size={14} color="#FF6B00" />
+              </TouchableOpacity>
+            );
+          })()}
+
+          {/* Price breakdown */}
+          <View style={styles.detailBreakdownCard}>
+            <Text style={styles.detailBreakdownTitle}>Price Breakdown</Text>
+            <View style={styles.detailBreakdownRow}>
+              <Text style={styles.detailBreakdownLabel}>Service Call</Text>
+              <Text style={styles.detailBreakdownValue}>$45.00</Text>
+            </View>
+            <View style={styles.detailBreakdownRow}>
+              <Text style={styles.detailBreakdownLabel}>Labor</Text>
+              <Text style={styles.detailBreakdownValue}>$20.00</Text>
+            </View>
+            <View style={styles.detailBreakdownRow}>
+              <Text style={styles.detailBreakdownLabel}>Tax</Text>
+              <Text style={styles.detailBreakdownValue}>$0.00</Text>
+            </View>
+            <View style={styles.detailBreakdownDivider} />
+            <View style={styles.detailBreakdownRow}>
+              <Text style={styles.detailBreakdownTotal}>Total</Text>
+              <Text style={styles.detailBreakdownTotalValue}>{formatCurrency(completedFinalTotal)}</Text>
+            </View>
+          </View>
+
+        </ScrollView>
+
+        {/* Service detail overlay */}
+        <Modal visible={completedServiceDetailsOpen} animationType="slide" onRequestClose={() => setCompletedServiceDetailsOpen(false)}>
+          <View style={styles.detailScreen}>
+            <View style={styles.detailNavBar}>
+              <TouchableOpacity style={styles.detailBackBtn} onPress={() => setCompletedServiceDetailsOpen(false)} activeOpacity={0.8}>
+                <Ionicons name="chevron-back" size={22} color="#17191D" />
+              </TouchableOpacity>
+              <Text style={styles.detailNavTitle}>Service Details</Text>
+              <View style={{ width: 40 }} />
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.sdContent}>
+
+              {servicesPerformed.length > 0 && <>
+                <Text style={styles.sdSectionTitle}>Services Performed</Text>
+                <View style={styles.sdCard}>
+                  {servicesPerformed.map((s, i) => (
+                    <View key={i} style={[styles.sdRow, i > 0 && styles.sdRowBorder]}>
+                      <Ionicons name="checkmark-circle" size={15} color="#16A34A" />
+                      <Text style={styles.sdRowText}>{s}</Text>
+                    </View>
+                  ))}
+                </View>
+              </>}
+
+              <Text style={styles.sdSectionTitle}>Time</Text>
+              <View style={styles.sdCard}>
+                <View style={styles.sdRow}>
+                  <Ionicons name="time-outline" size={15} color="#8B9098" />
+                  <Text style={styles.sdRowLabel}>Service Duration</Text>
+                  <Text style={styles.sdRowValue}>{durationLabel || '—'}</Text>
+                </View>
+                <View style={[styles.sdRow, styles.sdRowBorder]}>
+                  <Ionicons name="calendar-outline" size={15} color="#8B9098" />
+                  <Text style={styles.sdRowLabel}>Date & Time</Text>
+                  <Text style={styles.sdRowValue}>
+                    {completedDate ? dateLabel(completedDate) : ''}{completedDate ? `  ·  ${timeLabel(completedDate)}` : ''}
+                  </Text>
+                </View>
+              </View>
+
+              {customerNote !== 'No note provided' && !!customerNote && <>
+                <Text style={styles.sdSectionTitle}>Provider Notes</Text>
+                <View style={styles.sdCard}>
+                  <Text style={styles.sdNotesText}>{customerNote}</Text>
+                </View>
+              </>}
+
+              {completedPhotos.length > 0 && <>
+                <Text style={styles.sdSectionTitle}>Photos ({completedPhotos.length})</Text>
+                <View style={styles.sdPhotosRow}>
+                  {completedPhotos.map((photo, i) => (
+                    <View key={i} style={styles.sdPhotoItem}>
+                      <View style={styles.sdPhotoPlaceholder}>
+                        <Ionicons name="image-outline" size={22} color="#8B9098" />
+                      </View>
+                      <Text style={styles.sdPhotoLabel} numberOfLines={1}>{typeof photo === 'string' ? photo : `Photo ${i + 1}`}</Text>
+                    </View>
+                  ))}
+                </View>
+              </>}
+
+              {!servicesPerformed.length && !completedPhotos.length && (customerNote === 'No note provided' || !customerNote) && (
+                <Text style={{ color: '#8B9098', fontSize: 13, textAlign: 'center', marginTop: 40 }}>No service details available</Text>
+              )}
+
+            </ScrollView>
+          </View>
+        </Modal>
+
+        {/* Invoice overlay */}
+        <Modal visible={completedInvoicePreviewOpen} animationType="slide" onRequestClose={() => setCompletedInvoicePreviewOpen(false)}>
+          <View style={styles.detailScreen}>
+            <View style={styles.detailNavBar}>
+              <TouchableOpacity style={styles.detailBackBtn} onPress={() => setCompletedInvoicePreviewOpen(false)} activeOpacity={0.8}>
+                <Ionicons name="chevron-back" size={22} color="#17191D" />
+              </TouchableOpacity>
+              <Text style={styles.detailNavTitle}>Invoice</Text>
+              <View style={{ width: 40 }} />
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
+
+              {/* Invoice header */}
+              <View style={styles.invHeaderCard}>
+                <View style={styles.invHeaderTop}>
+                  <View style={styles.invIconWrap}>
+                    <Ionicons name="document-text-outline" size={18} color="#7C3AED" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.invTitle}>Invoice</Text>
+                    <Text style={styles.invMeta}>{completedInvoiceNumber}  ·  {completedDate ? dateLabel(completedDate) : ''}</Text>
+                  </View>
+                  <View style={styles.invPaidBadge}>
+                    <Ionicons name="checkmark-circle" size={12} color="#16A34A" />
+                    <Text style={styles.invPaidText}>PAID</Text>
+                  </View>
+                </View>
+              </View>
+
+              {/* Parties */}
+              <View style={styles.invPartyCard}>
+                <View style={styles.invPartyRow}>
+                  <Text style={styles.invPartyLabel}>FROM</Text>
+                  <Text style={styles.invPartyName}>Auterio Provider</Text>
+                  <Text style={styles.invPartySub}>+1 (555) 123-4567</Text>
+                </View>
+                <View style={styles.invDivider} />
+                <View style={styles.invPartyRow}>
+                  <Text style={styles.invPartyLabel}>SERVICE</Text>
+                  <Text style={styles.invPartyName}>{job.service?.issueName || job.service?.type || 'Service'}</Text>
+                  <Text style={styles.invPartySub}>{address}</Text>
+                </View>
+              </View>
+
+              {/* Labor */}
+              {completedInvoiceEstimate.labor.length > 0 && (
+                <View style={styles.invSection}>
+                  <Text style={styles.invSectionLabel}>LABOR</Text>
+                  {completedInvoiceEstimate.labor.map((item, i) => (
+                    <View key={item.id || i} style={[styles.invLineRow, i > 0 && styles.invLineBorder]}>
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.invLineName}>{item.label}</Text>
+                        {!!item.hours && <Text style={styles.invLineSub}>{item.hours}</Text>}
+                      </View>
+                      <Text style={styles.invLineAmt}>{formatCurrency(item.amount)}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              {/* Parts */}
+              {completedInvoiceEstimate.parts.length > 0 && (
+                <View style={styles.invSection}>
+                  <Text style={styles.invSectionLabel}>PARTS & MATERIALS</Text>
+                  {completedInvoiceEstimate.parts.map((item, i) => (
+                    <View key={item.id || i} style={[styles.invLineRow, i > 0 && styles.invLineBorder]}>
+                      <Text style={[styles.invLineName, { flex: 1 }]}>{item.label}</Text>
+                      <Text style={styles.invLineAmt}>{formatCurrency(item.amount)}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              {/* Fees */}
+              {completedInvoiceEstimate.fees.length > 0 && (
+                <View style={styles.invSection}>
+                  <Text style={styles.invSectionLabel}>FEES</Text>
+                  {completedInvoiceEstimate.fees.map((item, i) => (
+                    <View key={i} style={[styles.invLineRow, i > 0 && styles.invLineBorder]}>
+                      <Text style={[styles.invLineName, { flex: 1 }]}>{item.label}</Text>
+                      <Text style={styles.invLineAmt}>{formatCurrency(item.amount)}</Text>
+                    </View>
+                  ))}
+                </View>
+              )}
+
+              {/* Totals */}
+              <View style={styles.invTotalsCard}>
+                <View style={styles.invTotalRow}>
+                  <Text style={styles.invTotalLabel}>Subtotal</Text>
+                  <Text style={styles.invTotalValue}>{formatCurrency(completedInvoiceSubtotal)}</Text>
+                </View>
+                <View style={[styles.invTotalRow, styles.invLineBorder]}>
+                  <Text style={styles.invTotalLabel}>Tax (6.75%)</Text>
+                  <Text style={styles.invTotalValue}>{formatCurrency(completedInvoiceTax)}</Text>
+                </View>
+                <View style={[styles.invTotalRow, styles.invLineBorder]}>
+                  <Text style={styles.invTotalBold}>Total</Text>
+                  <Text style={styles.invTotalBoldValue}>{formatCurrency(completedFinalTotal)}</Text>
+                </View>
+              </View>
+
+              {/* Payment + Warranty */}
+              <View style={styles.invFooterRow}>
+                <Ionicons name="card-outline" size={14} color="#8B9098" />
+                <Text style={styles.invFooterText}>Payment method: <Text style={{ color: '#17191D', fontWeight: '700' }}>Visa •••• 4821</Text></Text>
+              </View>
+              <View style={styles.invWarrantyRow}>
+                <Ionicons name="shield-checkmark-outline" size={14} color="#16A34A" />
+                <Text style={styles.invWarrantyText}>90-day / 4,000-mile warranty on parts and labor</Text>
+              </View>
+
+            </ScrollView>
+          </View>
+        </Modal>
+
+        {/* Customer Profile overlay */}
+        <Modal visible={customerProfileOpen} transparent animationType="none" onRequestClose={closeCustomerProfile} onShow={() => {
+          Animated.timing(cpPanX, { toValue: 0, duration: 260, useNativeDriver: true }).start();
+        }}>
+          <GestureHandlerRootView style={{ flex: 1 }}>
+            <PanGestureHandler
+              onGestureEvent={onCpGestureEvent}
+              onHandlerStateChange={onCpHandlerStateChange}
+              activeOffsetX={[-100000, 12]}
+              failOffsetY={[-14, 14]}
+            >
+              <Animated.View style={[styles.detailScreen, { transform: [{ translateX: cpPanX }] }]}>
+                <View style={styles.detailNavBar}>
+                  <TouchableOpacity style={styles.detailBackBtn} onPress={closeCustomerProfile} activeOpacity={0.8}>
+                    <Ionicons name="chevron-back" size={22} color="#17191D" />
+                  </TouchableOpacity>
+                  <Text style={styles.detailNavTitle}>Customer Profile</Text>
+                  <View style={{ width: 40 }} />
+                </View>
+
+                <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.cpContent}>
+              <View style={styles.cpAvatarWrap}>
+                <Text style={styles.cpAvatarText}>{job.customer?.initials || 'CU'}</Text>
+              </View>
+              <Text style={styles.cpName}>{job.customer?.name || 'Customer'}</Text>
+
+              <View style={styles.cpBadgeRow}>
+                <View style={styles.cpRatingPill}>
+                  <Ionicons name="star" size={15} color="#FFC107" />
+                  <Text style={styles.cpRatingText}>4.9</Text>
+                </View>
+                <View style={styles.cpVerifiedPill}>
+                  <Ionicons name="shield-checkmark-outline" size={13} color="#2563EB" />
+                  <Text style={styles.cpVerifiedText}>Verified</Text>
+                </View>
+                <View style={styles.cpReturningPill}>
+                  <Ionicons name="bag-outline" size={13} color="#16A34A" />
+                  <Text style={styles.cpReturningText}>Returning</Text>
+                </View>
+              </View>
+              <Text style={styles.cpJobsCount}>14 completed jobs</Text>
+
+              <View style={styles.cpStatsCard}>
+                <View style={styles.cpStatItem}>
+                  <Text style={styles.cpStatLabel}>Customer since</Text>
+                  <Text style={styles.cpStatValue}>2024</Text>
+                </View>
+                <View style={styles.cpStatDivider} />
+                <View style={styles.cpStatItem}>
+                  <Text style={styles.cpStatLabel}>Completed jobs</Text>
+                  <Text style={styles.cpStatValue}>14</Text>
+                </View>
+                <View style={styles.cpStatDivider} />
+                <View style={styles.cpStatItem}>
+                  <Text style={styles.cpStatLabel}>Canceled</Text>
+                  <Text style={styles.cpStatValue}>0</Text>
+                </View>
+                <View style={styles.cpStatDivider} />
+                <View style={styles.cpStatItem}>
+                  <Text style={styles.cpStatLabel}>Rating</Text>
+                  <View style={styles.cpStatRatingRow}>
+                    <Ionicons name="star" size={13} color="#FFC107" />
+                    <Text style={styles.cpStatValue}>4.9</Text>
+                  </View>
+                </View>
+              </View>
+
+              <View style={styles.cpActionsRow}>
+                <TouchableOpacity style={styles.cpActionBtn} activeOpacity={0.84} onPress={() => phone && Linking.openURL(`tel:${phone}`)}>
+                  <Ionicons name="call-outline" size={18} color="#16A34A" />
+                  <Text style={styles.cpActionText}>Call</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.cpActionBtn} activeOpacity={0.84} onPress={() => phone && Linking.openURL(`sms:${phone}`)}>
+                  <Ionicons name="chatbubble-ellipses-outline" size={18} color="#2563EB" />
+                  <Text style={styles.cpActionText}>Message</Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.cpListCard}>
+                <View style={styles.cpListRow}>
+                  <Ionicons name="clipboard-outline" size={18} color="#5E646D" />
+                  <Text style={styles.cpListLabel}>Previous jobs</Text>
+                  <Text style={styles.cpListValue}>14</Text>
+                  <Ionicons name="chevron-forward" size={16} color="#C4C9D1" />
+                </View>
+                <View style={[styles.cpListRow, styles.cpListRowBorder]}>
+                  <Ionicons name="car-outline" size={18} color="#5E646D" />
+                  <Text style={styles.cpListLabel}>Vehicles</Text>
+                  <Text style={styles.cpListValue}>2</Text>
+                  <Ionicons name="chevron-forward" size={16} color="#C4C9D1" />
+                </View>
+                <View style={[styles.cpListRow, styles.cpListRowBorder]}>
+                  <Ionicons name="star-outline" size={18} color="#5E646D" />
+                  <Text style={styles.cpListLabel}>Reviews</Text>
+                  <Text style={styles.cpListValue}>4.9 (23)</Text>
+                  <Ionicons name="chevron-forward" size={16} color="#C4C9D1" />
+                </View>
+                <View style={[styles.cpListRow, styles.cpListRowBorder]}>
+                  <Ionicons name="document-text-outline" size={18} color="#5E646D" />
+                  <Text style={styles.cpListLabel}>Notes</Text>
+                  <Text style={styles.cpListValue}>—</Text>
+                  <Ionicons name="chevron-forward" size={16} color="#C4C9D1" />
+                </View>
+              </View>
+
+              <Text style={styles.cpFooterNote}>Customer details are visible only{`\n`}for your completed jobs.</Text>
+                </ScrollView>
+              </Animated.View>
+            </PanGestureHandler>
+          </GestureHandlerRootView>
+        </Modal>
+
+        {/* Job actions — compact dropdown anchored under the ... button */}
+        <Modal visible={jobActionsOpen} transparent animationType="fade" onRequestClose={() => setJobActionsOpen(false)}>
+          <TouchableOpacity style={styles.jaBackdropFill} activeOpacity={1} onPress={() => setJobActionsOpen(false)}>
+            <View style={styles.jaMenu}>
+              <TouchableOpacity style={styles.jaMenuRow} activeOpacity={0.7} onPress={shareInvoice}>
+                <Ionicons name="arrow-up-outline" size={17} color="#7C3AED" />
+                <Text style={styles.jaMenuRowText}>Share invoice</Text>
+              </TouchableOpacity>
+              <View style={styles.jaMenuDivider} />
+              <TouchableOpacity style={styles.jaMenuRow} activeOpacity={0.7} onPress={() => setJobActionsOpen(false)}>
+                <Ionicons name="document-outline" size={17} color="#DC2626" />
+                <Text style={styles.jaMenuRowText}>Export PDF</Text>
+              </TouchableOpacity>
+              <View style={styles.jaMenuDivider} />
+              <TouchableOpacity style={styles.jaMenuRow} activeOpacity={0.7} onPress={() => setJobActionsOpen(false)}>
+                <Ionicons name="flag-outline" size={17} color="#DC2626" />
+                <Text style={styles.jaMenuRowText}>Report issue</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </Modal>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.requestDetailShell}>
       <View style={styles.requestDetailHeader}>
@@ -3155,7 +3648,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
                 </View>
               </View>
             )}
-            <TouchableOpacity style={[styles.completedSummaryRow, !!jobDuration && styles.completedSummaryRowBorder]} activeOpacity={0.84} onPress={() => { setInvoiceOpen(true); }}>
+            <TouchableOpacity style={[styles.completedSummaryRow, !!jobDuration && styles.completedSummaryRowBorder]} activeOpacity={0.84} onPress={() => { setCompletedInvoicePreviewOpen(true); }}>
               <View style={[styles.completedSummaryIcon, { backgroundColor: '#7C3AED18' }]}>
                 <Ionicons name="document-text-outline" size={18} color="#7C3AED" />
               </View>
@@ -3237,6 +3730,12 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
             <Ionicons name="chevron-forward" size={18} color="#FFFFFF" />
           </TouchableOpacity>
         )}
+
+        {!isCompleted && (
+          <TouchableOpacity style={styles.cancelJobBtn} activeOpacity={0.86} onPress={cancelJob}>
+            <Text style={styles.cancelJobBtnText}>Cancel Order</Text>
+          </TouchableOpacity>
+        )}
       </ScrollView>
 
       <Modal visible={noteOpen} transparent animationType="fade" onRequestClose={() => setNoteOpen(false)}>
@@ -3271,6 +3770,20 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, refreshC
           </View>
         </View>
       </Modal>
+
+      <InvoicePreviewModal
+        visible={completedInvoicePreviewOpen}
+        onClose={() => setCompletedInvoicePreviewOpen(false)}
+        job={job}
+        vin={vin}
+        invoiceEstimate={completedInvoiceEstimate}
+        invoiceNumber={completedInvoiceNumber}
+        invoiceSubtotal={completedInvoiceSubtotal}
+        invoiceTax={completedInvoiceTax}
+        finalTotal={completedFinalTotal}
+        paymentMethod={completedPaymentMethod}
+        approvedRequiredChanges={completedApprovedRequiredChanges}
+      />
     </View>
   );
 }
@@ -3328,7 +3841,7 @@ function EstimateLine({ label, hours, amount, strong, total, mutedLabel, onRemov
       <Text style={[styles.estimateLineLabel, strong && styles.estimateLineStrong, mutedLabel && styles.estimateLineMuted]} numberOfLines={1}>{label}</Text>
       {!!priceWarning && <Ionicons name="alert-circle-outline" size={14} color="#F04416" />}
       {!!hours && <Text style={styles.estimateLineHours}>{hours}</Text>}
-      <Text style={[styles.estimateLineAmount, strong && styles.estimateLineStrong, total && styles.estimateTotalAmount]}>{formatCurrency(amount)}</Text>
+      <Text style={[styles.estimateLineAmount, strong && styles.estimateLineStrong, total && styles.estimateTotalAmount]} numberOfLines={1}>{formatCurrency(amount)}</Text>
       {!!onRemove && (
         <TouchableOpacity style={styles.estimateRemoveBtn} activeOpacity={0.84} onPress={onRemove}>
           <Ionicons name="close" size={14} color="#F04416" />
@@ -3449,6 +3962,143 @@ function CustomerPreviewLine({ label, hours, amount, strong, total }) {
       </View>
       <Text style={[styles.customerPreviewLineAmount, strong && styles.customerPreviewLineStrong, total && styles.customerPreviewTotalAmount]}>{formatCurrency(amount)}</Text>
     </View>
+  );
+}
+
+// Shared by the Complete Job screen's preview and the already-completed job's
+// summary card, so both invoice views compute totals the same way.
+function getInvoiceData(job, workflow, additionalApprovals, fallbackEstimate) {
+  const persistedEstimate = job.orderContext?.estimate || null;
+  const invoiceEstimate = persistedEstimate ? {
+    ...persistedEstimate,
+    labor: persistedEstimate.laborItems || [],
+    parts: persistedEstimate.partsItems || [],
+    fees: persistedEstimate.fees || [],
+  } : (fallbackEstimate || { labor: [], parts: [], fees: [], subtotal: 0, tax: 0, total: 0 });
+  const originalTotal = job.approvedTotal ?? workflow?.approvedTotal ?? invoiceEstimate.total ?? 0;
+  const approvedRequiredChanges = (additionalApprovals || []).filter(item => item.status === 'approved');
+  const approvedAdditionalTotal = sumAmounts(approvedRequiredChanges);
+  const finalTotal = originalTotal + approvedAdditionalTotal;
+  const invoiceNumber = `INV-${job.number || '00000'}`;
+  const paymentMethod = job.payment?.method ? `${job.payment.method} ••••${job.payment.last4 || '****'}` : 'Card on file';
+  const invoiceTax = Math.round(((invoiceEstimate.tax || 0) + approvedAdditionalTotal * 0.0675) * 100) / 100;
+  const invoiceSubtotal = (invoiceEstimate.subtotal || 0) + approvedAdditionalTotal - (invoiceEstimate.tax || 0);
+  return { invoiceEstimate, invoiceNumber, paymentMethod, invoiceTax, invoiceSubtotal, finalTotal, approvedRequiredChanges };
+}
+
+function InvoicePreviewModal({ visible, onClose, job, vin, invoiceEstimate, invoiceNumber, invoiceSubtotal, invoiceTax, finalTotal, paymentMethod, approvedRequiredChanges }) {
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={styles.customerEstimateOverlay}>
+        <TouchableOpacity style={styles.navChoiceBackdrop} activeOpacity={1} onPress={onClose} />
+        <View style={styles.customerEstimateCard}>
+          <View style={styles.customerEstimateHeader}>
+            <TouchableOpacity style={styles.noteCloseBtn} activeOpacity={0.8} onPress={onClose}>
+              <Ionicons name="chevron-back" size={22} color="#17191D" />
+            </TouchableOpacity>
+            <View style={styles.customerEstimateTitleWrap}>
+              <Text style={styles.customerEstimateTitle}>Invoice</Text>
+              <Text style={styles.customerEstimateSubtitle}>{invoiceNumber}</Text>
+            </View>
+            <TouchableOpacity style={styles.noteCloseBtn} activeOpacity={0.8} onPress={onClose}>
+              <Ionicons name="close" size={20} color="#17191D" />
+            </TouchableOpacity>
+          </View>
+          <ScrollView style={styles.customerEstimateScroll} contentContainerStyle={styles.customerEstimateContent} showsVerticalScrollIndicator={false}>
+            <View style={styles.invoicePartyCard}>
+              <View style={styles.invoicePartyRow}>
+                <Text style={styles.invoicePartyLabel}>FROM</Text>
+                <Text style={styles.invoicePartyName}>Auterio Provider</Text>
+                <Text style={styles.invoicePartySub}>+1 (555) 123-4567</Text>
+              </View>
+              <View style={styles.invoiceDivider} />
+              <View style={styles.invoicePartyRow}>
+                <Text style={styles.invoicePartyLabel}>TO</Text>
+                <Text style={styles.invoicePartyName}>{job.customer?.name || 'Customer'}</Text>
+                <Text style={styles.invoicePartySub}>{job.vehicle?.make} {job.vehicle?.model} {job.vehicle?.year}</Text>
+                {!!vin && <Text style={styles.invoicePartySub}>VIN: {vin}</Text>}
+              </View>
+            </View>
+
+            {invoiceEstimate.labor.length > 0 && (
+              <View style={styles.invoiceSection}>
+                <Text style={styles.invoiceSectionLabel}>LABOR</Text>
+                {invoiceEstimate.labor.map((item, i) => (
+                  <View key={item.id || i} style={[styles.invoiceLineRow, i > 0 && styles.invoiceLineRowBorder]}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.invoiceLineName}>{item.label}</Text>
+                      {!!item.hours && <Text style={styles.invoiceLineSub}>{item.hours}</Text>}
+                    </View>
+                    <Text style={styles.invoiceLineAmount}>{formatCurrency(item.amount)}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {invoiceEstimate.parts.length > 0 && (
+              <View style={styles.invoiceSection}>
+                <Text style={styles.invoiceSectionLabel}>PARTS & MATERIALS</Text>
+                {invoiceEstimate.parts.map((item, i) => (
+                  <View key={item.id || i} style={[styles.invoiceLineRow, i > 0 && styles.invoiceLineRowBorder]}>
+                    <Text style={[styles.invoiceLineName, { flex: 1 }]}>{item.label}</Text>
+                    <Text style={styles.invoiceLineAmount}>{formatCurrency(item.amount)}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {invoiceEstimate.fees.length > 0 && (
+              <View style={styles.invoiceSection}>
+                <Text style={styles.invoiceSectionLabel}>FEES</Text>
+                {invoiceEstimate.fees.map((item, i) => (
+                  <View key={i} style={[styles.invoiceLineRow, i > 0 && styles.invoiceLineRowBorder]}>
+                    <Text style={[styles.invoiceLineName, { flex: 1 }]}>{item.label}</Text>
+                    <Text style={styles.invoiceLineAmount}>{formatCurrency(item.amount)}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {approvedRequiredChanges.length > 0 && (
+              <View style={styles.invoiceSection}>
+                <Text style={styles.invoiceSectionLabel}>ADDITIONAL WORK</Text>
+                {approvedRequiredChanges.map((item, i) => (
+                  <View key={i} style={[styles.invoiceLineRow, i > 0 && styles.invoiceLineRowBorder]}>
+                    <Text style={[styles.invoiceLineName, { flex: 1 }]}>{item.name || item.label}</Text>
+                    <Text style={styles.invoiceLineAmount}>{formatCurrency(item.amount)}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            <View style={styles.invoiceTotalsCard}>
+              <View style={styles.invoiceTotalRow}>
+                <Text style={styles.invoiceTotalLabel}>Subtotal</Text>
+                <Text style={styles.invoiceTotalValue}>{formatCurrency(invoiceSubtotal)}</Text>
+              </View>
+              <View style={[styles.invoiceTotalRow, styles.invoiceLineRowBorder]}>
+                <Text style={styles.invoiceTotalLabel}>Tax (6.75%)</Text>
+                <Text style={styles.invoiceTotalValue}>{formatCurrency(invoiceTax)}</Text>
+              </View>
+              <View style={[styles.invoiceTotalRow, styles.invoiceLineRowBorder]}>
+                <Text style={styles.invoiceTotalLabelBold}>Total</Text>
+                <Text style={styles.invoiceTotalValueBold}>{formatCurrency(finalTotal)}</Text>
+              </View>
+            </View>
+
+            <View style={styles.invoicePaymentRow}>
+              <Ionicons name="card-outline" size={16} color="#6B7280" />
+              <Text style={styles.invoicePaymentText}>Payment method: <Text style={{ color: '#17191D', fontWeight: '700' }}>{paymentMethod}</Text></Text>
+            </View>
+
+            <View style={styles.invoiceWarrantyRow}>
+              <Ionicons name="shield-checkmark-outline" size={14} color="#16A34A" />
+              <Text style={styles.invoiceWarrantyText}>90-day / 4,000-mile warranty on parts and labor</Text>
+            </View>
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -4465,6 +5115,148 @@ const styles = StyleSheet.create({
   completedSummaryValue: { color: '#17191D', fontSize: 14, fontWeight: '700' },
   completedInvoicePaid: { backgroundColor: '#DCFCE7', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
   completedInvoicePaidText: { color: '#16A34A', fontSize: 10, fontWeight: '800', letterSpacing: 0.5 },
+  // Literal port of auterio3/screens/OrdersScreen.js's completed-order Detail modal
+  // (same style values/structure), with the counterpart flipped to the customer.
+  detailScreen: { flex: 1, backgroundColor: '#FFFFFF' },
+  detailNavBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 72, paddingBottom: 12, borderBottomWidth: 1, borderBottomColor: '#ECEEF0', backgroundColor: '#FFFFFF' },
+  detailBackBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#F3F4F5', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#ECEEF0' },
+  detailNavTitle: { color: '#17191D', fontSize: 17, fontWeight: '800' },
+  detailContent: { paddingHorizontal: 16, paddingTop: 14, paddingBottom: 16 },
+  detailCompletedBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 4 },
+  detailCompletedBadgeText: { color: '#16A34A', fontSize: 13, fontWeight: '700' },
+  detailTitle: { color: '#17191D', fontSize: 21, fontWeight: '800', marginBottom: 4 },
+  detailSubtitle: { color: '#8B9098', fontSize: 12, marginBottom: 14 },
+  detailProviderCard: { backgroundColor: '#F3F4F5', borderRadius: 14, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: '#ECEEF0' },
+  detailProviderMain: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  detailProviderLogo: { width: 48, height: 48, borderRadius: 12, backgroundColor: '#E0E7FF', alignItems: 'center', justifyContent: 'center' },
+  detailProviderInitials: { color: '#2563EB', fontSize: 16, fontWeight: '800' },
+  detailProviderNameRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 6 },
+  detailProviderName: { color: '#17191D', fontSize: 15, fontWeight: '700' },
+  detailProviderRatingValue: { color: '#17191D', fontSize: 11, fontWeight: '700' },
+  detailProviderBadgeRow: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  detailProviderVerifiedPill: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: '#EFF6FF', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
+  detailProviderVerifiedText: { color: '#2563EB', fontSize: 11, fontWeight: '600' },
+  detailProviderReturningPill: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: '#DCFCE7', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 3 },
+  detailProviderReturningText: { color: '#16A34A', fontSize: 11, fontWeight: '600' },
+  detailProviderActions: { flexDirection: 'row', gap: 6 },
+  detailProviderBtn: { alignItems: 'center', gap: 4 },
+  detailProviderBtnIcon: { width: 40, height: 40, borderRadius: 20, borderWidth: 1, borderColor: '#ECEEF0', alignItems: 'center', justifyContent: 'center', backgroundColor: '#FAFAFA' },
+  detailProviderBtnText: { color: '#5E646D', fontSize: 10, fontWeight: '500' },
+  detailPriceCard: { backgroundColor: '#F3F4F5', borderRadius: 14, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: '#ECEEF0' },
+  detailPriceTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 },
+  detailPriceLabel: { color: '#8B9098', fontSize: 12, fontWeight: '500' },
+  detailPriceValue: { color: '#17191D', fontSize: 26, fontWeight: '900', fontVariant: ['tabular-nums'], marginBottom: 8 },
+  detailPaidBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(22,163,74,0.1)', borderRadius: 20, paddingVertical: 5, paddingHorizontal: 12, borderWidth: 1, borderColor: 'rgba(22,163,74,0.22)' },
+  detailPaidText: { color: '#16A34A', fontSize: 11, fontWeight: '800', letterSpacing: 0.5 },
+  detailPaymentRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  detailPaymentLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  detailVisaBadge: { backgroundColor: '#1A1F71', borderRadius: 4, paddingHorizontal: 7, paddingVertical: 3 },
+  detailVisaText: { color: '#FFFFFF', fontSize: 11, fontWeight: '900', fontStyle: 'italic', letterSpacing: 0.5 },
+  detailPaymentMethod: { color: '#17191D', fontSize: 13, fontWeight: '600' },
+  detailInvoiceLink: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  detailInvoiceLinkText: { color: '#FF6B00', fontSize: 13, fontWeight: '700' },
+  detailGrid: { flexDirection: 'row', gap: 8, marginBottom: 10 },
+  detailGridCard: { flex: 1, backgroundColor: '#F3F4F5', borderRadius: 14, padding: 10, borderWidth: 1, borderColor: '#ECEEF0' },
+  detailGridHeader: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 5 },
+  detailGridTitle: { color: '#8B9098', fontSize: 11, fontWeight: '600' },
+  detailGridMain: { color: '#17191D', fontSize: 12, fontWeight: '500', marginBottom: 2 },
+  detailVinPill: { alignSelf: 'flex-start', backgroundColor: '#ECEEF0', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2, marginTop: 2 },
+  detailVinPillText: { color: '#5E646D', fontSize: 11, fontWeight: '600' },
+  detailServiceLink: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#F3F4F5', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 12, marginBottom: 10, borderWidth: 1, borderColor: '#ECEEF0' },
+  detailServiceLinkText: { color: '#17191D', fontSize: 14, fontWeight: '600' },
+  detailWarrantyCard: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#F3F4F5', borderRadius: 14, borderWidth: 1, borderColor: '#ECEEF0', paddingHorizontal: 12, paddingVertical: 12, marginBottom: 10 },
+  detailWarrantyLabel: { color: '#17191D', fontSize: 12, fontWeight: '600' },
+  detailWarrantyRange: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  detailWarrantyDays: { color: '#16A34A', fontSize: 12, fontWeight: '500' },
+  detailWarrantyOr: { color: '#8B9098', fontSize: 12 },
+  detailWarrantyMiles: { color: '#16A34A', fontSize: 12, fontWeight: '500' },
+  detailWarrantyCovered: { color: '#FF6B00', fontSize: 12, fontWeight: '600' },
+  detailBreakdownCard: { backgroundColor: '#F3F4F5', borderRadius: 14, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: '#ECEEF0' },
+  detailBreakdownTitle: { color: '#17191D', fontSize: 13, fontWeight: '800', marginBottom: 10 },
+  detailBreakdownRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
+  detailBreakdownLabel: { color: '#5E646D', fontSize: 13 },
+  detailBreakdownValue: { color: '#17191D', fontSize: 13 },
+  detailBreakdownDivider: { height: 1, backgroundColor: '#ECEEF0', marginVertical: 8 },
+  detailBreakdownTotal: { color: '#17191D', fontSize: 15, fontWeight: '800' },
+  detailBreakdownTotalValue: { color: '#17191D', fontSize: 15, fontWeight: '800' },
+  sdContent: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 40 },
+  sdSectionTitle: { color: '#8B9098', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6, marginTop: 14 },
+  sdCard: { backgroundColor: '#F3F4F5', borderRadius: 14, borderWidth: 1, borderColor: '#ECEEF0', overflow: 'hidden' },
+  sdRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 13 },
+  sdRowBorder: { borderTopWidth: 1, borderTopColor: '#ECEEF0' },
+  sdRowText: { color: '#17191D', fontSize: 13, fontWeight: '500', flex: 1 },
+  sdRowLabel: { color: '#5E646D', fontSize: 13, flex: 1 },
+  sdRowValue: { color: '#17191D', fontSize: 13, fontWeight: '600' },
+  sdNotesText: { color: '#5E646D', fontSize: 13, lineHeight: 20, padding: 14 },
+  sdPhotosRow: { flexDirection: 'row', gap: 10 },
+  sdPhotoItem: { flex: 1, alignItems: 'center', gap: 6 },
+  sdPhotoPlaceholder: { width: '100%', aspectRatio: 1, backgroundColor: '#F3F4F5', borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', alignItems: 'center', justifyContent: 'center' },
+  sdPhotoLabel: { color: '#8B9098', fontSize: 11 },
+  invHeaderCard: { backgroundColor: '#F3F4F5', borderRadius: 14, borderWidth: 1, borderColor: '#ECEEF0', padding: 14, marginBottom: 10 },
+  invHeaderTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  invIconWrap: { width: 38, height: 38, borderRadius: 10, backgroundColor: '#F3EEFF', alignItems: 'center', justifyContent: 'center' },
+  invTitle: { color: '#17191D', fontSize: 16, fontWeight: '800' },
+  invMeta: { color: '#8B9098', fontSize: 12, marginTop: 2 },
+  invPaidBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(22,163,74,0.1)', borderRadius: 20, paddingVertical: 5, paddingHorizontal: 10, borderWidth: 1, borderColor: 'rgba(22,163,74,0.2)' },
+  invPaidText: { color: '#16A34A', fontSize: 11, fontWeight: '800', letterSpacing: 0.4 },
+  invPartyCard: { backgroundColor: '#F3F4F5', borderRadius: 14, borderWidth: 1, borderColor: '#ECEEF0', paddingHorizontal: 14, marginBottom: 10 },
+  invPartyRow: { paddingVertical: 12 },
+  invPartyLabel: { color: '#8B9098', fontSize: 10, fontWeight: '800', letterSpacing: 0.8, marginBottom: 4 },
+  invPartyName: { color: '#17191D', fontSize: 14, fontWeight: '700' },
+  invPartySub: { color: '#8B9098', fontSize: 12, marginTop: 2 },
+  invDivider: { height: 1, backgroundColor: '#ECEEF0' },
+  invSection: { backgroundColor: '#F3F4F5', borderRadius: 14, borderWidth: 1, borderColor: '#ECEEF0', paddingHorizontal: 14, marginBottom: 10 },
+  invSectionLabel: { color: '#8B9098', fontSize: 10, fontWeight: '800', letterSpacing: 0.8, paddingTop: 12, paddingBottom: 6 },
+  invLineRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10 },
+  invLineBorder: { borderTopWidth: 1, borderTopColor: '#ECEEF0' },
+  invLineName: { color: '#17191D', fontSize: 13, fontWeight: '600' },
+  invLineSub: { color: '#8B9098', fontSize: 11, marginTop: 2 },
+  invLineAmt: { color: '#17191D', fontSize: 13, fontWeight: '700', marginLeft: 12 },
+  invTotalsCard: { backgroundColor: '#F3F4F5', borderRadius: 14, borderWidth: 1, borderColor: '#ECEEF0', paddingHorizontal: 14, marginBottom: 12 },
+  invTotalRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12 },
+  invTotalLabel: { color: '#8B9098', fontSize: 14 },
+  invTotalValue: { color: '#17191D', fontSize: 14, fontWeight: '600' },
+  invTotalBold: { color: '#17191D', fontSize: 15, fontWeight: '800' },
+  invTotalBoldValue: { color: '#17191D', fontSize: 17, fontWeight: '900' },
+  invFooterRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 },
+  invFooterText: { color: '#8B9098', fontSize: 13 },
+  invWarrantyRow: { flexDirection: 'row', alignItems: 'center', gap: 6, justifyContent: 'center' },
+  invWarrantyText: { color: '#8B9098', fontSize: 12 },
+
+  cpContent: { paddingHorizontal: 20, paddingTop: 24, paddingBottom: 40, alignItems: 'center' },
+  cpAvatarWrap: { width: 110, height: 110, borderRadius: 55, backgroundColor: '#F3F4F5', alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
+  cpAvatarText: { color: '#17191D', fontSize: 34, fontWeight: '800' },
+  cpName: { color: '#17191D', fontSize: 22, fontWeight: '800', marginBottom: 10 },
+  cpBadgeRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
+  cpRatingPill: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  cpRatingText: { color: '#17191D', fontSize: 15, fontWeight: '800' },
+  cpVerifiedPill: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#EFF6FF', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 },
+  cpVerifiedText: { color: '#2563EB', fontSize: 12, fontWeight: '700' },
+  cpReturningPill: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#DCFCE7', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 },
+  cpReturningText: { color: '#16A34A', fontSize: 12, fontWeight: '700' },
+  cpJobsCount: { color: '#8B9098', fontSize: 13, fontWeight: '600', marginBottom: 18 },
+  cpStatsCard: { flexDirection: 'row', width: '100%', backgroundColor: '#F3F4F5', borderRadius: 14, borderWidth: 1, borderColor: '#ECEEF0', paddingVertical: 16, marginBottom: 14 },
+  cpStatItem: { flex: 1, alignItems: 'center', gap: 6, paddingHorizontal: 4 },
+  cpStatLabel: { color: '#8B9098', fontSize: 10, fontWeight: '600', textAlign: 'center' },
+  cpStatValue: { color: '#17191D', fontSize: 16, fontWeight: '800' },
+  cpStatRatingRow: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  cpStatDivider: { width: 1, backgroundColor: '#ECEEF0' },
+  cpActionsRow: { flexDirection: 'row', width: '100%', gap: 10, marginBottom: 14 },
+  cpActionBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', paddingVertical: 13 },
+  cpActionText: { color: '#17191D', fontSize: 14, fontWeight: '700' },
+  cpListCard: { width: '100%', backgroundColor: '#F3F4F5', borderRadius: 14, borderWidth: 1, borderColor: '#ECEEF0', paddingHorizontal: 14, marginBottom: 18 },
+  cpListRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 13 },
+  cpListRowBorder: { borderTopWidth: 1, borderTopColor: '#ECEEF0' },
+  cpListLabel: { flex: 1, color: '#17191D', fontSize: 14, fontWeight: '600' },
+  cpListValue: { color: '#5E646D', fontSize: 13, fontWeight: '600' },
+  cpFooterNote: { color: '#8B9098', fontSize: 12, textAlign: 'center', lineHeight: 17 },
+
+  jaBackdropFill: { flex: 1, backgroundColor: 'rgba(23,25,29,0.15)' },
+  jaMenu: { position: 'absolute', top: 118, right: 16, width: 210, backgroundColor: '#FFFFFF', borderRadius: 14, paddingVertical: 4, shadowColor: '#000', shadowOpacity: 0.16, shadowRadius: 16, shadowOffset: { width: 0, height: 6 }, elevation: 10 },
+  jaMenuRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 12 },
+  jaMenuRowText: { color: '#17191D', fontSize: 14, fontWeight: '600' },
+  jaMenuDivider: { height: 1, backgroundColor: '#ECEEF0', marginHorizontal: 14 },
+
   mapView: { ...StyleSheet.absoluteFillObject },
   mapStartMarker: { width: 18, height: 18, borderRadius: 9, backgroundColor: '#17191D', borderWidth: 3, borderColor: '#FFFFFF' },
   mapEndMarker: { width: 32, height: 38, borderRadius: 16, backgroundColor: '#F04416', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#FFFFFF' },
@@ -4473,6 +5265,8 @@ const styles = StyleSheet.create({
   jobProgressCard: { backgroundColor: '#F3F4F5', borderWidth: 1, borderColor: '#ECEEF0', borderRadius: 8, paddingHorizontal: 10, paddingTop: 12, paddingBottom: 10, marginBottom: 8 },
   onTheWayBtn: { height: 54, borderRadius: 10, backgroundColor: '#17191D', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 2, marginBottom: 8 },
   onTheWayText: { color: '#FFFFFF', fontSize: 16, lineHeight: 20, fontWeight: '800' },
+  cancelJobBtn: { height: 48, borderRadius: 10, borderWidth: 1.5, borderColor: '#FEE2E2', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', marginBottom: 16 },
+  cancelJobBtnText: { color: '#DC2626', fontSize: 15, lineHeight: 19, fontWeight: '700' },
   jobRouteContent: { paddingHorizontal: 15, paddingTop: 10, paddingBottom: 104 },
   jobRouteMap: { height: 330, borderRadius: 8, backgroundColor: '#F3F4F5', borderWidth: 1, borderColor: '#ECEEF0', marginBottom: 10, overflow: 'hidden', position: 'relative' },
   routeAddressCard: { minHeight: 76, borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12 },
@@ -4542,7 +5336,7 @@ const styles = StyleSheet.create({
   estimateLineLabel: { flex: 1, minWidth: 0, color: '#17191D', fontSize: 12, lineHeight: 16, fontWeight: '700' },
   estimateLineMuted: { color: '#5E646D' },
   estimateLineHours: { width: 52, color: '#17191D', fontSize: 11, lineHeight: 15, fontWeight: '700', textAlign: 'right' },
-  estimateLineAmount: { width: 74, color: '#17191D', fontSize: 12, lineHeight: 16, fontWeight: '800', textAlign: 'right' },
+  estimateLineAmount: { minWidth: 74, flexShrink: 0, color: '#17191D', fontSize: 12, lineHeight: 16, fontWeight: '800', textAlign: 'right' },
   estimateLineStrong: { fontWeight: '900' },
   estimateRemoveBtn: { width: 24, height: 24, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(240,68,22,0.22)', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   optionalEstimateWrap: { marginBottom: 10 },
@@ -4555,13 +5349,6 @@ const styles = StyleSheet.create({
   estimateApprovalNote: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 12 },
   estimateApprovalText: { color: '#5E646D', fontSize: 11, lineHeight: 15, fontWeight: '700', textAlign: 'center' },
   callFeeToggleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10, paddingHorizontal: 2, marginBottom: 6, backgroundColor: '#F9FAFB', borderRadius: 10, paddingHorizontal: 10 },
-  invoiceHeaderCard: { backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 1, borderColor: '#ECEEF0', padding: 14, marginBottom: 10 },
-  invoiceHeaderTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  invoiceIconWrap: { width: 38, height: 38, borderRadius: 10, backgroundColor: '#F3EEFF', alignItems: 'center', justifyContent: 'center' },
-  invoiceTitle: { color: '#17191D', fontSize: 16, fontWeight: '800' },
-  invoiceMeta: { color: '#6B7280', fontSize: 12, marginTop: 2, fontWeight: '500' },
-  invoiceStatusBadge: { backgroundColor: '#FFF7ED', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1, borderColor: '#FED7AA' },
-  invoiceStatusText: { color: '#C2410C', fontSize: 11, fontWeight: '700' },
   invoicePartyCard: { backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 1, borderColor: '#ECEEF0', paddingHorizontal: 14, marginBottom: 10 },
   invoicePartyRow: { paddingVertical: 12 },
   invoicePartyLabel: { color: '#9CA3AF', fontSize: 10, fontWeight: '800', letterSpacing: 0.8, marginBottom: 4 },
@@ -4583,8 +5370,6 @@ const styles = StyleSheet.create({
   invoiceTotalValueBold: { color: '#17191D', fontSize: 17, fontWeight: '800' },
   invoicePaymentRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 16, paddingHorizontal: 2 },
   invoicePaymentText: { color: '#6B7280', fontSize: 13, fontWeight: '500' },
-  collectPaymentBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#16A34A', borderRadius: 16, paddingVertical: 17, marginBottom: 12 },
-  collectPaymentText: { color: '#FFFFFF', fontSize: 16, fontWeight: '800' },
   invoiceWarrantyRow: { flexDirection: 'row', alignItems: 'center', gap: 6, justifyContent: 'center', marginBottom: 8 },
   invoiceWarrantyText: { color: '#6B7280', fontSize: 12, fontWeight: '500' },
   callFeeToggleInfo: { flex: 1, marginRight: 10 },
@@ -4644,19 +5429,19 @@ const styles = StyleSheet.create({
   customerPreviewLineStrong: { fontWeight: '900' },
   customerPreviewTotalAmount: { color: '#16A34A', fontSize: 15, lineHeight: 19 },
   customerEstimateTotals: { borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', paddingHorizontal: 12, paddingVertical: 8, marginBottom: 12 },
-  customerEstimateDivider: { height: 1, backgroundColor: '#E1E4E8', marginVertical: 6 },
+  customerEstimateDivider: { height: 1, backgroundColor: '#ECEEF0', marginVertical: 6 },
   customerPreviewOnlyNote: { minHeight: 42, borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingHorizontal: 10 },
   customerPreviewOnlyText: { color: '#5E646D', fontSize: 11, lineHeight: 15, fontWeight: '700', textAlign: 'center', flexShrink: 1 },
-  approvedEstimateCard: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderRadius: 10, borderWidth: 1, borderColor: 'rgba(22,163,74,0.22)', backgroundColor: 'rgba(22,163,74,0.06)', padding: 12, marginBottom: 10 },
+  approvedEstimateCard: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', padding: 12, marginBottom: 10 },
   approvedEstimateLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  approvedEstimateIconWrap: { width: 36, height: 36, borderRadius: 10, backgroundColor: 'rgba(22,163,74,0.12)', alignItems: 'center', justifyContent: 'center' },
-  approvedEstimateTitle: { color: '#17191D', fontSize: 13, fontWeight: '800' },
-  approvedEstimateAmount: { color: '#16A34A', fontSize: 15, fontWeight: '900', marginTop: 1 },
+  approvedEstimateIconWrap: { width: 36, height: 36, borderRadius: 18, backgroundColor: 'rgba(22,163,74,0.1)', alignItems: 'center', justifyContent: 'center' },
+  approvedEstimateTitle: { color: '#17191D', fontSize: 13, fontWeight: '700' },
+  approvedEstimateAmount: { color: '#16A34A', fontSize: 17, fontWeight: '900', marginTop: 1 },
   approvedEstimateRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  approvedEstimateBadge: { borderRadius: 20, paddingVertical: 3, paddingHorizontal: 9, backgroundColor: '#16A34A' },
-  approvedEstimateBadgePartial: { backgroundColor: 'transparent', borderWidth: 1, borderColor: '#16A34A' },
-  approvedEstimateBadgeText: { color: '#FFFFFF', fontSize: 10, fontWeight: '800' },
-  approvedEstimateBadgeTextPartial: { color: '#16A34A' },
+  approvedEstimateBadge: { borderRadius: 6, backgroundColor: 'rgba(22,163,74,0.1)', paddingHorizontal: 8, paddingVertical: 4 },
+  approvedEstimateBadgePartial: { backgroundColor: '#F3F4F5' },
+  approvedEstimateBadgeText: { color: '#16A34A', fontSize: 11, fontWeight: '700' },
+  approvedEstimateBadgeTextPartial: { color: '#5E646D' },
   workSummaryApprovalRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 },
   workSummaryApprovalLeft: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   workSummaryApprovalLabel: { color: '#16A34A', fontSize: 12, fontWeight: '800' },
@@ -4722,61 +5507,59 @@ const styles = StyleSheet.create({
   approvalDemoBtn: { alignItems: 'center', paddingVertical: 12, marginTop: 4 },
   approvalDemoText: { color: '#C4C9D1', fontSize: 11, fontWeight: '500' },
   workContent: { paddingHorizontal: 15, paddingTop: 10, paddingBottom: 34 },
-  repairProgressCard: { borderRadius: 10, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', padding: 13, marginBottom: 12 },
-  repairProgressHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10, marginBottom: 14 },
-  repairProgressTitle: { color: '#17191D', fontSize: 18, lineHeight: 23, fontWeight: '900', marginBottom: 12 },
+  repairProgressCard: { borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', padding: 14, marginBottom: 10 },
+  repairProgressHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 8 },
+  repairProgressTitle: { color: '#17191D', fontSize: 15, fontWeight: '800' },
   repairProgressMeta: { color: '#5E646D', fontSize: 11, lineHeight: 14, fontWeight: '700', marginBottom: 3 },
-  repairTimer: { color: '#17191D', fontSize: 28, lineHeight: 34, fontWeight: '700', letterSpacing: 1.5 },
-  repairLivePill: { height: 28, borderRadius: 999, borderWidth: 1, borderColor: 'rgba(22,163,74,0.24)', backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 9 },
-  repairLiveDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#16A34A' },
-  repairLiveText: { color: '#16A34A', fontSize: 10, lineHeight: 13, fontWeight: '900' },
-  repairFieldBlock: { marginBottom: 13 },
-  repairFieldLabel: { color: '#17191D', fontSize: 13, lineHeight: 17, fontWeight: '900', marginBottom: 6 },
-  repairFieldText: { color: '#5E646D', fontSize: 12, lineHeight: 17, fontWeight: '700' },
+  repairTimer: { color: '#17191D', fontSize: 24, fontWeight: '900', letterSpacing: 1 },
+  repairLivePill: { flexDirection: 'row', alignItems: 'center', gap: 6, borderRadius: 6, backgroundColor: 'rgba(22,163,74,0.1)', paddingHorizontal: 8, paddingVertical: 4 },
+  repairLiveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#16A34A' },
+  repairLiveText: { color: '#16A34A', fontSize: 11, fontWeight: '700' },
+  repairFieldBlock: { marginTop: 10 },
+  repairFieldLabel: { color: '#8B9098', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4 },
+  repairFieldText: { color: '#5E646D', fontSize: 12, lineHeight: 16 },
   repairPhotosRow: { gap: 8, paddingRight: 2 },
-  repairPhotoTile: { width: 84, height: 76, borderRadius: 8, borderWidth: 1, borderColor: '#E1E4E8', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', padding: 7, gap: 5 },
-  repairPhotoText: { color: '#5E646D', fontSize: 9, lineHeight: 12, fontWeight: '800', textAlign: 'center' },
-  repairAddPhotoTile: { width: 84, height: 76, borderRadius: 8, borderWidth: 1, borderColor: '#E1E4E8', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', gap: 4 },
-  repairAddPhotoText: { color: '#5E646D', fontSize: 10, lineHeight: 13, fontWeight: '900', textAlign: 'center' },
-  repairNoteCard: { borderRadius: 10, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', padding: 12, marginBottom: 12 },
-  repairSummaryInput: { minHeight: 78, borderRadius: 8, borderWidth: 1, borderColor: '#E1E4E8', backgroundColor: '#FFFFFF', color: '#17191D', fontSize: 12, lineHeight: 17, fontWeight: '700', paddingHorizontal: 10, paddingVertical: 9, textAlignVertical: 'top' },
-  repairCustomerNoteInput: { minHeight: 54, borderRadius: 8, borderWidth: 1, borderColor: '#E1E4E8', backgroundColor: '#FFFFFF', color: '#17191D', fontSize: 12, lineHeight: 17, fontWeight: '700', paddingHorizontal: 10, paddingVertical: 9, textAlignVertical: 'top' },
-  workContactCard: { minHeight: 68, borderRadius: 10, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', gap: 10, padding: 11, marginBottom: 12 },
+  repairPhotoTile: { width: 84, height: 84, borderRadius: 10, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', alignItems: 'center', justifyContent: 'center', padding: 6, gap: 4 },
+  repairPhotoText: { color: '#5E646D', fontSize: 10, fontWeight: '600', textAlign: 'center' },
+  repairAddPhotoTile: { width: 84, height: 84, borderRadius: 10, borderWidth: 1.5, borderColor: '#E1E4E8', borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center', gap: 4 },
+  repairAddPhotoText: { color: '#5E646D', fontSize: 10, fontWeight: '600', textAlign: 'center' },
+  repairNoteCard: { borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', padding: 14, marginBottom: 10 },
+  repairSummaryInput: { minHeight: 60, borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', color: '#17191D', fontSize: 13, padding: 10, textAlignVertical: 'top' },
+  repairCustomerNoteInput: { minHeight: 54, borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', color: '#17191D', fontSize: 13, padding: 10, textAlignVertical: 'top' },
+  workContactCard: { height: 86, borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, marginBottom: 10 },
   workContactInfo: { flex: 1, minWidth: 0 },
-  workContactName: { color: '#17191D', fontSize: 15, lineHeight: 19, fontWeight: '800' },
-  workContactMeta: { color: '#5E646D', fontSize: 11, lineHeight: 15, fontWeight: '700', marginTop: 2 },
+  workContactName: { color: '#17191D', fontSize: 13, lineHeight: 17, fontWeight: '700' },
+  workContactMeta: { color: '#2563EB', fontSize: 11, lineHeight: 14, fontWeight: '600', marginTop: 2 },
   workContactActions: { flexDirection: 'row', alignItems: 'center', gap: 7, flexShrink: 0 },
-  workContactBtn: { width: 36, height: 36, borderRadius: 18, borderWidth: 1, borderColor: '#E1E4E8', backgroundColor: '#F3F4F5', alignItems: 'center', justifyContent: 'center' },
-  workSummaryCard: { borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', paddingHorizontal: 12, paddingVertical: 8, marginBottom: 12 },
-  additionalApprovalCard: { borderRadius: 10, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', padding: 12, marginBottom: 12 },
-  additionalApprovalSubtitle: { color: '#5E646D', fontSize: 12, lineHeight: 17, fontWeight: '700', marginTop: -4, marginBottom: 11 },
-  additionalActionRow: { flexDirection: 'row', gap: 9, marginBottom: 12 },
-  additionalRequiredBtn: { flex: 1, minHeight: 48, borderRadius: 9, backgroundColor: '#F04416', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingHorizontal: 10 },
-  additionalRequiredText: { color: '#FFFFFF', fontSize: 12, lineHeight: 16, fontWeight: '900', textAlign: 'center', flexShrink: 1 },
-  additionalEmptyBox: { minHeight: 74, borderRadius: 8, borderWidth: 1, borderColor: '#E1E4E8', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', gap: 5 },
-  additionalEmptyText: { color: '#5E646D', fontSize: 12, lineHeight: 16, fontWeight: '700' },
-  crCard: { borderRadius: 12, borderWidth: 1.5, borderColor: 'rgba(240,68,22,0.28)', backgroundColor: '#FFFFFF', padding: 14, gap: 10 },
-  crCardApproved: { borderColor: 'rgba(22,163,74,0.25)', backgroundColor: 'rgba(22,163,74,0.04)' },
-  crCardDeclined: { borderColor: 'rgba(220,38,38,0.2)', backgroundColor: 'rgba(220,38,38,0.03)' },
-  crHeader: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  crIconWrap: { width: 36, height: 36, borderRadius: 10, backgroundColor: 'rgba(240,68,22,0.1)', alignItems: 'center', justifyContent: 'center' },
-  crIconWrapApproved: { backgroundColor: 'rgba(22,163,74,0.1)' },
-  crIconWrapDeclined: { backgroundColor: 'rgba(220,38,38,0.08)' },
-  crHeaderText: { flex: 1, minWidth: 0 },
-  crTitle: { color: '#17191D', fontSize: 13, fontWeight: '800' },
-  crSubtitle: { color: '#5E646D', fontSize: 11, fontWeight: '600', marginTop: 1 },
-  crAmount: { color: '#F04416', fontSize: 16, fontWeight: '900' },
+  workContactBtn: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E6E8EB', alignItems: 'center', justifyContent: 'center' },
+  workSummaryCard: { borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', padding: 14, marginBottom: 10 },
+  additionalApprovalCard: { borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', padding: 14, marginBottom: 10 },
+  changeRequestsSectionTitle: { color: '#17191D', fontSize: 15, fontWeight: '800', marginBottom: 4 },
+  additionalApprovalSubtitle: { color: '#5E646D', fontSize: 12, lineHeight: 16, marginBottom: 12 },
+  additionalActionRow: { flexDirection: 'row', gap: 9, marginBottom: 10 },
+  additionalRequiredBtn: { flex: 1, height: 46, borderRadius: 10, backgroundColor: '#F04416', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingHorizontal: 10 },
+  additionalRequiredText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700', textAlign: 'center', flexShrink: 1 },
+  additionalEmptyBox: { alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 16 },
+  additionalEmptyText: { color: '#8B9098', fontSize: 12, fontWeight: '600' },
+  crCard: { borderRadius: 10, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', padding: 12, marginTop: 8, gap: 10 },
+  crCardApproved: { borderColor: 'rgba(22,163,74,0.3)', backgroundColor: 'rgba(22,163,74,0.06)' },
+  crCardDeclined: { borderColor: 'rgba(220,38,38,0.3)', backgroundColor: 'rgba(220,38,38,0.06)' },
+  crHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
+  crTitle: { color: '#17191D', fontSize: 12, fontWeight: '700' },
+  crFieldGroup: { gap: 2 },
+  crSubtitle: { color: '#17191D', fontSize: 12, fontWeight: '500' },
+  crAmount: { color: '#F04416', fontSize: 14, fontWeight: '800' },
   crAmountApproved: { color: '#16A34A' },
   crAmountDeclined: { color: '#DC2626' },
-  crFieldLabel: { color: '#8B9098', fontSize: 9, lineHeight: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 3 },
-  crDesc: { color: '#17191D', fontSize: 12, lineHeight: 17, fontWeight: '500' },
+  crFieldLabel: { color: '#8B9098', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4 },
+  crDesc: { color: '#17191D', fontSize: 12, lineHeight: 16, fontWeight: '500' },
   crEvidenceRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 5 },
   crEvidenceText: { flex: 1, color: '#5E646D', fontSize: 11, lineHeight: 15, fontWeight: '500' },
-  crStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 6, paddingHorizontal: 10, borderRadius: 8 },
-  crStatusPending: { backgroundColor: 'rgba(139,144,152,0.08)' },
-  crStatusApproved: { backgroundColor: 'rgba(22,163,74,0.08)' },
-  crStatusDeclined: { backgroundColor: 'rgba(220,38,38,0.06)' },
-  crStatusText: { fontSize: 12, fontWeight: '700', color: '#8B9098' },
+  crStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  crStatusPending: {},
+  crStatusApproved: {},
+  crStatusDeclined: {},
+  crStatusText: { fontSize: 11, fontWeight: '600', color: '#8B9098' },
   crStatusTextApproved: { color: '#16A34A' },
   crStatusTextDeclined: { color: '#DC2626' },
   additionalItem: { borderRadius: 8, borderWidth: 1, padding: 11, marginBottom: 9 },
@@ -4801,28 +5584,29 @@ const styles = StyleSheet.create({
   additionalDemoActions: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 0 },
   additionalApproveMini: { width: 28, height: 28, borderRadius: 14, backgroundColor: '#16A34A', alignItems: 'center', justifyContent: 'center' },
   additionalDeclineMini: { width: 28, height: 28, borderRadius: 14, borderWidth: 1, borderColor: 'rgba(240,68,22,0.28)', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center' },
-  completeWorkBtn: { height: 54, borderRadius: 10, backgroundColor: '#16A34A', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 2, marginBottom: 10 },
-  completeWorkText: { color: '#FFFFFF', fontSize: 15, lineHeight: 19, fontWeight: '900' },
+  completeWorkBtn: { height: 66, borderRadius: 12, backgroundColor: '#16A34A', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 14, marginBottom: 10 },
+  completeWorkText: { color: '#FFFFFF', fontSize: 14, fontWeight: '800' },
   completeContent: { paddingHorizontal: 15, paddingTop: 10, paddingBottom: 34 },
-  completeHeroCard: { borderRadius: 10, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', flexDirection: 'row', alignItems: 'center', gap: 12, padding: 13, marginBottom: 12 },
-  completeHeroIcon: { width: 48, height: 48, borderRadius: 12, backgroundColor: '#17191D', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  completeHeroCard: { borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, marginBottom: 10 },
+  completeHeroIcon: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#17191D', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   completeHeroInfo: { flex: 1, minWidth: 0 },
-  completeHeroTitle: { color: '#17191D', fontSize: 18, lineHeight: 23, fontWeight: '900' },
-  completeHeroSubtitle: { color: '#5E646D', fontSize: 12, lineHeight: 17, fontWeight: '700', marginTop: 3 },
-  completeChecklistCard: { borderRadius: 10, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', padding: 12, marginBottom: 12 },
-  completionCheckRow: { minHeight: 54, borderTopWidth: 1, borderTopColor: '#E1E4E8', flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 9 },
+  completeHeroTitle: { color: '#17191D', fontSize: 15, fontWeight: '800' },
+  completeHeroSubtitle: { color: '#5E646D', fontSize: 12, lineHeight: 16, fontWeight: '500', marginTop: 3 },
+  completeChecklistCard: { borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', padding: 14, marginBottom: 10 },
+  completeChecklistTitle: { color: '#17191D', fontSize: 15, fontWeight: '800', marginBottom: 4 },
+  completionCheckRow: { minHeight: 54, borderTopWidth: 1, borderTopColor: '#ECEEF0', flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 9 },
   completionCheckIcon: { width: 24, height: 24, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(240,68,22,0.22)', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   completionCheckIconDone: { borderColor: '#16A34A', backgroundColor: '#16A34A' },
   completionCheckInfo: { flex: 1, minWidth: 0 },
-  completionCheckTitle: { color: '#17191D', fontSize: 13, lineHeight: 17, fontWeight: '900' },
-  completionCheckDetail: { color: '#5E646D', fontSize: 11, lineHeight: 15, fontWeight: '700', marginTop: 2 },
-  completeSummaryText: { color: '#5E646D', fontSize: 12, lineHeight: 18, fontWeight: '700' },
+  completionCheckTitle: { color: '#17191D', fontSize: 13, fontWeight: '700' },
+  completionCheckDetail: { color: '#5E646D', fontSize: 11, lineHeight: 15, fontWeight: '500', marginTop: 2 },
+  completeSummaryText: { color: '#5E646D', fontSize: 12, lineHeight: 16, fontWeight: '500' },
   completePhotosGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  completePhotoTile: { width: '31.5%', minHeight: 74, borderRadius: 8, borderWidth: 1, borderColor: '#E1E4E8', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', padding: 7, gap: 5 },
-  completeBlockedCard: { minHeight: 48, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(240,68,22,0.22)', backgroundColor: 'rgba(240,68,22,0.07)', flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 11, paddingVertical: 9, marginBottom: 12 },
-  completeBlockedText: { flex: 1, minWidth: 0, color: '#F04416', fontSize: 12, lineHeight: 16, fontWeight: '800' },
-  completeSubmitBtn: { height: 56, borderRadius: 10, backgroundColor: '#16A34A', alignItems: 'center', justifyContent: 'center' },
-  completeSubmitText: { color: '#FFFFFF', fontSize: 16, lineHeight: 20, fontWeight: '900' },
+  completePhotoTile: { width: '31.5%', minHeight: 74, borderRadius: 10, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', alignItems: 'center', justifyContent: 'center', padding: 6, gap: 4 },
+  completeBlockedCard: { minHeight: 48, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(240,68,22,0.22)', backgroundColor: 'rgba(240,68,22,0.07)', flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 11, paddingVertical: 9, marginBottom: 10 },
+  completeBlockedText: { flex: 1, minWidth: 0, color: '#F04416', fontSize: 12, lineHeight: 16, fontWeight: '700' },
+  completeSubmitBtn: { height: 66, borderRadius: 12, backgroundColor: '#16A34A', alignItems: 'center', justifyContent: 'center' },
+  completeSubmitText: { color: '#FFFFFF', fontSize: 14, fontWeight: '800' },
   changeRequestOverlay: { flex: 1, justifyContent: 'flex-end', padding: 15 },
   changeRequestCard: { borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', padding: 14, marginBottom: 18, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 12 },
   changeRequestHeaderText: { flex: 1, minWidth: 0 },
