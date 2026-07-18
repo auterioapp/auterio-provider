@@ -28,7 +28,7 @@ import JobDetailScreen, { JobStepper } from './screens/JobDetailScreen';
 import { getJobProgressIndex } from './utils/jobUtils';
 import { API_URL, ACCEPT_BLUE, TAB_BAR_PADDING, TAB_INDICATOR_EXTRA_WIDTH, TAB_INDICATOR_DROP_SCALE, TABS, JOB_STEPS, ACTIVE_SHOP_STATUSES } from './constants';
 
-import { formatMoney, getServiceMeta, getServiceTitle, getOrderServiceType, getServiceFlowSchema, getDiagnosisSchema, getProviderIntakeItems, isTowingService, getDropoffAddress, getRequestLocation, getRequestDistance, getVehicleVin, normalizeComplaintItem, getCustomerComplaintItems, getAcceptedAtLabel, getVehicleLabel, getBackendStatusFromWorkflowStage, stripCountryFromAddress } from './utils/serviceUtils';
+import { formatMoney, getServiceMeta, getServiceTitle, getOrderServiceType, getServiceFlowSchema, getDiagnosisSchema, getProviderIntakeItems, isTowingService, getDropoffAddress, getRequestLocation, getRequestDistance, getVehicleVin, normalizeComplaintItem, getCustomerComplaintItems, getAcceptedAtLabel, getVehicleDisplayParts, hasKnownVin, getBackendStatusFromWorkflowStage, stripCountryFromAddress, getArrivedAtLabel } from './utils/serviceUtils';
 import { getRecommendedServicesFromDiagnosis, getDemoEstimate, getEstimateCatalog, getEstimatePriceCheck, sumAmounts, formatCurrency } from './utils/estimateUtils';
 import { loadPricing, savePricing, DEFAULT_PRICING } from './utils/pricingStore';
 import { setAuthFailureHandler as setApiAuthFailureHandler } from './apiClient';
@@ -103,8 +103,6 @@ function normalizeOrderToJob(order) {
   const serviceMeta = getServiceMeta(order);
   const requestId = order.id || order._id || `local-${Date.now()}`;
   const number = order.number || String(requestId).replace(/\D/g, '').slice(-5) || '12345';
-  const vehicleLabel = getVehicleLabel(order);
-  const [fallbackMake, fallbackYear] = vehicleLabel.split(' - ');
   const customerName = order.customer?.name || order.contactInfo?.name || 'Customer';
   const initials = customerName.split(' ').map(part => part[0]).join('').slice(0, 2).toUpperCase() || 'CU';
   const total = Number(order.payment?.total || order.payment?.totalHeld || order.payment?.priceMax || order.price || order.total || 0);
@@ -144,10 +142,9 @@ function normalizeOrderToJob(order) {
       icon: order.service?.icon || serviceMeta.icon,
     },
     vehicle: {
-      make: order.vehicle?.make || fallbackMake || 'Vehicle',
+      make: order.vehicle?.make || '',
       model: order.vehicle?.model || '',
-      year: order.vehicle?.year || fallbackYear || '',
-      color: order.vehicle?.color || 'Color pending',
+      year: order.vehicle?.year || '',
       vin: order.vehicle?.vin,
     },
     pickup: {
@@ -196,6 +193,7 @@ function AppInner() {
   const [previewTab, setPreviewTab] = useState('home');
   const [screenResetNonce, setScreenResetNonce] = useState(0);
   const [tabBarWidth, setTabBarWidth] = useState(0);
+  const [jobsInitialTab, setJobsInitialTab] = useState(null);
   const [requestFilter, setRequestFilter] = useState('new');
   const [requests, setRequests] = useState([]);
   const [requestsLoaded, setRequestsLoaded] = useState(false);
@@ -244,6 +242,15 @@ function AppInner() {
     (job.status !== 'completed' && job.status !== 'scheduled' && job.status !== 'confirmed' && job.status !== 'proposed' && job.status !== 'cancelled' && job.status !== 'declined')
   ).length, [providerJobs]);
   const pendingCount = dashboardRequests.length;
+  const todayScheduledJobs = useMemo(() => {
+    if (isDemo) return [];
+    const start = new Date(); start.setHours(0, 0, 0, 0);
+    const end = new Date(start); end.setDate(end.getDate() + 1);
+    return acceptedJobs
+      .filter(job => ['scheduled', 'confirmed', 'proposed'].includes(job.status) && job.scheduledAt)
+      .filter(job => { const d = new Date(job.scheduledAt); return d >= start && d < end; })
+      .sort((a, b) => new Date(a.scheduledAt) - new Date(b.scheduledAt));
+  }, [acceptedJobs, isDemo]);
   const tabWidth = tabBarWidth ? (tabBarWidth - TAB_BAR_PADDING * 2) / TABS.length : 0;
   const isLightVisible = !!selectedRequest || (!selectedRequest && (activeScreen === 'home' || activeScreen === 'requests' || activeScreen === 'jobs' || activeScreen === 'earnings' || activeScreen === 'profile'));
   const [verificationStatus, setVerificationStatus] = useState('unverified');
@@ -1263,6 +1270,8 @@ function AppInner() {
               acceptingId={acceptingId}
               pendingCount={pendingCount}
               activeJobs={activeJobs}
+              completedOrders={completedOrders}
+              scheduledJobs={todayScheduledJobs}
               onOpenRequest={setSelectedRequest}
               onViewAll={() => setActiveScreen('requests')}
               allowScheduling={allowScheduling}
@@ -1274,6 +1283,8 @@ function AppInner() {
               isDemo={isDemo}
               profileComplete={profileComplete}
               onGoToProfile={() => { setActiveScreen('profile'); setActiveTab('profile'); }}
+              onGoToEarnings={() => selectTabAt(TABS.findIndex(t => t.key === 'earnings'))}
+              onGoToJobs={(tab) => { setJobsInitialTab({ tab, nonce: Date.now() }); selectTabAt(TABS.findIndex(t => t.key === 'jobs')); }}
             />
           </View>
           <View style={activeScreen !== 'requests' ? styles.screenHidden : styles.screenVisible}>
@@ -1296,7 +1307,7 @@ function AppInner() {
             />
           </View>
           <View style={activeScreen !== 'jobs' ? styles.screenHidden : styles.screenVisible}>
-            <JobsScreen jobs={providerJobs} jobWorkflows={jobWorkflows} onOpen={setSelectedJob} refreshControl={refreshControl} scrollSignal={screenResetNonce} providerType={providerType} isDemo={isDemo} />
+            <JobsScreen jobs={providerJobs} jobWorkflows={jobWorkflows} onOpen={setSelectedJob} refreshControl={refreshControl} scrollSignal={screenResetNonce} providerType={providerType} isDemo={isDemo} initialTabSignal={jobsInitialTab} />
           </View>
           <View style={activeScreen !== 'earnings' ? styles.screenHidden : styles.screenVisible}>
             <EarningsScreen refreshControl={refreshControl} scrollSignal={screenResetNonce} isDemo={isDemo} completedOrders={completedOrders} />
@@ -1715,6 +1726,9 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
   const liveDistanceMi = (customerMapCoord && providerMapCoord)
     ? haversineMiles(providerMapCoord.latitude, providerMapCoord.longitude, customerMapCoord.latitude, customerMapCoord.longitude)
     : null;
+  const liveEta = liveDistanceMi != null
+    ? `${Math.round(liveDistanceMi * 4)} min`
+    : null;
   const mapPoints = [customerMapCoord, providerMapCoord].filter(Boolean);
   const jobMapRegion = mapPoints.length ? (() => {
     const lats = mapPoints.map(p => p.latitude);
@@ -1729,9 +1743,12 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
     };
   })() : null;
   const vin = getVehicleVin(job);
+  const hasVin = hasKnownVin(job);
+  const vehicleDisplayParts = getVehicleDisplayParts(job);
   const phone = job.customer?.phone || '';
   const customerNote = job.customerNote || 'No note provided';
   const acceptedLabel = getAcceptedAtLabel(job);
+  const arrivedAtLabel = getArrivedAtLabel(job);
   const jobDuration = (() => {
     const start = job.acceptedAt ? new Date(job.acceptedAt).getTime() : null;
     const end = job.completedAt && job.completedAt !== 'Completed just now' ? new Date(job.completedAt).getTime() : Date.now();
@@ -2883,22 +2900,48 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
           <View style={styles.jobPopupHeaderTextWrap}>
             <Text style={styles.jobPopupHeaderTitle}>Job #{job.number}</Text>
             <Text style={styles.jobPopupAcceptedText}>{acceptedLabel}</Text>
+            {!!arrivedAtLabel && <Text style={styles.jobPopupArrivedText}>{arrivedAtLabel}</Text>}
           </View>
           <View style={styles.requestHeaderIconBtn} />
         </View>
 
         <ScrollView style={[styles.container, styles.requestDetailScroll]} contentContainerStyle={styles.arrivedContent} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
+          <View style={styles.jobCustomerCard}>
+            <View style={styles.customerPopupAvatar}>
+              <Text style={styles.customerPopupInitials}>{job.customer?.initials || 'CU'}</Text>
+            </View>
+            <View style={styles.customerPopupInfo}>
+              <View style={styles.customerNameRatingRow}>
+                <Text style={styles.customerPopupName} numberOfLines={1}>{job.customer?.name || 'Customer'}</Text>
+              </View>
+              <View style={styles.customerTrustedLine}>
+                <Ionicons name="shield-checkmark-outline" size={13} color="#F04416" />
+                <Text style={styles.customerTrustedText}>Verified & trusted</Text>
+              </View>
+            </View>
+            <View style={styles.customerActionsDivider} />
+            <View style={styles.customerPopupActions}>
+              <TouchableOpacity style={styles.customerPopupActionBtn} activeOpacity={0.82} onPress={() => phone && Linking.openURL(`tel:${phone}`)}>
+                <Ionicons name="call-outline" size={19} color="#F04416" />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.customerPopupActionBtn} activeOpacity={0.82} onPress={() => phone && Linking.openURL(`sms:${phone}`)}>
+                <Ionicons name="chatbox-outline" size={19} color="#F04416" />
+              </TouchableOpacity>
+            </View>
+          </View>
+
           <View style={styles.vehicleInfoCard}>
             <View style={styles.requestVehicleIcon}>
               <Ionicons name={job.service?.icon || job.icon || 'car-outline'} size={22} color="#F04416" />
             </View>
             <View style={styles.serviceInfo}>
-              <Text style={styles.serviceType} numberOfLines={2}>{job.vehicle?.year} {job.vehicle?.make} {job.vehicle?.model}</Text>
-              <Text style={styles.serviceVehicle} numberOfLines={1}>{job.vehicle?.color || 'Color pending'}</Text>
-              <View style={[styles.trustedLine, styles.vehicleTrustedLine]}>
-                <Ionicons name="barcode-outline" size={13} color="#F04416" />
-                <Text style={styles.verifiedTrusted} numberOfLines={1}>VIN {vin}</Text>
-              </View>
+              <Text style={styles.serviceType} numberOfLines={2}>{vehicleDisplayParts.main}{!!vehicleDisplayParts.suffix && <Text style={styles.serviceTypeSuffix}>{vehicleDisplayParts.suffix}</Text>}</Text>
+              {hasVin && (
+                <View style={[styles.trustedLine, styles.vehicleTrustedLine]}>
+                  <Ionicons name="barcode-outline" size={13} color="#F04416" />
+                  <Text style={styles.verifiedTrusted} numberOfLines={1}>VIN {vin}</Text>
+                </View>
+              )}
             </View>
             <View style={styles.vehicleMetaBox}>
               <View style={styles.requestSpecRow}>
@@ -2908,32 +2951,8 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
             </View>
           </View>
 
-          <View style={styles.vehicleInfoCard}>
-            <View style={styles.requestVehicleIcon}>
-              <Ionicons name={job.service?.icon || job.icon || 'construct-outline'} size={22} color="#F04416" />
-            </View>
-            <View style={styles.serviceInfo}>
-              <Text style={styles.serviceType} numberOfLines={2}>{job.service?.type || 'Service request'}</Text>
-              <Text style={styles.serviceVehicle} numberOfLines={1}>Requested problem</Text>
-              <View style={[styles.trustedLine, styles.vehicleTrustedLine]}>
-                <Ionicons name="chatbox-outline" size={13} color="#F04416" />
-                <Text style={styles.verifiedTrusted} numberOfLines={1}>{customerNote}</Text>
-              </View>
-            </View>
-            <View style={styles.vehicleMetaBox}>
-              <View style={styles.requestSpecRow}>
-                <Text style={styles.requestSpecLabel}>Issue</Text>
-                <Text style={styles.requestSpecValue} numberOfLines={1}>{job.service?.type || 'Service'}</Text>
-              </View>
-            </View>
-          </View>
-
-          <View style={styles.arrivedStatusCard}>
-            <View style={styles.arrivedStatusLeft}>
-              <View style={styles.arrivedStatusDot} />
-              <Text style={styles.arrivedStatusText}>Arrived</Text>
-            </View>
-            <Text style={styles.arrivedStatusTime}>10:35 AM</Text>
+          <View style={styles.requestBriefCard}>
+            <RequestInfoRow icon="chatbox-outline" color="#2F80FF" label="Customer Note" value={customerNote} />
           </View>
 
           <View style={styles.jobProgressCard}>
@@ -2958,7 +2977,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
                     <Text style={styles.arrivedNextTitle}>{item.title}</Text>
                     {item.optional && <Text style={styles.arrivedNextOptional}>(optional)</Text>}
                   </View>
-                  <Text style={styles.arrivedNextSubtitle}>{item.subtitle}</Text>
+                  <Text style={styles.arrivedNextSubtitle} numberOfLines={1}>{arrivedChecklistData[item.key] || item.subtitle}</Text>
                 </View>
                 <Ionicons name="chevron-forward" size={18} color="#8B9098" />
               </TouchableOpacity>
@@ -2970,6 +2989,9 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
           <TouchableOpacity style={[styles.startInspectionBtn, !canContinueDiagnosis && styles.startInspectionBtnDisabled]} activeOpacity={canContinueDiagnosis ? 0.86 : 1} disabled={!canContinueDiagnosis} onPress={() => { setArrivedOpen(false); setDiagnosisOpen(true); onWorkflowChange?.({ stage: 'diagnosis' }); }}>
             <Text style={[styles.startInspectionText, !canContinueDiagnosis && styles.startInspectionTextDisabled]}>Continue to Diagnosis</Text>
           </TouchableOpacity>
+          {!canContinueDiagnosis && (
+            <Text style={styles.arrivedContinueHint}>Complete required photos to continue</Text>
+          )}
         </ScrollView>
 
         <Modal visible={!!activeChecklistItem} transparent animationType="fade" onRequestClose={() => setActiveChecklistItem(null)}>
@@ -3082,7 +3104,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
                 <Text style={styles.mapPlaceholderText}>Map unavailable</Text>
               </View>
             )}
-            <View style={styles.mapBubble}><Text style={styles.mapBubbleText}>{job.eta || '15 min'}{`\n`}To customer</Text></View>
+            <View style={styles.mapBubble}><Text style={styles.mapBubbleText}>{liveEta || job.eta || '15 min'}{`\n`}To customer</Text></View>
           </View>
 
           <View style={styles.jobCustomerCard}>
@@ -3277,10 +3299,12 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
                 <Ionicons name="car-outline" size={15} color="#5E646D" />
                 <Text style={styles.detailGridTitle}>Vehicle</Text>
               </View>
-              <Text style={styles.detailGridMain}>{job.vehicle?.year} {job.vehicle?.make} {job.vehicle?.model}</Text>
-              <View style={styles.detailVinPill}>
-                <Text style={styles.detailVinPillText}>VIN {vin}</Text>
-              </View>
+              <Text style={styles.detailGridMain}>{vehicleDisplayParts.main}{!!vehicleDisplayParts.suffix && <Text style={styles.serviceTypeSuffix}>{vehicleDisplayParts.suffix}</Text>}</Text>
+              {hasVin && (
+                <View style={styles.detailVinPill}>
+                  <Text style={styles.detailVinPillText}>VIN {vin}</Text>
+                </View>
+              )}
             </View>
             <View style={styles.detailGridCard}>
               <View style={styles.detailGridHeader}>
@@ -3707,12 +3731,13 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
             <Ionicons name={job.service?.icon || job.icon || 'car-outline'} size={22} color="#F04416" />
           </View>
           <View style={styles.serviceInfo}>
-            <Text style={styles.serviceType} numberOfLines={2}>{job.vehicle?.year} {job.vehicle?.make} {job.vehicle?.model}</Text>
-            <Text style={styles.serviceVehicle} numberOfLines={1}>{job.vehicle?.color || 'Color pending'}</Text>
-            <View style={[styles.trustedLine, styles.vehicleTrustedLine]}>
-              <Ionicons name="barcode-outline" size={13} color="#F04416" />
-              <Text style={styles.verifiedTrusted} numberOfLines={1}>VIN {vin}</Text>
-            </View>
+            <Text style={styles.serviceType} numberOfLines={2}>{vehicleDisplayParts.main}{!!vehicleDisplayParts.suffix && <Text style={styles.serviceTypeSuffix}>{vehicleDisplayParts.suffix}</Text>}</Text>
+            {hasVin && (
+              <View style={[styles.trustedLine, styles.vehicleTrustedLine]}>
+                <Ionicons name="barcode-outline" size={13} color="#F04416" />
+                <Text style={styles.verifiedTrusted} numberOfLines={1}>VIN {vin}</Text>
+              </View>
+            )}
           </View>
           <View style={styles.vehicleMetaBox}>
             <View style={styles.requestSpecRow}>
@@ -3781,7 +3806,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
                 <Text style={styles.mapPlaceholderText}>Map unavailable</Text>
               </View>
             )}
-            <View style={styles.mapBubble}><Text style={styles.mapBubbleText}>{job.eta || '15 min'}{`\n`}On route</Text></View>
+            <View style={styles.mapBubble}><Text style={styles.mapBubbleText}>{liveEta || job.eta || '15 min'}{`\n`}On route</Text></View>
           </View>
         )}
 
@@ -3950,7 +3975,7 @@ function EstimateLine({ label, hours, amount, strong, total, mutedLabel, onRemov
 
 function CustomerEstimatePreview({ job, estimate, onClose }) {
   const serviceMeta = getServiceMeta(job);
-  const vehicle = getVehicleLabel(job);
+  const vehicleParts = getVehicleDisplayParts(job);
   const optionalAvailable = estimate.optionalSubtotal > 0;
 
   return (
@@ -3977,7 +4002,7 @@ function CustomerEstimatePreview({ job, estimate, onClose }) {
             </View>
             <View style={styles.customerEstimateHeroInfo}>
               <Text style={styles.customerEstimateService} numberOfLines={1}>{serviceMeta.title}</Text>
-              <Text style={styles.customerEstimateVehicle} numberOfLines={2}>{vehicle}</Text>
+              <Text style={styles.customerEstimateVehicle} numberOfLines={2}>{vehicleParts.main}{!!vehicleParts.suffix && <Text style={styles.serviceTypeSuffix}>{vehicleParts.suffix}</Text>}</Text>
               <Text style={styles.customerEstimateLocation} numberOfLines={1}>{job.pickup?.address || 'Service location'}</Text>
             </View>
           </View>
@@ -4084,6 +4109,8 @@ function getInvoiceData(job, workflow, additionalApprovals, fallbackEstimate) {
 }
 
 function InvoicePreviewModal({ visible, onClose, job, vin, invoiceEstimate, invoiceNumber, invoiceSubtotal, invoiceTax, finalTotal, paymentMethod, approvedRequiredChanges }) {
+  const vehicleDisplayParts = getVehicleDisplayParts(job);
+  const hasVin = hasKnownVin(job);
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.customerEstimateOverlay}>
@@ -4112,8 +4139,8 @@ function InvoicePreviewModal({ visible, onClose, job, vin, invoiceEstimate, invo
               <View style={styles.invoicePartyRow}>
                 <Text style={styles.invoicePartyLabel}>TO</Text>
                 <Text style={styles.invoicePartyName}>{job.customer?.name || 'Customer'}</Text>
-                <Text style={styles.invoicePartySub}>{job.vehicle?.make} {job.vehicle?.model} {job.vehicle?.year}</Text>
-                {!!vin && <Text style={styles.invoicePartySub}>VIN: {vin}</Text>}
+                <Text style={styles.invoicePartySub}>{vehicleDisplayParts.main}{!!vehicleDisplayParts.suffix && <Text style={styles.serviceTypeSuffix}>{vehicleDisplayParts.suffix}</Text>}</Text>
+                {hasVin && <Text style={styles.invoicePartySub}>VIN: {vin}</Text>}
               </View>
             </View>
 
@@ -5140,13 +5167,14 @@ const styles = StyleSheet.create({
   scheduledEta: { color: '#F04416', fontSize: 13, lineHeight: 16, fontWeight: '800' },
   scheduledPay: { color: '#5E646D', fontSize: 9, lineHeight: 12, fontWeight: '500', textAlign: 'right' },
   requestDetailShell: { flex: 1, backgroundColor: '#FFFFFF' },
-  requestDetailHeader: { minHeight: 68, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 72, backgroundColor: '#FFFFFF' },
-  requestHeaderIconBtn: { width: 42, height: 42, alignItems: 'flex-start', justifyContent: 'center' },
+  requestDetailHeader: { minHeight: 68, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 84, backgroundColor: '#FFFFFF' },
+  requestHeaderIconBtn: { width: 42, height: 42, alignItems: 'flex-start', justifyContent: 'center', marginTop: -8 },
   requestHeaderMenuBtn: { width: 46, height: 46, borderRadius: 23, backgroundColor: '#F5F6F7', borderWidth: 1, borderColor: '#E6E8EB', alignItems: 'center', justifyContent: 'center' },
   requestHeaderTitle: { position: 'absolute', left: 72, right: 72, bottom: 13, color: '#17191D', fontSize: 19, lineHeight: 24, fontWeight: '700', textAlign: 'center' },
   jobPopupHeaderTextWrap: { position: 'absolute', left: 72, right: 72, bottom: 10, alignItems: 'center' },
   jobPopupHeaderTitle: { color: '#17191D', fontSize: 16, lineHeight: 19, fontWeight: '700', textAlign: 'center' },
   jobPopupAcceptedText: { color: '#5E646D', fontSize: 10, lineHeight: 13, fontWeight: '600', textAlign: 'center', marginTop: 1 },
+  jobPopupArrivedText: { color: '#16A34A', fontSize: 10, lineHeight: 13, fontWeight: '700', textAlign: 'center', marginTop: 1 },
   requestDetailScroll: { backgroundColor: '#FFFFFF' },
   requestDetailContent: { paddingHorizontal: 15, paddingTop: 10, paddingBottom: 12 },
   jobPopupContent: { paddingHorizontal: 15, paddingTop: 10, paddingBottom: 28 },
@@ -5187,7 +5215,7 @@ const styles = StyleSheet.create({
   customerPopupInitials: { color: '#17191D', fontSize: 13, fontWeight: '800' },
   customerPopupInfo: { flex: 1, minWidth: 0 },
   customerNameRatingRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 2 },
-  customerPopupName: { color: '#17191D', fontSize: 15, lineHeight: 19, fontWeight: '700', flexShrink: 1 },
+  customerPopupName: { color: '#17191D', fontSize: 14, lineHeight: 18, fontWeight: '800', flexShrink: 1 },
   customerRatingPill: { height: 20, borderRadius: 10, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E1E4E8', flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 6, flexShrink: 0 },
   customerRatingText: { color: '#17191D', fontSize: 10, fontWeight: '800' },
   customerTrustedLine: { flexDirection: 'row', alignItems: 'center', gap: 4, minHeight: 16 },
@@ -5375,12 +5403,7 @@ const styles = StyleSheet.create({
   routeBottomPanel: { position: 'absolute', left: 10, right: 10, bottom: 28, borderRadius: 14, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#ECEEF0', padding: 10, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 14, shadowOffset: { width: 0, height: 6 }, elevation: 10 },
   arrivedRouteBtn: { height: 58, borderRadius: 10, backgroundColor: '#F04416', alignItems: 'center', justifyContent: 'center' },
   arrivedRouteText: { color: '#FFFFFF', fontSize: 17, lineHeight: 21, fontWeight: '800' },
-  arrivedContent: { paddingHorizontal: 15, paddingTop: 10, paddingBottom: 32 },
-  arrivedStatusCard: { height: 42, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(22,163,74,0.18)', backgroundColor: 'rgba(22,163,74,0.08)', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12, marginBottom: 9 },
-  arrivedStatusLeft: { flexDirection: 'row', alignItems: 'center', gap: 7 },
-  arrivedStatusDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#16A34A' },
-  arrivedStatusText: { color: '#16A34A', fontSize: 12, lineHeight: 15, fontWeight: '800' },
-  arrivedStatusTime: { color: '#5E646D', fontSize: 11, lineHeight: 14, fontWeight: '700' },
+  arrivedContent: { paddingHorizontal: 15, paddingTop: 2, paddingBottom: 32 },
   arrivedSectionCard: { borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', padding: 12, marginBottom: 10 },
   arrivedSectionTitle: { color: '#17191D', fontSize: 15, lineHeight: 19, fontWeight: '800', marginBottom: 10 },
   diagnosisContent: { paddingHorizontal: 15, paddingTop: 10, paddingBottom: 32 },
@@ -5841,7 +5864,9 @@ const styles = StyleSheet.create({
   serviceRow: { flexDirection: 'row', alignItems: 'center', gap: 13 },
   serviceIconWrap: { width: 48, height: 48, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   serviceInfo: { flex: 1, minWidth: 0 },
-  serviceType: { color: '#17191D', fontSize: 13, lineHeight: 17, fontWeight: '700', marginBottom: 2, flexShrink: 1 },
+  serviceType: { color: '#17191D', fontSize: 14, lineHeight: 18, fontWeight: '800', marginBottom: 2, flexShrink: 1 },
+  serviceTypeSuffix: { fontSize: 11, fontWeight: '500', color: '#8B9098' },
+  arrivedContinueHint: { color: '#8B9098', fontSize: 11, fontWeight: '600', textAlign: 'center', marginTop: 8 },
   serviceVehicle: { color: '#5E646D', fontSize: 12, lineHeight: 16, fontWeight: '600', marginBottom: 3 },
   serviceAddress: { color: '#5E646D', fontSize: 12, fontWeight: '600' },
   vehicleTrustedLine: { minHeight: 16 },

@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { Alert, Modal, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import useScrollToTop from '../hooks/useScrollToTop';
-import { getServiceMeta, formatMoney, getServiceMode, getRequestDistance, getCityState } from '../utils/serviceUtils';
+import { getServiceMeta, formatMoney, getServiceMode, getRequestDistance, getCityState, getTodayCompletedStats, getVehicleTypeLabel } from '../utils/serviceUtils';
+import { formatCurrency } from '../utils/estimateUtils';
 import { useProvider } from '../ProviderContext';
 
 const DEMO_INCOMING_REQUEST = {
@@ -38,6 +39,25 @@ const DEMO_SCHEDULE = [
   { time: '2:00 PM', title: 'Diagnostics', vehicle: 'BMW X5', eta: 'In 3h 45m' },
 ];
 
+function formatActivityDate(dateStr) {
+  const d = new Date(dateStr);
+  const now = new Date();
+  const time = d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+  if (d.toDateString() === now.toDateString()) return `Today, ${time}`;
+  const yesterday = new Date(now); yesterday.setDate(now.getDate() - 1);
+  if (d.toDateString() === yesterday.toDateString()) return `Yesterday, ${time}`;
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function getRelativeTimeLabel(targetDate) {
+  const diffMs = new Date(targetDate).getTime() - Date.now();
+  if (diffMs <= 0) return 'Now';
+  const mins = Math.round(diffMs / 60000);
+  if (mins < 60) return `In ${mins} min`;
+  const h = Math.floor(mins / 60), m = mins % 60;
+  return m > 0 ? `In ${h}h ${m}min` : `In ${h}h`;
+}
+
 const DEMO_ACTIVITY = [
   { icon: 'wallet-outline', color: '#22C55E', title: 'Payment received', meta: 'Today, 8:45 AM', value: '$89.00' },
   { icon: 'star', color: '#FFC107', title: 'New 5-star review', meta: 'Great service! Very professional.', value: '5.0' },
@@ -62,9 +82,25 @@ function ProfileSetupBanner({ onGoToProfile }) {
   );
 }
 
-export default function HomeScreen({ online, setOnline, requests = [], requestAnim, acceptingId, pendingCount, activeJobs, onOpenRequest, onViewAll, allowScheduling, onAccept, onDecline, refreshControl, scrollSignal, verificationStatus, isDemo, profileComplete, onGoToProfile }) {
+export default function HomeScreen({ online, setOnline, requests = [], requestAnim, acceptingId, pendingCount, activeJobs, completedOrders = [], scheduledJobs = [], onOpenRequest, onViewAll, allowScheduling, onAccept, onDecline, refreshControl, scrollSignal, verificationStatus, isDemo, profileComplete, onGoToProfile, onGoToEarnings, onGoToJobs }) {
   const { provider } = useProvider();
   const scrollRef = useScrollToTop(scrollSignal);
+  const todayStats = getTodayCompletedStats(completedOrders);
+  const recentActivity = isDemo ? [] : [...completedOrders]
+    .sort((a, b) => new Date(b.completedAt || b.updatedAt || 0) - new Date(a.completedAt || a.updatedAt || 0))
+    .slice(0, 5)
+    .map(order => {
+      const meta = getServiceMeta(order);
+      const amount = Number(order.payment?.total || order.payment?.totalHeld || order.payment?.priceMax || 0);
+      return {
+        key: order.id || order._id,
+        icon: 'checkmark-circle',
+        color: '#16A34A',
+        title: 'Job completed',
+        meta: `${meta.title} · ${formatActivityDate(order.completedAt || order.updatedAt)}`,
+        value: formatCurrency(amount),
+      };
+    });
   const [showAllRequests, setShowAllRequests] = useState(false);
   const [showDemoRequest, setShowDemoRequest] = useState(true);
   const [showDemoBooking, setShowDemoBooking] = useState(true);
@@ -115,10 +151,10 @@ export default function HomeScreen({ online, setOnline, requests = [], requestAn
       <Text style={styles.subGreeting}>Here's what's happening with your business today.</Text>
 
       <View style={styles.metricsGrid}>
-        <Metric title="Today's Revenue" value={isDemo ? '$1,240.00' : '$0.00'} meta={isDemo ? '12% vs yesterday' : 'No jobs yet'} icon="cash-outline" color="#17191D" />
-        <Metric title="Active Jobs" value={String(activeJobs)} meta="View ongoing jobs" icon="briefcase-outline" color="#F04416" />
+        <Metric title="Today's Revenue" value={isDemo ? '$1,240.00' : formatCurrency(todayStats.total)} meta={isDemo ? '12% vs yesterday' : (todayStats.count ? `${todayStats.count} job${todayStats.count === 1 ? '' : 's'} today` : 'No jobs yet')} icon="cash-outline" color="#17191D" onPress={onGoToEarnings} />
+        <Metric title="Active Jobs" value={String(activeJobs)} meta="View ongoing jobs" icon="time-outline" color="#2F80FF" onPress={() => onGoToJobs && onGoToJobs('active')} />
         <Metric title="Pending Requests" value={String(pendingCount)} meta="View new requests" icon="receipt-outline" color="#17191D" />
-        <Metric title="Jobs Completed" value={isDemo ? '8' : '0'} meta={isDemo ? '2 vs yesterday' : 'No jobs yet'} icon="checkmark-done" color="#F04416" />
+        <Metric title="Jobs Completed" value={isDemo ? '8' : String(todayStats.count)} meta={isDemo ? '2 vs yesterday' : (todayStats.count ? 'Today' : 'No jobs yet')} icon="checkmark-circle" color="#16A34A" onPress={() => onGoToJobs && onGoToJobs('completed')} />
       </View>
 
       {!profileComplete && !isDemo && <ProfileSetupBanner onGoToProfile={onGoToProfile} />}
@@ -217,7 +253,21 @@ export default function HomeScreen({ online, setOnline, requests = [], requestAn
             </View>
             <Text style={styles.etaText}>{item.eta}</Text>
           </View>
-        )) : (
+        )) : scheduledJobs.length ? scheduledJobs.map((job, index) => {
+          const meta = getServiceMeta(job);
+          const time = new Date(job.scheduledAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+          return (
+            <View key={job.id || job._id || index} style={[styles.scheduleRow, index < scheduledJobs.length - 1 && styles.rowBorder]}>
+              <Text style={styles.timeText}>{time}</Text>
+              <View style={styles.timelineDot} />
+              <View style={styles.scheduleInfo}>
+                <Text style={styles.scheduleTitle}>{meta.title}</Text>
+                <Text style={styles.scheduleVehicle}>{getVehicleTypeLabel(job)}</Text>
+              </View>
+              <Text style={styles.etaText}>{getRelativeTimeLabel(job.scheduledAt)}</Text>
+            </View>
+          );
+        }) : (
           <View style={styles.emptyState}>
             <Ionicons name="calendar-outline" size={28} color="#C8CDD4" />
             <Text style={styles.emptyStateText}>No scheduled jobs yet</Text>
@@ -237,6 +287,17 @@ export default function HomeScreen({ online, setOnline, requests = [], requestAn
               <Text style={styles.activityMeta}>{item.meta}</Text>
             </View>
             <Text style={[styles.activityValue, item.valueColor && { color: item.valueColor }]}>{item.value}</Text>
+          </View>
+        )) : recentActivity.length ? recentActivity.map(item => (
+          <View key={item.key} style={styles.activityRow}>
+            <View style={[styles.activityIcon, { backgroundColor: item.color + '20' }]}>
+              <Ionicons name={item.icon} size={18} color={item.color} />
+            </View>
+            <View style={styles.activityInfo}>
+              <Text style={styles.activityTitle}>{item.title}</Text>
+              <Text style={styles.activityMeta}>{item.meta}</Text>
+            </View>
+            <Text style={styles.activityValue}>{item.value}</Text>
           </View>
         )) : (
           <View style={styles.emptyState}>
@@ -359,9 +420,10 @@ function IncomingRequest({ order, accepting, onOpen, onAccept, onDecline, allowS
   );
 }
 
-function Metric({ title, value, meta, icon, color, compact }) {
+function Metric({ title, value, meta, icon, color, compact, onPress }) {
+  const CardComponent = onPress ? TouchableOpacity : View;
   return (
-    <View style={[styles.metricCard, compact && styles.metricCardCompact]}>
+    <CardComponent style={[styles.metricCard, compact && styles.metricCardCompact]} onPress={onPress} activeOpacity={onPress ? 0.84 : 1}>
       <View style={styles.metricTop}>
         <Text style={styles.metricTitle}>{title}</Text>
         <View style={[styles.metricIcon, { backgroundColor: color + '20' }]}>
@@ -370,7 +432,7 @@ function Metric({ title, value, meta, icon, color, compact }) {
       </View>
       <Text style={[styles.metricValue, { color }]} numberOfLines={1}>{value}</Text>
       <Text style={styles.metricMeta}>{meta}</Text>
-    </View>
+    </CardComponent>
   );
 }
 

@@ -1,11 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { getServiceMeta, getDropoffAddress, isTowingService, getProviderIntakeItems, getServiceMode } from '../utils/serviceUtils';
+import { getServiceMeta, getDropoffAddress, isTowingService, getProviderIntakeItems, getServiceMode, getVehicleDisplayLabel, hasKnownVin } from '../utils/serviceUtils';
 import { formatCurrency } from '../utils/estimateUtils';
 
 const TIMER_SECONDS = 60;
-const VEHICLE_TYPE_LABELS = { car: 'Car', truck: 'Truck', van: 'Van', moto: 'Motorcycle' };
 
 function formatTimer(s) {
   return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
@@ -31,10 +30,7 @@ export default function RequestDetailScreen({ order, accepting, providerType = '
   const serviceMeta = getServiceMeta(order);
   const icon = serviceMeta.icon;
   const title = serviceMeta.title;
-  const knownVehicle = [order.vehicle?.year, order.vehicle?.make, order.vehicle?.model].filter(Boolean).join(' ');
-  const vehicleTypeLabel = VEHICLE_TYPE_LABELS[order.service?.vehicleType]
-    || (order.service?.vehicleType ? order.service.vehicleType.charAt(0).toUpperCase() + order.service.vehicleType.slice(1) : '');
-  const displayVehicle = knownVehicle || (vehicleTypeLabel ? `${vehicleTypeLabel} (details not provided)` : 'No vehicle info provided');
+  const displayVehicle = getVehicleDisplayLabel(order);
   const address = order.pickup?.address || 'Location pending';
   const dropoffAddress = getDropoffAddress(order);
   const payout = Number(order.payment?.totalHeld || order.payment?.total || 0);
@@ -47,7 +43,7 @@ export default function RequestDetailScreen({ order, accepting, providerType = '
   const customerFiles = Array.isArray(rawCustomerFiles) ? rawCustomerFiles.filter(Boolean) : [];
   const isTowing = isTowingService(order);
   const isCustomerVerified = !!order.customer?.phoneVerified;
-  const hasVin = !!order.vehicle?.vin && order.vehicle.vin !== 'Not added';
+  const hasVin = hasKnownVin(order);
 
   const intakeRows = getProviderIntakeItems(order)
     .filter(item => item.value !== undefined && item.value !== null && String(item.value).trim())

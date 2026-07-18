@@ -54,7 +54,8 @@
       "Bash(rm -f /tmp/expo_bp13.log)",
       "Bash(taskkill //PID 20156 //F //T)",
       "Bash(rm -f /tmp/expo_bp14.log)",
-      "WebFetch(domain:docs.expo.dev)"
+      "WebFetch(domain:docs.expo.dev)",
+      "Bash(node -c routes/orders.js)"
     ],
     "additionalDirectories": [
       "C:\\Users\\PCUSER\\AppData\\Local\\Temp\\claude\\c--Users-PCUSER-auterio-provider\\64bebc74-8dab-4c76-bee5-745a688192dd\\scratchpad"

@@ -1,18 +1,22 @@
-import { Fragment, useState } from 'react';
+import { Fragment, useEffect, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import useScrollToTop from '../hooks/useScrollToTop';
 import SwipePager from '../components/SwipePager';
 import { getJobStatusMeta, getJobProgressIndex, getWorkflowJobStatus } from '../utils/jobUtils';
-import { getServiceMode } from '../utils/serviceUtils';
+import { getServiceMode, getVehicleTypeLabel } from '../utils/serviceUtils';
 import { formatCurrency } from '../utils/estimateUtils';
 import { JOB_STEPS, ACTIVE_SHOP_STATUSES } from '../constants';
 import CalendarScreen from './CalendarScreen';
 
-export default function JobsScreen({ jobs, jobWorkflows = {}, onOpen, refreshControl, scrollSignal, providerType = 'mobile', isDemo = false }) {
+export default function JobsScreen({ jobs, jobWorkflows = {}, onOpen, refreshControl, scrollSignal, providerType = 'mobile', isDemo = false, initialTabSignal }) {
   const hasAppointments = providerType === 'shop' || providerType === 'both';
   const scrollRef = useScrollToTop(scrollSignal);
   const [activeTab, setActiveTab] = useState('active');
+
+  useEffect(() => {
+    if (initialTabSignal?.tab) setActiveTab(initialTabSignal.tab);
+  }, [initialTabSignal?.nonce]);
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const jobsWithStatus = jobs.map(job => ({
@@ -182,9 +186,7 @@ function ActiveJobCard({ job, onOpen, completed }) {
       ? (SHOP_STATUS_BADGE[job.shopStatus]?.color || cardAccent)
       : (meta.color || cardAccent);
 
-  const vehicle = job.vehicle
-    ? [job.vehicle.year, job.vehicle.make, job.vehicle.model].filter(Boolean).join(' ') || job.vehicle.make || 'Vehicle'
-    : job.vehicleType || 'Vehicle';
+  const vehicle = getVehicleTypeLabel(job);
   const serviceType = getRequestedService(job);
   const customerName = job.customer?.name || 'Customer';
   const payout = job.payment?.total ?? job.payment?.totalHeld ?? job.payment?.priceMin ?? 0;

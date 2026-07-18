@@ -457,6 +457,14 @@ export function getAcceptedAtLabel(job) {
   return `Accepted ${date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}, ${date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
 }
 
+export function getArrivedAtLabel(job) {
+  const rawValue = job.arrivedAt;
+  if (!rawValue) return null;
+  const date = new Date(rawValue);
+  if (Number.isNaN(date.getTime())) return null;
+  return `Arrived ${date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}`;
+}
+
 export function getVehicleLabel(order) {
   const demo = getDemoRequestDetails(order);
   const make = order.vehicle?.make;
@@ -468,6 +476,49 @@ export function getVehicleLabel(order) {
   if (year) return `Vehicle - ${year}`;
   if (demo.vehicle) return demo.vehicle;
   return 'Vehicle details pending';
+}
+
+const VEHICLE_TYPE_LABELS = { car: 'Car', truck: 'Truck', van: 'Van', moto: 'Motorcycle' };
+
+// Honest fallback for orders where the customer skipped make/model/year: falls back to the
+// broad vehicle category (car/truck/van/moto) if known, otherwise admits there's no data at all.
+export function getVehicleDisplayLabel(order) {
+  const knownVehicle = [order.vehicle?.year, order.vehicle?.make, order.vehicle?.model].filter(Boolean).join(' ');
+  if (knownVehicle) return knownVehicle;
+  const rawType = order.service?.vehicleType;
+  const typeLabel = VEHICLE_TYPE_LABELS[rawType] || (rawType ? rawType.charAt(0).toUpperCase() + rawType.slice(1) : '');
+  return typeLabel ? `${typeLabel} (details not provided)` : 'No vehicle info provided';
+}
+
+// Compact variant for list rows: just the vehicle category (e.g. "Car"), no long
+// "(details not provided)" explainer — falls back to the generic "Vehicle" label.
+export function getVehicleTypeLabel(order) {
+  const knownVehicle = [order.vehicle?.year, order.vehicle?.make, order.vehicle?.model].filter(Boolean).join(' ');
+  if (knownVehicle) return knownVehicle;
+  const rawType = order.service?.vehicleType;
+  return VEHICLE_TYPE_LABELS[rawType] || (rawType ? rawType.charAt(0).toUpperCase() + rawType.slice(1) : 'Vehicle');
+}
+
+// Same fallback as getVehicleDisplayLabel, but split so callers can render the
+// "(details not provided)" explainer in a smaller/muted style than the main label.
+export function getVehicleDisplayParts(order) {
+  const knownVehicle = [order.vehicle?.year, order.vehicle?.make, order.vehicle?.model].filter(Boolean).join(' ');
+  if (knownVehicle) return { main: knownVehicle, suffix: '' };
+  const rawType = order.service?.vehicleType;
+  const typeLabel = VEHICLE_TYPE_LABELS[rawType] || (rawType ? rawType.charAt(0).toUpperCase() + rawType.slice(1) : '');
+  return typeLabel ? { main: typeLabel, suffix: ' (details not provided)' } : { main: 'No vehicle info provided', suffix: '' };
+}
+
+export function hasKnownVin(order) {
+  return !!order.vehicle?.vin && order.vehicle.vin !== 'Not added';
+}
+
+export function getTodayCompletedStats(completedOrders = []) {
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const todayOrders = completedOrders.filter(o => new Date(o.completedAt || o.updatedAt || o.createdAt) >= startOfToday);
+  const total = todayOrders.reduce((acc, o) => acc + Number(o.payment?.total || o.payment?.totalHeld || o.payment?.priceMax || 0), 0);
+  return { count: todayOrders.length, total };
 }
 
 export async function fetchJson(url, options) {
