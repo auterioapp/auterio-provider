@@ -10,7 +10,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import { GestureHandlerRootView, PanGestureHandler, State as GestureState } from 'react-native-gesture-handler';
-import MapView, { Marker, Polyline, PROVIDER_GOOGLE } from 'react-native-maps';
+import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import WelcomeScreen from './screens/WelcomeScreen';
 import AuthScreen from './screens/AuthScreen';
 import BusinessInfoScreen from './screens/BusinessInfoScreen';
@@ -26,7 +26,7 @@ import { getServiceMode } from './utils/serviceUtils';
 import JobsScreen from './screens/JobsScreen';
 import JobDetailScreen, { JobStepper } from './screens/JobDetailScreen';
 import { getJobProgressIndex } from './utils/jobUtils';
-import { API_URL, ACCEPT_BLUE, TAB_BAR_PADDING, TAB_INDICATOR_EXTRA_WIDTH, TAB_INDICATOR_DROP_SCALE, TABS, REQUEST_ROUTE, REQUEST_MAP_REGION, JOB_STEPS, ACTIVE_SHOP_STATUSES } from './constants';
+import { API_URL, ACCEPT_BLUE, TAB_BAR_PADDING, TAB_INDICATOR_EXTRA_WIDTH, TAB_INDICATOR_DROP_SCALE, TABS, JOB_STEPS, ACTIVE_SHOP_STATUSES } from './constants';
 
 import { formatMoney, getServiceMeta, getServiceTitle, getOrderServiceType, getServiceFlowSchema, getDiagnosisSchema, getProviderIntakeItems, isTowingService, getDropoffAddress, getRequestLocation, getRequestDistance, getVehicleVin, normalizeComplaintItem, getCustomerComplaintItems, getAcceptedAtLabel, getVehicleLabel, getBackendStatusFromWorkflowStage, stripCountryFromAddress } from './utils/serviceUtils';
 import { getRecommendedServicesFromDiagnosis, getDemoEstimate, getEstimateCatalog, getEstimatePriceCheck, sumAmounts, formatCurrency } from './utils/estimateUtils';
@@ -90,6 +90,15 @@ const MOBILE_STAGE_FROM_STATUS = {
   in_progress: 'working',
 };
 
+function haversineMiles(lat1, lng1, lat2, lng2) {
+  const R = 3958.8;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
 function normalizeOrderToJob(order) {
   const serviceMeta = getServiceMeta(order);
   const requestId = order.id || order._id || `local-${Date.now()}`;
@@ -98,7 +107,7 @@ function normalizeOrderToJob(order) {
   const [fallbackMake, fallbackYear] = vehicleLabel.split(' - ');
   const customerName = order.customer?.name || order.contactInfo?.name || 'Customer';
   const initials = customerName.split(' ').map(part => part[0]).join('').slice(0, 2).toUpperCase() || 'CU';
-  const total = Number(order.payment?.total || order.payment?.totalHeld || order.payment?.priceMax || order.price || order.total || 89);
+  const total = Number(order.payment?.total || order.payment?.totalHeld || order.payment?.priceMax || order.price || order.total || 0);
   const shopStatus = order.shopStatus || (getServiceMode(order) === 'shop' ? SHOP_STATUS_FROM_ORDER_STATUS[order.status] : undefined);
   // approvedTotal/approveOptional/estimateApprovedAt/additionalApprovals live under
   // orderContext on the backend but are read as top-level job fields in the provider
@@ -122,10 +131,12 @@ function normalizeOrderToJob(order) {
     accent: order.accent || '#F04416',
     icon: order.icon || serviceMeta.icon,
     customer: {
+      id: order.customer?.id || null,
       name: customerName,
       initials,
       phone: order.customer?.phone || order.contactInfo?.phone || '',
       email: order.customer?.email || order.contactInfo?.email || '',
+      phoneVerified: !!order.customer?.phoneVerified,
     },
     service: {
       ...(order.service || {}),
@@ -179,6 +190,7 @@ function AppInner() {
   const pendingCredentials = useRef(null);
   const [businessInfoLoading, setBusinessInfoLoading] = useState(false);
   const [online, setOnline] = useState(true);
+  const [providerLiveCoord, setProviderLiveCoord] = useState(null);
   const [activeScreen, setActiveScreen] = useState('home');
   const [activeTab, setActiveTab] = useState('home');
   const [previewTab, setPreviewTab] = useState('home');
@@ -627,6 +639,33 @@ function AppInner() {
     const timer = setInterval(() => loadProviderJobsFromBackend(provider.id), 10000);
     return () => clearInterval(timer);
   }, [isDemo, provider.id]);
+
+  // While online and doing mobile work, periodically share the provider's live position so
+  // customer search can prefer it over the static geocoded business address. Foreground only —
+  // stops as soon as the provider goes offline or the app is backgrounded.
+  useEffect(() => {
+    if (isDemo || !online || providerType === 'shop' || !provider.id) return undefined;
+    let cancelled = false;
+    const pingLocation = async () => {
+      try {
+        const { status } = await Location.requestForegroundPermissionsAsync();
+        if (status !== 'granted' || cancelled) return;
+        const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        if (cancelled) return;
+        setProviderLiveCoord({ latitude: position.coords.latitude, longitude: position.coords.longitude });
+        await fetchJson(`${API_URL}/profiles/${provider.id}/location`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lat: position.coords.latitude, lng: position.coords.longitude }),
+        });
+      } catch (error) {
+        console.log('Location ping error:', error.message);
+      }
+    };
+    pingLocation();
+    const timer = setInterval(pingLocation, 60000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [isDemo, online, providerType, provider.id]);
 
   useEffect(() => {
     if (isDemo) return;
@@ -1406,6 +1445,7 @@ function AppInner() {
                     await cancelShopJob(o);
                   }}
                   refreshControl={refreshControl}
+                  providerLiveCoord={providerLiveCoord}
                 />
               )}
             </View>
@@ -1457,7 +1497,7 @@ function pulseTabChange() {
   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
 }
 
-function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel, refreshControl }) {
+function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel, refreshControl, providerLiveCoord }) {
   const [noteOpen, setNoteOpen] = useState(false);
   const [routeOpen, setRouteOpen] = useState(workflow.stage === 'route');
 
@@ -1503,10 +1543,19 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
   const [completedServiceDetailsOpen, setCompletedServiceDetailsOpen] = useState(false);
   const [customerProfileOpen, setCustomerProfileOpen] = useState(false);
   const [jobActionsOpen, setJobActionsOpen] = useState(false);
+  const [customerStats, setCustomerStats] = useState(null);
+  const [customerStatsLoading, setCustomerStatsLoading] = useState(false);
   const cpPanX = useRef(new Animated.Value(0)).current;
   const openCustomerProfile = () => {
     cpPanX.setValue(Dimensions.get('window').width);
     setCustomerProfileOpen(true);
+    const customerId = job.customer?.id;
+    if (!customerId) { setCustomerStats(null); return; }
+    setCustomerStatsLoading(true);
+    fetchJson(`${API_URL}/orders/customer-stats/${customerId}`)
+      .then(setCustomerStats)
+      .catch(() => setCustomerStats(null))
+      .finally(() => setCustomerStatsLoading(false));
   };
   const closeCustomerProfile = (velocity = 1200) => {
     Animated.spring(cpPanX, {
@@ -1657,6 +1706,28 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
   const address = stripCountryFromAddress(job.pickup?.address) || 'Location pending';
   const isTowing = isTowingService(job);
   const dropoffAddress = getDropoffAddress(job);
+  const customerMapCoord = (job.pickup?.latitude != null && job.pickup?.longitude != null)
+    ? { latitude: Number(job.pickup.latitude), longitude: Number(job.pickup.longitude) }
+    : null;
+  const providerMapCoord = (job.tracking?.providerLatitude != null && job.tracking?.providerLongitude != null)
+    ? { latitude: Number(job.tracking.providerLatitude), longitude: Number(job.tracking.providerLongitude) }
+    : providerLiveCoord;
+  const liveDistanceMi = (customerMapCoord && providerMapCoord)
+    ? haversineMiles(providerMapCoord.latitude, providerMapCoord.longitude, customerMapCoord.latitude, customerMapCoord.longitude)
+    : null;
+  const mapPoints = [customerMapCoord, providerMapCoord].filter(Boolean);
+  const jobMapRegion = mapPoints.length ? (() => {
+    const lats = mapPoints.map(p => p.latitude);
+    const lngs = mapPoints.map(p => p.longitude);
+    const minLat = Math.min(...lats), maxLat = Math.max(...lats);
+    const minLng = Math.min(...lngs), maxLng = Math.max(...lngs);
+    return {
+      latitude: (minLat + maxLat) / 2,
+      longitude: (minLng + maxLng) / 2,
+      latitudeDelta: Math.max(0.02, (maxLat - minLat) * 1.8),
+      longitudeDelta: Math.max(0.02, (maxLng - minLng) * 1.8),
+    };
+  })() : null;
   const vin = getVehicleVin(job);
   const phone = job.customer?.phone || '';
   const customerNote = job.customerNote || 'No note provided';
@@ -1671,10 +1742,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
     return m > 0 ? `${h}h ${m}min` : `${h}h`;
   })();
   const customerFirstName = (job.customer?.name || 'customer').split(' ')[0] || 'customer';
-  const rawCustomerFiles = job.orderContext?.files || job.files || job.photos || [
-    { name: 'Inspection photo', type: 'image' },
-    { name: 'Customer attachment', type: 'file' },
-  ];
+  const rawCustomerFiles = job.orderContext?.files || job.files || job.photos || [];
   const customerFiles = Array.isArray(rawCustomerFiles) ? rawCustomerFiles : [rawCustomerFiles].filter(Boolean);
   const intakeRows = getProviderIntakeItems(job)
     .filter(item => item.value !== undefined && item.value !== null && String(item.value).trim())
@@ -1689,7 +1757,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
     { key: 'pickup', icon: 'location-outline', color: '#7C3AED', label: isTowing ? 'Pickup Location' : 'Service Location', value: address },
     ...(isTowing ? [{ key: 'dropoff', icon: 'flag-outline', color: '#EF4444', label: 'Drop-off Location', value: dropoffAddress }] : []),
     ...(!isCompleted ? [
-      { key: 'distance', icon: 'trail-sign-outline', color: '#42D463', label: 'Distance', value: job.distance || '5.2 mi away' },
+      { key: 'distance', icon: 'trail-sign-outline', color: '#42D463', label: 'Distance', value: liveDistanceMi != null ? `${liveDistanceMi.toFixed(1)} mi away` : (job.distance || '—') },
       { key: 'payout', icon: 'cash-outline', color: '#EAB308', label: 'Est. Payout', value: formatCurrency(job.payment?.total || 0) },
     ] : []),
   ];
@@ -2984,26 +3052,36 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
 
         <ScrollView style={[styles.container, styles.requestDetailScroll]} contentContainerStyle={styles.jobRouteContent} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
           <View style={styles.jobRouteMap}>
-            <MapView
-              provider={PROVIDER_GOOGLE}
-              style={styles.mapView}
-              initialRegion={REQUEST_MAP_REGION}
-              scrollEnabled={false}
-              zoomEnabled={false}
-              rotateEnabled={false}
-              pitchEnabled={false}
-              toolbarEnabled={false}
-            >
-              <Polyline coordinates={REQUEST_ROUTE} strokeColor="#F04416" strokeWidth={4} />
-              <Marker coordinate={REQUEST_ROUTE[0]} anchor={{ x: 0.5, y: 0.5 }}>
-                <View style={styles.mapStartMarker} />
-              </Marker>
-              <Marker coordinate={REQUEST_ROUTE[REQUEST_ROUTE.length - 1]} anchor={{ x: 0.5, y: 1 }}>
-                <View style={styles.mapEndMarker}>
-                  <Ionicons name="location" size={20} color="#FFFFFF" />
-                </View>
-              </Marker>
-            </MapView>
+            {jobMapRegion ? (
+              <MapView
+                provider={PROVIDER_GOOGLE}
+                style={styles.mapView}
+                region={jobMapRegion}
+                scrollEnabled={false}
+                zoomEnabled={false}
+                rotateEnabled={false}
+                pitchEnabled={false}
+                toolbarEnabled={false}
+              >
+                {providerMapCoord && (
+                  <Marker coordinate={providerMapCoord} anchor={{ x: 0.5, y: 0.5 }}>
+                    <View style={styles.mapStartMarker} />
+                  </Marker>
+                )}
+                {customerMapCoord && (
+                  <Marker coordinate={customerMapCoord} anchor={{ x: 0.5, y: 1 }}>
+                    <View style={styles.mapEndMarker}>
+                      <Ionicons name="location" size={20} color="#FFFFFF" />
+                    </View>
+                  </Marker>
+                )}
+              </MapView>
+            ) : (
+              <View style={[styles.mapView, styles.mapPlaceholder]}>
+                <Ionicons name="map-outline" size={32} color="#C4C9D1" />
+                <Text style={styles.mapPlaceholderText}>Map unavailable</Text>
+              </View>
+            )}
             <View style={styles.mapBubble}><Text style={styles.mapBubbleText}>{job.eta || '15 min'}{`\n`}To customer</Text></View>
           </View>
 
@@ -3014,10 +3092,6 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
             <View style={styles.customerPopupInfo}>
               <View style={styles.customerNameRatingRow}>
                 <Text style={styles.customerPopupName} numberOfLines={1}>{job.customer?.name || 'Customer'}</Text>
-                <View style={styles.customerRatingPill}>
-                  <Ionicons name="star" size={11} color="#FFC107" />
-                  <Text style={styles.customerRatingText}>4.9</Text>
-                </View>
               </View>
               <View style={styles.customerTrustedLine}>
                 <Ionicons name="shield-checkmark-outline" size={13} color="#F04416" />
@@ -3481,43 +3555,42 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
               <Text style={styles.cpName}>{job.customer?.name || 'Customer'}</Text>
 
               <View style={styles.cpBadgeRow}>
-                <View style={styles.cpRatingPill}>
-                  <Ionicons name="star" size={15} color="#FFC107" />
-                  <Text style={styles.cpRatingText}>4.9</Text>
-                </View>
-                <View style={styles.cpVerifiedPill}>
-                  <Ionicons name="shield-checkmark-outline" size={13} color="#2563EB" />
-                  <Text style={styles.cpVerifiedText}>Verified</Text>
-                </View>
-                <View style={styles.cpReturningPill}>
-                  <Ionicons name="bag-outline" size={13} color="#16A34A" />
-                  <Text style={styles.cpReturningText}>Returning</Text>
-                </View>
+                {!!job.customer?.phoneVerified && (
+                  <View style={styles.cpVerifiedPill}>
+                    <Ionicons name="shield-checkmark-outline" size={13} color="#2563EB" />
+                    <Text style={styles.cpVerifiedText}>Verified</Text>
+                  </View>
+                )}
+                {!!customerStats?.returning && (
+                  <View style={styles.cpReturningPill}>
+                    <Ionicons name="bag-outline" size={13} color="#16A34A" />
+                    <Text style={styles.cpReturningText}>Returning</Text>
+                  </View>
+                )}
               </View>
-              <Text style={styles.cpJobsCount}>14 completed jobs</Text>
+              <Text style={styles.cpJobsCount}>
+                {customerStatsLoading ? 'Loading…' : `${customerStats?.completedJobs ?? 0} completed jobs with you`}
+              </Text>
 
               <View style={styles.cpStatsCard}>
                 <View style={styles.cpStatItem}>
                   <Text style={styles.cpStatLabel}>Customer since</Text>
-                  <Text style={styles.cpStatValue}>2024</Text>
+                  <Text style={styles.cpStatValue}>{customerStats?.memberSince ? new Date(customerStats.memberSince).getFullYear() : '—'}</Text>
                 </View>
                 <View style={styles.cpStatDivider} />
                 <View style={styles.cpStatItem}>
                   <Text style={styles.cpStatLabel}>Completed jobs</Text>
-                  <Text style={styles.cpStatValue}>14</Text>
+                  <Text style={styles.cpStatValue}>{customerStatsLoading ? '—' : customerStats?.completedJobs ?? '—'}</Text>
                 </View>
                 <View style={styles.cpStatDivider} />
                 <View style={styles.cpStatItem}>
                   <Text style={styles.cpStatLabel}>Canceled</Text>
-                  <Text style={styles.cpStatValue}>0</Text>
+                  <Text style={styles.cpStatValue}>{customerStatsLoading ? '—' : customerStats?.canceledJobs ?? '—'}</Text>
                 </View>
                 <View style={styles.cpStatDivider} />
                 <View style={styles.cpStatItem}>
                   <Text style={styles.cpStatLabel}>Rating</Text>
-                  <View style={styles.cpStatRatingRow}>
-                    <Ionicons name="star" size={13} color="#FFC107" />
-                    <Text style={styles.cpStatValue}>4.9</Text>
-                  </View>
+                  <Text style={styles.cpStatValue}>—</Text>
                 </View>
               </View>
 
@@ -3536,19 +3609,19 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
                 <View style={styles.cpListRow}>
                   <Ionicons name="clipboard-outline" size={18} color="#5E646D" />
                   <Text style={styles.cpListLabel}>Previous jobs</Text>
-                  <Text style={styles.cpListValue}>14</Text>
+                  <Text style={styles.cpListValue}>{customerStatsLoading ? '—' : customerStats?.completedJobs ?? '—'}</Text>
                   <Ionicons name="chevron-forward" size={16} color="#C4C9D1" />
                 </View>
                 <View style={[styles.cpListRow, styles.cpListRowBorder]}>
                   <Ionicons name="car-outline" size={18} color="#5E646D" />
                   <Text style={styles.cpListLabel}>Vehicles</Text>
-                  <Text style={styles.cpListValue}>2</Text>
+                  <Text style={styles.cpListValue}>—</Text>
                   <Ionicons name="chevron-forward" size={16} color="#C4C9D1" />
                 </View>
                 <View style={[styles.cpListRow, styles.cpListRowBorder]}>
                   <Ionicons name="star-outline" size={18} color="#5E646D" />
                   <Text style={styles.cpListLabel}>Reviews</Text>
-                  <Text style={styles.cpListValue}>4.9 (23)</Text>
+                  <Text style={styles.cpListValue}>—</Text>
                   <Ionicons name="chevron-forward" size={16} color="#C4C9D1" />
                 </View>
                 <View style={[styles.cpListRow, styles.cpListRowBorder]}>
@@ -3612,10 +3685,6 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
           <View style={styles.customerPopupInfo}>
             <View style={styles.customerNameRatingRow}>
               <Text style={styles.customerPopupName} numberOfLines={1}>{job.customer?.name || 'Customer'}</Text>
-              <View style={styles.customerRatingPill}>
-                <Ionicons name="star" size={11} color="#FFC107" />
-                <Text style={styles.customerRatingText}>4.9</Text>
-              </View>
             </View>
             <View style={styles.customerTrustedLine}>
               <Ionicons name="shield-checkmark-outline" size={13} color="#F04416" />
@@ -3682,26 +3751,36 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
           </View>
         ) : (
           <View style={styles.mapPreview}>
-            <MapView
-              provider={PROVIDER_GOOGLE}
-              style={styles.mapView}
-              initialRegion={REQUEST_MAP_REGION}
-              scrollEnabled={false}
-              zoomEnabled={false}
-              rotateEnabled={false}
-              pitchEnabled={false}
-              toolbarEnabled={false}
-            >
-              <Polyline coordinates={REQUEST_ROUTE} strokeColor="#F04416" strokeWidth={4} />
-              <Marker coordinate={REQUEST_ROUTE[0]} anchor={{ x: 0.5, y: 0.5 }}>
-                <View style={styles.mapStartMarker} />
-              </Marker>
-              <Marker coordinate={REQUEST_ROUTE[REQUEST_ROUTE.length - 1]} anchor={{ x: 0.5, y: 1 }}>
-                <View style={styles.mapEndMarker}>
-                  <Ionicons name="location" size={20} color="#FFFFFF" />
-                </View>
-              </Marker>
-            </MapView>
+            {jobMapRegion ? (
+              <MapView
+                provider={PROVIDER_GOOGLE}
+                style={styles.mapView}
+                region={jobMapRegion}
+                scrollEnabled={false}
+                zoomEnabled={false}
+                rotateEnabled={false}
+                pitchEnabled={false}
+                toolbarEnabled={false}
+              >
+                {providerMapCoord && (
+                  <Marker coordinate={providerMapCoord} anchor={{ x: 0.5, y: 0.5 }}>
+                    <View style={styles.mapStartMarker} />
+                  </Marker>
+                )}
+                {customerMapCoord && (
+                  <Marker coordinate={customerMapCoord} anchor={{ x: 0.5, y: 1 }}>
+                    <View style={styles.mapEndMarker}>
+                      <Ionicons name="location" size={20} color="#FFFFFF" />
+                    </View>
+                  </Marker>
+                )}
+              </MapView>
+            ) : (
+              <View style={[styles.mapView, styles.mapPlaceholder]}>
+                <Ionicons name="map-outline" size={32} color="#C4C9D1" />
+                <Text style={styles.mapPlaceholderText}>Map unavailable</Text>
+              </View>
+            )}
             <View style={styles.mapBubble}><Text style={styles.mapBubbleText}>{job.eta || '15 min'}{`\n`}On route</Text></View>
           </View>
         )}
@@ -5246,8 +5325,6 @@ const styles = StyleSheet.create({
   cpAvatarText: { color: '#17191D', fontSize: 34, fontWeight: '800' },
   cpName: { color: '#17191D', fontSize: 22, fontWeight: '800', marginBottom: 10 },
   cpBadgeRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
-  cpRatingPill: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  cpRatingText: { color: '#17191D', fontSize: 15, fontWeight: '800' },
   cpVerifiedPill: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#EFF6FF', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 },
   cpVerifiedText: { color: '#2563EB', fontSize: 12, fontWeight: '700' },
   cpReturningPill: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#DCFCE7', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 },
@@ -5257,7 +5334,6 @@ const styles = StyleSheet.create({
   cpStatItem: { flex: 1, alignItems: 'center', gap: 6, paddingHorizontal: 4 },
   cpStatLabel: { color: '#8B9098', fontSize: 10, fontWeight: '600', textAlign: 'center' },
   cpStatValue: { color: '#17191D', fontSize: 16, fontWeight: '800' },
-  cpStatRatingRow: { flexDirection: 'row', alignItems: 'center', gap: 3 },
   cpStatDivider: { width: 1, backgroundColor: '#ECEEF0' },
   cpActionsRow: { flexDirection: 'row', width: '100%', gap: 10, marginBottom: 14 },
   cpActionBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', paddingVertical: 13 },
@@ -5276,6 +5352,8 @@ const styles = StyleSheet.create({
   jaMenuDivider: { height: 1, backgroundColor: '#ECEEF0', marginHorizontal: 14 },
 
   mapView: { ...StyleSheet.absoluteFillObject },
+  mapPlaceholder: { alignItems: 'center', justifyContent: 'center', gap: 6 },
+  mapPlaceholderText: { color: '#8B9098', fontSize: 12, fontWeight: '600' },
   mapStartMarker: { width: 18, height: 18, borderRadius: 9, backgroundColor: '#17191D', borderWidth: 3, borderColor: '#FFFFFF' },
   mapEndMarker: { width: 32, height: 38, borderRadius: 16, backgroundColor: '#F04416', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#FFFFFF' },
   mapBubble: { position: 'absolute', left: '45%', top: 34, borderRadius: 8, backgroundColor: 'rgba(23,25,29,0.9)', paddingHorizontal: 8, paddingVertical: 6 },

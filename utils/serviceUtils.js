@@ -390,7 +390,7 @@ export function getServiceMode(order) {
 }
 
 export function getVehicleVin(job) {
-  return job.vehicle?.vin || job.vin || DEMO_VIN_BY_JOB_ID[job.id] || 'VIN pending';
+  return job.vehicle?.vin || job.vin || DEMO_VIN_BY_JOB_ID[job.id] || 'pending';
 }
 
 export function normalizeComplaintItem(item, index) {

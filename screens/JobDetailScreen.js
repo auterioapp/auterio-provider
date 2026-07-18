@@ -71,9 +71,7 @@ export default function JobDetailScreen({ job, onBack, onStatusChange, refreshCo
           <Ionicons name="chevron-back" size={24} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.jobHeaderTitle}>Job #{job.number}</Text>
-        <TouchableOpacity activeOpacity={0.8} style={styles.jobMenuBtn}>
-          <Ionicons name="apps-outline" size={22} color="#fff" />
-        </TouchableOpacity>
+        <View style={styles.jobMenuBtn} />
       </View>
 
       <ScrollView

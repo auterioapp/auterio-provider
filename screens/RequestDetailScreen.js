@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
-import { getServiceMeta, getVehicleLabel, getDropoffAddress, isTowingService, getProviderIntakeItems, getServiceMode } from '../utils/serviceUtils';
+import { getServiceMeta, getDropoffAddress, isTowingService, getProviderIntakeItems, getServiceMode } from '../utils/serviceUtils';
 import { formatCurrency } from '../utils/estimateUtils';
 
 const TIMER_SECONDS = 60;
+const VEHICLE_TYPE_LABELS = { car: 'Car', truck: 'Truck', van: 'Van', moto: 'Motorcycle' };
 
 function formatTimer(s) {
   return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
@@ -31,9 +31,10 @@ export default function RequestDetailScreen({ order, accepting, providerType = '
   const serviceMeta = getServiceMeta(order);
   const icon = serviceMeta.icon;
   const title = serviceMeta.title;
-  const vehicle = getVehicleLabel(order);
-  const vehicleFallback = vehicle === 'Vehicle details pending' ? '' : vehicle;
-  const displayVehicle = [order.vehicle?.year, order.vehicle?.make, order.vehicle?.model].filter(Boolean).join(' ') || vehicleFallback || '—';
+  const knownVehicle = [order.vehicle?.year, order.vehicle?.make, order.vehicle?.model].filter(Boolean).join(' ');
+  const vehicleTypeLabel = VEHICLE_TYPE_LABELS[order.service?.vehicleType]
+    || (order.service?.vehicleType ? order.service.vehicleType.charAt(0).toUpperCase() + order.service.vehicleType.slice(1) : '');
+  const displayVehicle = knownVehicle || (vehicleTypeLabel ? `${vehicleTypeLabel} (details not provided)` : 'No vehicle info provided');
   const address = order.pickup?.address || 'Location pending';
   const dropoffAddress = getDropoffAddress(order);
   const payout = Number(order.payment?.totalHeld || order.payment?.total || 0);
@@ -45,14 +46,8 @@ export default function RequestDetailScreen({ order, accepting, providerType = '
   const rawCustomerFiles = order.orderContext?.files || order.files || order.photos || [];
   const customerFiles = Array.isArray(rawCustomerFiles) ? rawCustomerFiles.filter(Boolean) : [];
   const isTowing = isTowingService(order);
-
-  const hasCoords = order.pickup?.latitude != null && order.pickup?.longitude != null;
-  const customerCoord = hasCoords
-    ? { latitude: Number(order.pickup.latitude), longitude: Number(order.pickup.longitude) }
-    : null;
-  const mapRegion = customerCoord
-    ? { latitude: customerCoord.latitude, longitude: customerCoord.longitude, latitudeDelta: 0.018, longitudeDelta: 0.018 }
-    : null;
+  const isCustomerVerified = !!order.customer?.phoneVerified;
+  const hasVin = !!order.vehicle?.vin && order.vehicle.vin !== 'Not added';
 
   const intakeRows = getProviderIntakeItems(order)
     .filter(item => item.value !== undefined && item.value !== null && String(item.value).trim())
@@ -106,15 +101,13 @@ export default function RequestDetailScreen({ order, accepting, providerType = '
             <Ionicons name="shield-checkmark-outline" size={22} color="#F04416" />
           </View>
           <View style={styles.verifiedInfo}>
-            <Text style={styles.verifiedTitle} numberOfLines={1}>Verified Customer</Text>
-            <View style={styles.ratingLine}>
-              <Ionicons name="star" size={13} color="#FFC107" />
-              <Text style={styles.ratingScore}>4.9</Text>
-            </View>
-            <View style={[styles.trustedLine, styles.verifiedTrustedLine]}>
-              <Ionicons name="shield-checkmark-outline" size={13} color="#F04416" />
-              <Text style={styles.verifiedTrusted} numberOfLines={1}>Verified & trusted</Text>
-            </View>
+            <Text style={styles.verifiedTitle} numberOfLines={1}>{isCustomerVerified ? 'Verified Customer' : 'Customer'}</Text>
+            {isCustomerVerified && (
+              <View style={[styles.trustedLine, styles.verifiedTrustedLine]}>
+                <Ionicons name="shield-checkmark-outline" size={13} color="#F04416" />
+                <Text style={styles.verifiedTrusted} numberOfLines={1}>Verified & trusted</Text>
+              </View>
+            )}
           </View>
           <View style={styles.lockedContact}>
             <Ionicons name="lock-closed-outline" size={18} color="#5E646D" />
@@ -128,49 +121,18 @@ export default function RequestDetailScreen({ order, accepting, providerType = '
           </View>
           <View style={styles.serviceInfo}>
             <Text style={styles.serviceType} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.75}>{displayVehicle}</Text>
-            <View style={[styles.trustedLine, styles.vehicleTrustedLine]}>
-              <Ionicons name="checkmark-circle-outline" size={13} color="#F04416" />
-              <Text style={styles.verifiedTrusted}>VIN verified</Text>
-            </View>
+            {hasVin && (
+              <View style={[styles.trustedLine, styles.vehicleTrustedLine]}>
+                <Ionicons name="checkmark-circle-outline" size={13} color="#F04416" />
+                <Text style={styles.verifiedTrusted}>VIN on file</Text>
+              </View>
+            )}
           </View>
           <View style={styles.vehicleMetaBox}>
             <View style={styles.requestSpecRow}>
               <Text style={styles.requestSpecLabel}>Service Type</Text>
               <Text style={styles.requestSpecValue} numberOfLines={1}>{title}</Text>
             </View>
-          </View>
-        </View>
-
-        <View style={styles.mapPreview}>
-          {mapRegion ? (
-            <MapView
-              provider={PROVIDER_GOOGLE}
-              style={styles.mapView}
-              initialRegion={mapRegion}
-              scrollEnabled={false}
-              zoomEnabled={false}
-              rotateEnabled={false}
-              pitchEnabled={false}
-              toolbarEnabled={false}
-            >
-              <Marker coordinate={customerCoord} anchor={{ x: 0.5, y: 1 }}>
-                <View style={styles.mapEndMarker}>
-                  <Ionicons name="location" size={20} color="#FFFFFF" />
-                </View>
-              </Marker>
-            </MapView>
-          ) : (
-            <View style={[styles.mapView, styles.mapPlaceholder]}>
-              <Ionicons name="map-outline" size={32} color="#C4C9D1" />
-              <Text style={styles.mapPlaceholderText}>Map unavailable</Text>
-            </View>
-          )}
-          <View style={styles.mapBubble}>
-            <Text style={styles.mapBubbleText}>
-              {driveTime !== '—' ? driveTime : ''}
-              {driveTime !== '—' && distance !== '—' ? '\n' : ''}
-              {distance !== '—' ? distance : ''}
-            </Text>
           </View>
         </View>
 
@@ -322,8 +284,6 @@ const styles = StyleSheet.create({
   verifiedIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E6E8EB', alignItems: 'center', justifyContent: 'center' },
   verifiedInfo: { flex: 1, minWidth: 0 },
   verifiedTitle: { color: '#17191D', fontSize: 13, lineHeight: 17, fontWeight: '700', marginBottom: 3 },
-  ratingLine: { flexDirection: 'row', alignItems: 'center', gap: 6, minHeight: 16, marginBottom: 3 },
-  ratingScore: { color: '#FFB000', fontSize: 12, lineHeight: 15, fontWeight: '800' },
   trustedLine: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   verifiedTrustedLine: { minHeight: 16 },
   vehicleTrustedLine: { minHeight: 16 },
@@ -339,14 +299,6 @@ const styles = StyleSheet.create({
   requestSpecRow: { alignItems: 'center', justifyContent: 'center', gap: 4 },
   requestSpecLabel: { color: '#5E646D', fontSize: 11, lineHeight: 14, fontWeight: '600', textAlign: 'center' },
   requestSpecValue: { color: '#17191D', fontSize: 11, lineHeight: 14, fontWeight: '700', textAlign: 'center', flexShrink: 1 },
-  mapPreview: { height: 148, borderRadius: 8, backgroundColor: '#F3F4F5', borderWidth: 1, borderColor: '#ECEEF0', marginBottom: 8, overflow: 'hidden', position: 'relative' },
-  mapView: { ...StyleSheet.absoluteFillObject },
-  mapPlaceholder: { alignItems: 'center', justifyContent: 'center', gap: 6 },
-  mapPlaceholderText: { color: '#8B9098', fontSize: 12, fontWeight: '600' },
-  mapStartMarker: { width: 18, height: 18, borderRadius: 9, backgroundColor: '#17191D', borderWidth: 3, borderColor: '#FFFFFF' },
-  mapEndMarker: { width: 32, height: 38, borderRadius: 16, backgroundColor: '#F04416', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#FFFFFF' },
-  mapBubble: { position: 'absolute', left: '45%', top: 34, borderRadius: 8, backgroundColor: 'rgba(23,25,29,0.9)', paddingHorizontal: 8, paddingVertical: 6 },
-  mapBubbleText: { color: '#FFFFFF', fontSize: 9, lineHeight: 12, fontWeight: '700', textAlign: 'center' },
   requestBriefCard: { backgroundColor: '#F3F4F5', borderWidth: 1, borderColor: '#ECEEF0', borderRadius: 8, padding: 12, marginBottom: 8 },
   jobDetailHeading: { color: '#17191D', fontSize: 15, fontWeight: '700', marginBottom: 11 },
   jobDetailSectionRow: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#E1E4E8' },

@@ -43,7 +43,18 @@
       "Bash(xargs -r -I{} taskkill //F //PID {})",
       "Bash(grep -n \"^import { Alert, Animated\\\\|AppState\" App.js)",
       "Bash(grep -n \"useEffect\\(\\(\\) => {\\\\s*$\\\\|if \\(authState !== 'app'\\) return;\\\\|const refreshApp\" App.js)",
-      "Bash(tasklist)"
+      "Bash(tasklist)",
+      "Bash(rm -f /tmp/expo_bp9.log)",
+      "Bash(taskkill //PID 21164 //F //T)",
+      "Bash(rm -f /tmp/expo_bp10.log)",
+      "Bash(taskkill //PID 18756 //F //T)",
+      "Bash(taskkill //PID 5872 //F //T)",
+      "Bash(rm -f /tmp/expo_bp12.log)",
+      "Bash(taskkill //PID 9312 //F //T)",
+      "Bash(rm -f /tmp/expo_bp13.log)",
+      "Bash(taskkill //PID 20156 //F //T)",
+      "Bash(rm -f /tmp/expo_bp14.log)",
+      "WebFetch(domain:docs.expo.dev)"
     ],
     "additionalDirectories": [
       "C:\\Users\\PCUSER\\AppData\\Local\\Temp\\claude\\c--Users-PCUSER-auterio-provider\\64bebc74-8dab-4c76-bee5-745a688192dd\\scratchpad"
