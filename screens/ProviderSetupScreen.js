@@ -6,16 +6,14 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { authorizedFetch } from '../apiClient';
-import { API_URL, PROVIDER } from '../constants';
+import { API_URL } from '../constants';
+import { useProvider } from '../ProviderContext';
 import { savePricing, DEFAULT_PRICING } from '../utils/pricingStore';
 
 // ── Services data (labels must match ServicesScreen exactly) ──────────────────
 
 const MOBILE_SERVICES = [
-  { id: 'battery',     title: 'Battery Service', icon: 'flash-outline' },
-  { id: 'tire',        title: 'Tire Service',     icon: 'disc-outline' },
   { id: 'towing',      title: 'Towing',           icon: 'car-outline' },
-  { id: 'diagnostics', title: 'Diagnostics',      icon: 'speedometer-outline' },
   { id: 'lockout',     title: 'Lockout Service',  icon: 'lock-closed-outline' },
   { id: 'fuel',        title: 'Fuel Delivery',    icon: 'flame-outline' },
 ];
@@ -98,6 +96,25 @@ function Step1_BusinessType({ value, onChange }) {
 
 // ── Step 2: Services ──────────────────────────────────────────────────────────
 
+function ServiceToggleRow({ id, icon, label, on, onPress }) {
+  return (
+    <TouchableOpacity
+      key={id}
+      style={[s.svcRow, on && s.svcRowOn]}
+      activeOpacity={0.8}
+      onPress={onPress}
+    >
+      <View style={[s.svcIcon, on && s.svcIconOn]}>
+        <Ionicons name={icon} size={20} color={on ? '#FF6B00' : '#6B7280'} />
+      </View>
+      <Text style={[s.svcTitle, on && s.svcTitleOn]}>{label}</Text>
+      <View style={[s.checkbox, on && s.checkboxOn]}>
+        {on && <Ionicons name="checkmark" size={13} color="#fff" />}
+      </View>
+    </TouchableOpacity>
+  );
+}
+
 function Step2_Services({ providerType, mobileEnabled, shopEnabled, onMobileToggle, onShopToggle }) {
   const showMobile = providerType === 'mobile' || providerType === 'both';
   const showShop   = providerType === 'shop'   || providerType === 'both';
@@ -108,26 +125,15 @@ function Step2_Services({ providerType, mobileEnabled, shopEnabled, onMobileTogg
 
       {showMobile && (
         <>
-          {providerType === 'both' && <Text style={s.sectionLabel}>Mobile Services</Text>}
-          {MOBILE_SERVICES.map(svc => {
-            const on = mobileEnabled.has(svc.id);
-            return (
-              <TouchableOpacity
-                key={svc.id}
-                style={[s.svcRow, on && s.svcRowOn]}
-                activeOpacity={0.8}
-                onPress={() => onMobileToggle(svc.id)}
-              >
-                <View style={[s.svcIcon, on && s.svcIconOn]}>
-                  <Ionicons name={svc.icon} size={20} color={on ? '#FF6B00' : '#6B7280'} />
-                </View>
-                <Text style={[s.svcTitle, on && s.svcTitleOn]}>{svc.title}</Text>
-                <View style={[s.checkbox, on && s.checkboxOn]}>
-                  {on && <Ionicons name="checkmark" size={13} color="#fff" />}
-                </View>
-              </TouchableOpacity>
-            );
-          })}
+          <Text style={s.sectionLabel}>Roadside & Mobile</Text>
+          {MOBILE_SERVICES.map(svc => (
+            <ServiceToggleRow key={svc.id} id={svc.id} icon={svc.icon} label={svc.title} on={mobileEnabled.has(svc.id)} onPress={() => onMobileToggle(svc.id)} />
+          ))}
+          <Text style={[s.sectionLabel, { marginTop: 20 }]}>Repair Categories</Text>
+          <Text style={s.stepDesc}>Same categories as a shop offers — pick what you can actually do on-site.</Text>
+          {SHOP_CATEGORIES.map(cat => (
+            <ServiceToggleRow key={cat.id} id={cat.id} icon={cat.icon} label={cat.label} on={mobileEnabled.has(cat.id)} onPress={() => onMobileToggle(cat.id)} />
+          ))}
         </>
       )}
 
@@ -136,25 +142,9 @@ function Step2_Services({ providerType, mobileEnabled, shopEnabled, onMobileTogg
           {providerType === 'both' && (
             <Text style={[s.sectionLabel, { marginTop: 20 }]}>Shop Categories</Text>
           )}
-          {SHOP_CATEGORIES.map(cat => {
-            const on = shopEnabled.has(cat.id);
-            return (
-              <TouchableOpacity
-                key={cat.id}
-                style={[s.svcRow, on && s.svcRowOn]}
-                activeOpacity={0.8}
-                onPress={() => onShopToggle(cat.id)}
-              >
-                <View style={[s.svcIcon, on && s.svcIconOn]}>
-                  <Ionicons name={cat.icon} size={20} color={on ? '#FF6B00' : '#6B7280'} />
-                </View>
-                <Text style={[s.svcTitle, on && s.svcTitleOn]}>{cat.label}</Text>
-                <View style={[s.checkbox, on && s.checkboxOn]}>
-                  {on && <Ionicons name="checkmark" size={13} color="#fff" />}
-                </View>
-              </TouchableOpacity>
-            );
-          })}
+          {SHOP_CATEGORIES.map(cat => (
+            <ServiceToggleRow key={cat.id} id={cat.id} icon={cat.icon} label={cat.label} on={shopEnabled.has(cat.id)} onPress={() => onShopToggle(cat.id)} />
+          ))}
         </>
       )}
     </View>
@@ -282,6 +272,7 @@ function Step5_Review({ providerType, services, days, radius, address, onEdit })
 const TOTAL_STEPS = 5;
 
 export default function ProviderSetupScreen({ onComplete, onSkip }) {
+  const { provider } = useProvider();
   const [step, setStep]                   = useState(1);
   const [saving, setSaving]               = useState(false);
 
@@ -313,9 +304,10 @@ export default function ProviderSetupScreen({ onComplete, onSkip }) {
   const buildServices = () => {
     const isMobile = providerType === 'mobile' || providerType === 'both';
     const isShop   = providerType === 'shop'   || providerType === 'both';
-    const mobile   = isMobile ? MOBILE_SERVICES.filter(sv => mobileEnabled.has(sv.id)).map(sv => sv.title) : [];
-    const shop     = isShop   ? SHOP_CATEGORIES.filter(c  => shopEnabled.has(c.id)).map(c => c.label)      : [];
-    return [...mobile, ...shop];
+    const mobile     = isMobile ? MOBILE_SERVICES.filter(sv => mobileEnabled.has(sv.id)).map(sv => sv.title) : [];
+    const mobileCats = isMobile ? SHOP_CATEGORIES.filter(c => mobileEnabled.has(c.id)).map(c => `${c.label} (Mobile)`) : [];
+    const shop        = isShop   ? SHOP_CATEGORIES.filter(c  => shopEnabled.has(c.id)).map(c => c.label)      : [];
+    return [...mobile, ...mobileCats, ...shop];
   };
 
   const buildSchedule = () => {
@@ -336,7 +328,7 @@ export default function ProviderSetupScreen({ onComplete, onSkip }) {
     try {
       if (step === 1) {
         await savePricing({ ...DEFAULT_PRICING, providerType });
-        const res = await authorizedFetch(`${API_URL}/profiles/${PROVIDER.id}`, {
+        const res = await authorizedFetch(`${API_URL}/profiles/${provider.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ type: providerType }),
@@ -345,7 +337,7 @@ export default function ProviderSetupScreen({ onComplete, onSkip }) {
         setStep(2);
 
       } else if (step === 2) {
-        const res = await authorizedFetch(`${API_URL}/profiles/${PROVIDER.id}`, {
+        const res = await authorizedFetch(`${API_URL}/profiles/${provider.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ services: buildServices() }),
@@ -354,7 +346,7 @@ export default function ProviderSetupScreen({ onComplete, onSkip }) {
         setStep(3);
 
       } else if (step === 3) {
-        const res = await authorizedFetch(`${API_URL}/schedules/${PROVIDER.id}`, {
+        const res = await authorizedFetch(`${API_URL}/schedules/${provider.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(buildSchedule()),
@@ -365,7 +357,7 @@ export default function ProviderSetupScreen({ onComplete, onSkip }) {
       } else if (step === 4) {
         await AsyncStorage.setItem('@service_radius', String(radius));
         {
-          const res = await authorizedFetch(`${API_URL}/profiles/${PROVIDER.id}`, {
+          const res = await authorizedFetch(`${API_URL}/profiles/${provider.id}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({

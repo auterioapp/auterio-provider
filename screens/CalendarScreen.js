@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, Modal, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Animated, Dimensions, Modal, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { authorizedFetch } from '../apiClient';
-import { API_URL, PROVIDER } from '../constants';
+import { API_URL } from '../constants';
+import { useProvider } from '../ProviderContext';
 
 const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const DAY_FULL  = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -53,19 +54,33 @@ function getApptMeta(job) {
 }
 
 export default function CalendarScreen({ visible, onClose, onOpenJob }) {
+  const { provider } = useProvider();
   const [weekStart, setWeekStart] = useState(() => getMonday(new Date()));
   const [appointments, setAppointments] = useState([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [modalVisible, setModalVisible] = useState(visible);
+  const slideAnim = useRef(new Animated.Value(Dimensions.get('window').width)).current;
 
   useEffect(() => {
     if (visible) loadAppointments();
   }, [visible]);
 
+  useEffect(() => {
+    if (visible) {
+      setModalVisible(true);
+      Animated.timing(slideAnim, { toValue: 0, duration: 280, useNativeDriver: true }).start();
+    } else {
+      Animated.timing(slideAnim, { toValue: Dimensions.get('window').width, duration: 250, useNativeDriver: true }).start(() => {
+        setModalVisible(false);
+      });
+    }
+  }, [visible]);
+
   async function loadAppointments(silent = false) {
     if (!silent) setLoading(true);
     try {
-      const scheduledRes = await authorizedFetch(`${API_URL}/orders?status=scheduled&providerId=${PROVIDER.id}`);
+      const scheduledRes = await authorizedFetch(`${API_URL}/orders?status=scheduled&providerId=${provider.id}`);
       const scheduled = scheduledRes.ok ? await scheduledRes.json() : [];
       const all = [...scheduled].sort((a, b) => {
         const ta = new Date(a.scheduledAt || 0).getTime();
@@ -97,8 +112,8 @@ export default function CalendarScreen({ visible, onClose, onOpenJob }) {
   const weekTotal = grouped.reduce((s, g) => s + g.items.length, 0);
 
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-      <View style={styles.container}>
+    <Modal visible={modalVisible} animationType="none" transparent onRequestClose={onClose}>
+      <Animated.View style={[styles.container, { transform: [{ translateX: slideAnim }] }]}>
         {/* Header */}
         <View style={styles.header}>
           <TouchableOpacity onPress={onClose} style={styles.backBtn} activeOpacity={0.7}>
@@ -203,7 +218,7 @@ export default function CalendarScreen({ visible, onClose, onOpenJob }) {
             })}
           </ScrollView>
         )}
-      </View>
+      </Animated.View>
     </Modal>
   );
 }

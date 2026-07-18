@@ -1,4 +1,5 @@
-import { Alert, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Alert, Animated, Dimensions, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 const DEMO_DOCUMENTS = [
@@ -25,10 +26,23 @@ export default function TrustComplianceScreen({ visible, onClose, verificationSt
   const docStatus = isVerified ? 'Verified' : isPending ? 'Under Review' : 'Not Submitted';
   const docMeta = isPending ? 'Under review by our team' : isVerified ? '' : 'Upload required';
   const documents = isVerified ? DEMO_DOCUMENTS : REAL_DOCUMENTS.map(d => ({ ...d, status: docStatus, meta: docMeta }));
+  const [modalVisible, setModalVisible] = useState(visible);
+  const slideAnim = useRef(new Animated.Value(Dimensions.get('window').width)).current;
+
+  useEffect(() => {
+    if (visible) {
+      setModalVisible(true);
+      Animated.timing(slideAnim, { toValue: 0, duration: 280, useNativeDriver: true }).start();
+    } else {
+      Animated.timing(slideAnim, { toValue: Dimensions.get('window').width, duration: 250, useNativeDriver: true }).start(() => {
+        setModalVisible(false);
+      });
+    }
+  }, [visible]);
 
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-      <View style={styles.container}>
+    <Modal visible={modalVisible} animationType="none" transparent onRequestClose={onClose}>
+      <Animated.View style={[styles.container, { transform: [{ translateX: slideAnim }] }]}>
         <View style={styles.header}>
           <TouchableOpacity onPress={onClose} style={styles.backBtn} activeOpacity={0.7}>
             <Ionicons name="arrow-back" size={22} color="#17191D" />
@@ -74,7 +88,7 @@ export default function TrustComplianceScreen({ visible, onClose, verificationSt
             Make sure your documents are up to date to avoid service interruptions.
           </Text>
         </ScrollView>
-      </View>
+      </Animated.View>
     </Modal>
   );
 }

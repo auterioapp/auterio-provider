@@ -1,23 +1,38 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, AppState, Linking, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, AppState, Dimensions, Linking, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { authorizedFetch } from '../apiClient';
-import { API_URL, PROVIDER } from '../constants';
+import { API_URL } from '../constants';
+import { useProvider } from '../ProviderContext';
 
 export default function PayoutsScreen({ visible, onClose, isDemo }) {
+  const { provider } = useProvider();
   const [account, setAccount] = useState(null); // { connected, payoutsEnabled, bankAccount }
   const [loading, setLoading] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const appState = useRef(AppState.currentState);
+  const [modalVisible, setModalVisible] = useState(visible);
+  const slideAnim = useRef(new Animated.Value(Dimensions.get('window').width)).current;
+
+  useEffect(() => {
+    if (visible) {
+      setModalVisible(true);
+      Animated.timing(slideAnim, { toValue: 0, duration: 280, useNativeDriver: true }).start();
+    } else {
+      Animated.timing(slideAnim, { toValue: Dimensions.get('window').width, duration: 250, useNativeDriver: true }).start(() => {
+        setModalVisible(false);
+      });
+    }
+  }, [visible]);
 
   const fetchAccount = useCallback(async () => {
     if (isDemo) return;
     try {
-      const res = await authorizedFetch(`${API_URL}/stripe/connect/account/${PROVIDER.id}`);
+      const res = await authorizedFetch(`${API_URL}/stripe/connect/account/${provider.id}`);
       const data = await res.json();
       setAccount(data);
     } catch {}
-  }, [isDemo]);
+  }, [isDemo, provider.id]);
 
   useEffect(() => {
     if (visible) fetchAccount();
@@ -41,7 +56,7 @@ export default function PayoutsScreen({ visible, onClose, isDemo }) {
       const res = await authorizedFetch(`${API_URL}/stripe/connect/create-account`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ providerId: PROVIDER.id }),
+        body: JSON.stringify({ providerId: provider.id }),
       });
       const data = await res.json();
       if (data.url) {
@@ -62,7 +77,7 @@ export default function PayoutsScreen({ visible, onClose, isDemo }) {
       const res = await authorizedFetch(`${API_URL}/stripe/connect/dashboard-link`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ providerId: PROVIDER.id }),
+        body: JSON.stringify({ providerId: provider.id }),
       });
       const data = await res.json();
       if (data.url) await Linking.openURL(data.url);
@@ -76,8 +91,8 @@ export default function PayoutsScreen({ visible, onClose, isDemo }) {
   const isConnected = isDemo || account?.connected;
 
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-      <View style={styles.container}>
+    <Modal visible={modalVisible} animationType="none" transparent onRequestClose={onClose}>
+      <Animated.View style={[styles.container, { transform: [{ translateX: slideAnim }] }]}>
 
         <View style={styles.header}>
           <TouchableOpacity onPress={onClose} style={styles.backBtn} activeOpacity={0.7}>
@@ -217,7 +232,7 @@ export default function PayoutsScreen({ visible, onClose, isDemo }) {
           </View>
 
         </ScrollView>
-      </View>
+      </Animated.View>
     </Modal>
   );
 }

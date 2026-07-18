@@ -1,15 +1,17 @@
-import { useEffect, useState } from 'react';
-import { Alert, Modal, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Alert, Animated, Dimensions, Modal, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { loadPricing, savePricing } from '../utils/pricingStore';
-import { API_URL, PROVIDER } from '../constants';
+import { API_URL } from '../constants';
 
-export default function AppSettingsScreen({ visible, onClose, onLogout }) {
+export default function AppSettingsScreen({ visible, onClose }) {
   const [pushEnabled, setPushEnabled] = useState(true);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [vibrationEnabled, setVibrationEnabled] = useState(true);
   const [providerType, setProviderTypeState] = useState('mobile');
   const [allowScheduling, setAllowSchedulingState] = useState(false);
+  const [modalVisible, setModalVisible] = useState(visible);
+  const slideAnim = useRef(new Animated.Value(Dimensions.get('window').width)).current;
 
   useEffect(() => {
     loadPricing().then(p => {
@@ -18,38 +20,26 @@ export default function AppSettingsScreen({ visible, onClose, onLogout }) {
     });
   }, []);
 
+  useEffect(() => {
+    if (visible) {
+      setModalVisible(true);
+      Animated.timing(slideAnim, { toValue: 0, duration: 280, useNativeDriver: true }).start();
+    } else {
+      Animated.timing(slideAnim, { toValue: Dimensions.get('window').width, duration: 250, useNativeDriver: true }).start(() => {
+        setModalVisible(false);
+      });
+    }
+  }, [visible]);
+
   const changeAllowScheduling = async (val) => {
     setAllowSchedulingState(val);
     const current = await loadPricing();
     await savePricing({ ...current, allowScheduling: val });
   };
 
-  const handleLogout = () => {
-    Alert.alert('Logout', 'Are you sure you want to log out?', [
-      { text: 'Cancel', style: 'cancel' },
-      { text: 'Logout', style: 'destructive', onPress: () => { onClose(); onLogout?.(); } },
-    ]);
-  };
-
-  const handleDeleteAccount = () => {
-    Alert.alert(
-      'Delete Account',
-      'This will permanently delete your account and all data. This action cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () =>
-            Alert.alert('Account Deletion Requested', 'Our team will process your request within 7 business days.'),
-        },
-      ]
-    );
-  };
-
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-      <View style={styles.container}>
+    <Modal visible={modalVisible} animationType="none" transparent onRequestClose={onClose}>
+      <Animated.View style={[styles.container, { transform: [{ translateX: slideAnim }] }]}>
         <View style={styles.header}>
           <TouchableOpacity onPress={onClose} style={styles.backBtn} activeOpacity={0.7}>
             <Ionicons name="arrow-back" size={22} color="#17191D" />
@@ -113,20 +103,8 @@ export default function AppSettingsScreen({ visible, onClose, onLogout }) {
             />
           </View>
 
-          {/* Logout */}
-          <TouchableOpacity style={styles.logoutCard} activeOpacity={0.84} onPress={handleLogout}>
-            <Ionicons name="log-out-outline" size={20} color="#F04416" />
-            <Text style={styles.logoutText}>Logout</Text>
-          </TouchableOpacity>
-
-          {/* Delete Account */}
-          <TouchableOpacity style={styles.deleteCard} activeOpacity={0.84} onPress={handleDeleteAccount}>
-            <Ionicons name="trash-outline" size={20} color="#DC2626" />
-            <Text style={styles.deleteText}>Delete Account</Text>
-          </TouchableOpacity>
-
         </ScrollView>
-      </View>
+      </Animated.View>
     </Modal>
   );
 }
@@ -175,8 +153,4 @@ const styles = StyleSheet.create({
   rowSublabel: { color: '#6B7280', fontSize: 12, marginTop: 2 },
   selectRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   selectValue: { color: '#6B7280', fontSize: 14, fontWeight: '500' },
-  logoutCard: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 1, borderColor: '#ECEEF0', paddingHorizontal: 16, paddingVertical: 16, marginTop: 20 },
-  logoutText: { color: '#F04416', fontSize: 15, fontWeight: '700' },
-  deleteCard: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#FEF2F2', borderRadius: 14, borderWidth: 1, borderColor: '#FECACA', paddingHorizontal: 16, paddingVertical: 16, marginTop: 10 },
-  deleteText: { color: '#DC2626', fontSize: 15, fontWeight: '700' },
 });

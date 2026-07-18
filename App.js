@@ -1,5 +1,5 @@
-﻿import { useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Animated, Dimensions, Easing, KeyboardAvoidingView, Linking, Modal, PanResponder, Platform, RefreshControl, ScrollView, Share, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, Animated, AppState, Dimensions, Easing, KeyboardAvoidingView, Linking, Modal, PanResponder, Platform, RefreshControl, ScrollView, Share, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
@@ -26,24 +26,15 @@ import { getServiceMode } from './utils/serviceUtils';
 import JobsScreen from './screens/JobsScreen';
 import JobDetailScreen, { JobStepper } from './screens/JobDetailScreen';
 import { getJobProgressIndex } from './utils/jobUtils';
-import { API_URL, PROVIDER, ACCEPT_BLUE, TAB_BAR_PADDING, TAB_INDICATOR_EXTRA_WIDTH, TAB_INDICATOR_DROP_SCALE, TABS, REQUEST_ROUTE, REQUEST_MAP_REGION, JOB_STEPS, ACTIVE_SHOP_STATUSES } from './constants';
+import { API_URL, ACCEPT_BLUE, TAB_BAR_PADDING, TAB_INDICATOR_EXTRA_WIDTH, TAB_INDICATOR_DROP_SCALE, TABS, REQUEST_ROUTE, REQUEST_MAP_REGION, JOB_STEPS, ACTIVE_SHOP_STATUSES } from './constants';
 
 import { formatMoney, getServiceMeta, getServiceTitle, getOrderServiceType, getServiceFlowSchema, getDiagnosisSchema, getProviderIntakeItems, isTowingService, getDropoffAddress, getRequestLocation, getRequestDistance, getVehicleVin, normalizeComplaintItem, getCustomerComplaintItems, getAcceptedAtLabel, getVehicleLabel, getBackendStatusFromWorkflowStage, stripCountryFromAddress } from './utils/serviceUtils';
 import { getRecommendedServicesFromDiagnosis, getDemoEstimate, getEstimateCatalog, getEstimatePriceCheck, sumAmounts, formatCurrency } from './utils/estimateUtils';
 import { loadPricing, savePricing, DEFAULT_PRICING } from './utils/pricingStore';
 import { setAuthFailureHandler as setApiAuthFailureHandler } from './apiClient';
+import { ProviderContextProvider, useProvider } from './ProviderContext';
 
 const DEMO_EMAIL = 'auterioapp@gmail.com';
-
-function applyProviderUser(user) {
-  if (!user) return;
-  if ((user.email || '').toLowerCase() === DEMO_EMAIL) return;
-  if (user._id) PROVIDER.id = user._id;
-  if (user.companyName) { PROVIDER.company = user.companyName; }
-  if (user.name) PROVIDER.name = user.name;
-  PROVIDER.initials = ((user.companyName || user.name) || 'P').slice(0, 2).toUpperCase();
-  if (user.phone) PROVIDER.phone = user.phone;
-}
 
 Text.defaultProps = Text.defaultProps || {};
 Text.defaultProps.allowFontScaling = false;
@@ -62,6 +53,7 @@ async function registerPushToken(providerId) {
     const pushToken = tokenData.data;
     await fetchJson(`${API_URL}/profiles/${providerId}/push-token`, {
       method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ pushToken }),
     });
   } catch (e) {
@@ -180,7 +172,8 @@ const DEMO_JOBS = [
   { id: 'demo-job-007', status: 'completed', icon: 'checkmark-circle-outline', service: { type: 'Engine Tune-Up' }, vehicle: { year: '2016', make: 'Hyundai', model: 'Elantra' }, pickup: { address: '602 E 11th St, Austin TX' }, payment: { total: 230 }, distance: '4.0 mi' },
 ];
 
-export default function App() {
+function AppInner() {
+  const { provider, updateProvider, resetProvider, applyProviderUser } = useProvider();
   const [authState, setAuthState] = useState('loading');
   const pendingBusinessType = useRef('mobile');
   const pendingCredentials = useRef(null);
@@ -227,6 +220,7 @@ export default function App() {
   const tabIndicatorPosition = useRef(0);
   const tabIndicatorTarget = useRef(0);
   const tabDragFrame = useRef(null);
+  const appStateRef = useRef(AppState.currentState);
 
   const [isDemo, setIsDemo] = useState(false);
   const [completedOrders, setCompletedOrders] = useState([]);
@@ -305,25 +299,25 @@ export default function App() {
         _refreshToken = refreshTok || null;
         _onAuthFailure = handleLogout;
         applyProviderUser(user);
-        const demo = PROVIDER.id === 'provider-demo-001';
+        const demo = (user?.email || '').toLowerCase() === DEMO_EMAIL;
+        const providerId = demo ? 'provider-demo-001' : (user?._id || 'provider-demo-001');
         setIsDemo(demo);
         setVerificationStatus(demo ? 'verified' : savedStatus);
         let serverSetupDone = false;
         let needsBusinessInfo = false;
         if (!demo) {
           try {
-            const profile = await fetchJson(`${API_URL}/profiles/${PROVIDER.id}`);
+            const profile = await fetchJson(`${API_URL}/profiles/${providerId}`);
             const businessName = (profile?.businessName || profile?.name || '').trim();
             if (businessName) {
-              PROVIDER.company = businessName;
-              PROVIDER.initials = businessName.slice(0, 2).toUpperCase();
+              updateProvider({ company: businessName, initials: businessName.slice(0, 2).toUpperCase() });
             }
-            if (profile?.contactName) PROVIDER.name = profile.contactName;
+            if (profile?.contactName) updateProvider({ name: profile.contactName });
             serverSetupDone = profile?.setupCompleted === true;
             needsBusinessInfo = !businessName || !String(profile?.contactName || '').trim();
           } catch {}
-          loadProviderJobsFromBackend(PROVIDER.id);
-          registerPushToken(PROVIDER.id);
+          loadProviderJobsFromBackend(providerId);
+          registerPushToken(providerId);
         }
         if (needsBusinessInfo) setAuthState('business-info-existing');
         else setAuthState(demo || setupDone || serverSetupDone ? 'app' : 'setup');
@@ -342,12 +336,12 @@ export default function App() {
     if (user) await AsyncStorage.setItem('providerUser', JSON.stringify(user));
     if (isRegister) {
       // Fresh account — wipe all previous user's local data before applying new user
-      PROVIDER.id = 'provider-demo-001';
-      PROVIDER.company = 'Auterio Provider';
-      PROVIDER.name = user?.name || '';
-      PROVIDER.initials = 'AP';
+      resetProvider();
       setProfileComplete(false);
       profileCompleteRef.current = false;
+      setAcceptedJobs([]);
+      setCompletedOrders([]);
+      setAcceptedRequestIds([]);
       await Promise.all([
         AsyncStorage.removeItem('@setup_completed_v1'),
         AsyncStorage.removeItem('@provider_verification_status'),
@@ -361,15 +355,16 @@ export default function App() {
       ]);
     }
     applyProviderUser(user);
-    const demo = PROVIDER.id === 'provider-demo-001';
+    const demo = (user?.email || '').toLowerCase() === DEMO_EMAIL;
+    const providerId = demo ? 'provider-demo-001' : (user?._id || 'provider-demo-001');
     setIsDemo(demo);
     setVerificationStatus(demo ? 'verified' : 'unverified');
     if (!demo) {
-      loadProviderJobsFromBackend(PROVIDER.id);
-      registerPushToken(PROVIDER.id);
+      loadProviderJobsFromBackend(providerId);
+      registerPushToken(providerId);
       // Ensure provider profile exists in DB (creates it if new), then sync name
       const profileName = (user?.companyName || user?.name || '').trim();
-      fetchJson(`${API_URL}/profiles/${PROVIDER.id}`, {
+      fetchJson(`${API_URL}/profiles/${providerId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -390,7 +385,7 @@ export default function App() {
       let serverSetupDone = false;
       let needsBusinessInfo = false;
       try {
-        const profile = await fetchJson(`${API_URL}/profiles/${PROVIDER.id}`);
+        const profile = await fetchJson(`${API_URL}/profiles/${providerId}`);
         serverSetupDone = profile?.setupCompleted === true;
         needsBusinessInfo = !String(profile?.businessName || profile?.name || '').trim()
           || !String(profile?.contactName || '').trim();
@@ -411,10 +406,7 @@ export default function App() {
     setAcceptedRequestIds([]);
     setProfileComplete(false);
     profileCompleteRef.current = false;
-    PROVIDER.id = 'provider-demo-001';
-    PROVIDER.company = 'Auterio Provider';
-    PROVIDER.name = '';
-    PROVIDER.initials = 'AP';
+    resetProvider();
     await Promise.all([
       SecureStore.deleteItemAsync('providerToken'),
       SecureStore.deleteItemAsync('providerRefreshToken'),
@@ -470,7 +462,7 @@ export default function App() {
     setBusinessInfoLoading(true);
     try {
       const displayBusinessName = kind === 'individual' ? name : businessName;
-      await fetchJson(`${API_URL}/profiles/${PROVIDER.id}`, {
+      await fetchJson(`${API_URL}/profiles/${provider.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -481,9 +473,7 @@ export default function App() {
           initials: displayBusinessName.slice(0, 2).toUpperCase(),
         }),
       });
-      PROVIDER.company = displayBusinessName;
-      PROVIDER.name = name;
-      PROVIDER.initials = displayBusinessName.slice(0, 2).toUpperCase();
+      updateProvider({ company: displayBusinessName, name, initials: displayBusinessName.slice(0, 2).toUpperCase() });
       const storedUserRaw = await AsyncStorage.getItem('providerUser');
       const storedUser = storedUserRaw ? JSON.parse(storedUserRaw) : {};
       await AsyncStorage.setItem('providerUser', JSON.stringify({
@@ -507,34 +497,53 @@ export default function App() {
     return () => setApiAuthFailureHandler(null);
   }, []);
 
+  // Pulls fresh business name/contact/verification status/type from the backend —
+  // the app never polls this on its own, so without an explicit call the UI can sit
+  // on a stale verificationStatus indefinitely (e.g. after an admin approves the
+  // account elsewhere) until the app is fully restarted.
+  const syncProviderProfile = useCallback(async () => {
+    const pricing = await loadPricing();
+    let pt = pricing.providerType || 'mobile';
+    if (!isDemo) {
+      try {
+        const data = await fetchJson(`${API_URL}/profiles/${provider.id}`);
+        const businessName = (data?.businessName || data?.name || '').trim();
+        if (businessName) updateProvider({ company: businessName, initials: businessName.slice(0, 2).toUpperCase() });
+        if (data?.contactName) updateProvider({ name: data.contactName });
+        if (data?.verificationStatus) {
+          setVerificationStatus(data.verificationStatus);
+          AsyncStorage.setItem('@provider_verification_status', data.verificationStatus);
+        }
+        // Server is the source of truth for business type — local cache drifts after logout/login.
+        if (data?.type && data.type !== pt) {
+          pt = data.type;
+          await savePricing({ ...pricing, providerType: pt, ...(businessName ? { businessName } : {}) });
+        } else if (businessName) {
+          await savePricing({ ...pricing, businessName });
+        }
+      } catch {}
+    }
+    setProviderType(pt);
+    providerTypeRef.current = pt;
+    const scheduling = pt === 'shop' ? true : pt === 'mobile' ? false : (pricing.allowScheduling ?? false);
+    setAllowScheduling(scheduling);
+  }, [isDemo, provider.id, updateProvider]);
+
   useEffect(() => {
     if (authState !== 'app') return;
-    loadPricing().then(p => {
-      const pt = p.providerType || 'mobile';
-      setProviderType(pt);
-      providerTypeRef.current = pt;
-      const scheduling = pt === 'shop' ? true : pt === 'mobile' ? false : (p.allowScheduling ?? false);
-      setAllowScheduling(scheduling);
-      loadRequests();
+    syncProviderProfile().then(loadRequests);
+  }, [authState, syncProviderProfile]);
+
+  useEffect(() => {
+    if (authState !== 'app') return;
+    const sub = AppState.addEventListener('change', next => {
+      if (appStateRef.current.match(/inactive|background/) && next === 'active') {
+        syncProviderProfile();
+      }
+      appStateRef.current = next;
     });
-    if (!isDemo) {
-      fetchJson(`${API_URL}/profiles/${PROVIDER.id}`)
-        .then(data => {
-          const businessName = (data?.businessName || data?.name || '').trim();
-          if (businessName) {
-            PROVIDER.company = businessName;
-            PROVIDER.initials = businessName.slice(0, 2).toUpperCase();
-            loadPricing().then(current => savePricing({ ...current, businessName }));
-          }
-          if (data?.contactName) PROVIDER.name = data.contactName;
-          if (data?.verificationStatus) {
-            setVerificationStatus(data.verificationStatus);
-            AsyncStorage.setItem('@provider_verification_status', data.verificationStatus);
-          }
-        })
-        .catch(() => {});
-    }
-  }, [authState]);
+    return () => sub.remove();
+  }, [authState, syncProviderProfile]);
 
   useEffect(() => {
     if (activeScreen !== 'profile') {
@@ -561,7 +570,7 @@ export default function App() {
     const isShop = type === 'shop' || type === 'both';
     try {
       const [availableData, scheduledPendingData, scheduledData] = await Promise.all([
-        isMobile ? fetchJson(`${API_URL}/orders/provider/available?providerId=${PROVIDER.id}`) : Promise.resolve([]),
+        isMobile ? fetchJson(`${API_URL}/orders/provider/available?providerId=${provider.id}`) : Promise.resolve([]),
         isShop   ? fetchJson(`${API_URL}/orders?status=scheduled_pending`)                     : Promise.resolve([]),
         isShop   ? fetchJson(`${API_URL}/orders?status=scheduled`)                             : Promise.resolve([]),
       ]);
@@ -579,7 +588,7 @@ export default function App() {
       const bookingOrders = isShop && Array.isArray(scheduledPendingData)
         ? scheduledPendingData.filter(o =>
             o.status === 'scheduled_pending' &&
-            String(o.provider?.id) === String(PROVIDER.id) &&
+            String(o.provider?.id) === String(provider.id) &&
             !dismissed.includes(String(o.id || o._id))
           )
         : [];
@@ -611,13 +620,13 @@ export default function App() {
     }
     const timer = setInterval(loadRequests, 3000);
     return () => clearInterval(timer);
-  }, [online, acceptedRequestIds, verificationStatus]);
+  }, [online, acceptedRequestIds, verificationStatus, provider.id]);
 
   useEffect(() => {
-    if (isDemo || !PROVIDER.id) return;
-    const timer = setInterval(() => loadProviderJobsFromBackend(PROVIDER.id), 10000);
+    if (isDemo || !provider.id) return;
+    const timer = setInterval(() => loadProviderJobsFromBackend(provider.id), 10000);
     return () => clearInterval(timer);
-  }, [isDemo]);
+  }, [isDemo, provider.id]);
 
   useEffect(() => {
     if (isDemo) return;
@@ -727,10 +736,10 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           provider: {
-            id: PROVIDER.id, name: PROVIDER.company,
+            id: provider.id, name: provider.company,
             type: order.provider?.type || 'Mobile Service Provider',
-            phone: PROVIDER.phone, initials: PROVIDER.initials,
-            rating: PROVIDER.rating, eta: PROVIDER.eta, color: '#FF6B00',
+            phone: provider.phone, initials: provider.initials,
+            rating: provider.rating, eta: provider.eta, color: '#FF6B00',
           },
         }),
       });
@@ -767,10 +776,10 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           provider: {
-            id: PROVIDER.id, name: PROVIDER.company,
+            id: provider.id, name: provider.company,
             type: order.provider?.type || 'Auto Repair Shop',
-            phone: PROVIDER.phone, initials: PROVIDER.initials,
-            rating: PROVIDER.rating, eta: PROVIDER.eta, color: '#FF6B00',
+            phone: provider.phone, initials: provider.initials,
+            rating: provider.rating, eta: provider.eta, color: '#FF6B00',
           },
         }),
       });
@@ -855,7 +864,7 @@ export default function App() {
       fetchJson(`${API_URL}/orders/${realId}/decline`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ providerId: PROVIDER.id }),
+        body: JSON.stringify({ providerId: provider.id }),
       }).catch(() => {});
     }
   };
@@ -879,10 +888,10 @@ export default function App() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           provider: {
-            id: PROVIDER.id, name: PROVIDER.company,
+            id: provider.id, name: provider.company,
             type: order.provider?.type || 'Mobile Service Provider',
-            phone: PROVIDER.phone, initials: PROVIDER.initials,
-            rating: PROVIDER.rating, eta: PROVIDER.eta, color: '#FF6B00',
+            phone: provider.phone, initials: provider.initials,
+            rating: provider.rating, eta: provider.eta, color: '#FF6B00',
           },
           appointmentTime,
         }),
@@ -1000,7 +1009,7 @@ export default function App() {
     pulseTabChange();
     setRefreshing(true);
     try {
-      await loadRequests();
+      await Promise.all([loadRequests(), syncProviderProfile()]);
       if (isDemo) {
         setAcceptedJobs(current => current.map(job => {
           if (job.status === 'proposed') return { ...job, status: 'scheduled' };
@@ -1147,6 +1156,7 @@ export default function App() {
           mode={authState}
           onLogin={(token, refreshTok, user) => handleLogin(token, refreshTok, user, authState === 'register')}
           onRegisterCredentials={authState === 'register' ? beginProviderRegistration : undefined}
+          onSwitchToRegister={() => setAuthState('register')}
           onBack={() => setAuthState('welcome')}
         />
       </SafeAreaProvider>
@@ -1170,7 +1180,7 @@ export default function App() {
       <SafeAreaProvider>
         <ProviderSetupScreen
           onComplete={async () => {
-            const profile = await fetchJson(`${API_URL}/profiles/${PROVIDER.id}`, {
+            const profile = await fetchJson(`${API_URL}/profiles/${provider.id}`, {
               method: 'PUT',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({
@@ -1427,6 +1437,14 @@ export default function App() {
         )}
       </SafeAreaView>
     </SafeAreaProvider>
+  );
+}
+
+export default function App() {
+  return (
+    <ProviderContextProvider>
+      <AppInner />
+    </ProviderContextProvider>
   );
 }
 

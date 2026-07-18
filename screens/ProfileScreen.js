@@ -16,10 +16,12 @@ import BusinessProfileScreen from './BusinessProfileScreen';
 import AccountInfoScreen from './AccountInfoScreen';
 import CalendarScreen from './CalendarScreen';
 import PayoutsScreen from './PayoutsScreen';
-import { API_URL, PROVIDER } from '../constants';
+import { API_URL } from '../constants';
+import { useProvider } from '../ProviderContext';
 import { loadPricing, savePricing } from '../utils/pricingStore';
 
 export default function ProfileScreen({ online, setOnline, refreshControl, scrollSignal, onLogout, verificationStatus, setVerificationStatus, onProfileComplete }) {
+  const { provider, updateProvider } = useProvider();
   const scrollRef = useScrollToTop(scrollSignal);
   const [reviewsOpen, setReviewsOpen] = useState(false);
   const [servicesOpen, setServicesOpen] = useState(false);
@@ -39,34 +41,47 @@ export default function ProfileScreen({ online, setOnline, refreshControl, scrol
   const [profileData, setProfileData] = useState(null);
   const [scheduleData, setScheduleData] = useState(null);
   const [providerType, setProviderType] = useState('mobile');
-  const [isDemoAccount, setIsDemoAccount] = useState(PROVIDER.id === 'provider-demo-001');
+  const [isDemoAccount, setIsDemoAccount] = useState(provider.id === 'provider-demo-001');
   const [loading, setLoading] = useState(true);
   const [networkError, setNetworkError] = useState(false);
 
   const loadProfileData = useCallback(async () => {
     setLoading(true);
     try {
-      const [profileRes, scheduleRes, pricing, radius, storedUser] = await Promise.all([
-        authorizedFetch(`${API_URL}/profiles/${PROVIDER.id}`).then(r => r.ok ? r.json() : null).catch(() => null),
-        authorizedFetch(`${API_URL}/schedules/${PROVIDER.id}`).then(r => r.ok ? r.json() : null).catch(() => null),
+      const [pricing, radius, storedUser] = await Promise.all([
         loadPricing(),
         AsyncStorage.getItem('@service_radius'),
         AsyncStorage.getItem('providerUser'),
       ]);
-      setNetworkError(!profileRes && !scheduleRes);
+      const user = storedUser ? JSON.parse(storedUser) : null;
+      const isDemo = (user?.email || '').toLowerCase() === 'auterioapp@gmail.com';
+      setIsDemoAccount(isDemo);
+
+      let profileRes = null;
+      let scheduleRes = null;
+      if (!isDemo) {
+        [profileRes, scheduleRes] = await Promise.all([
+          authorizedFetch(`${API_URL}/profiles/${provider.id}`).then(r => r.ok ? r.json() : null).catch(() => null),
+          authorizedFetch(`${API_URL}/schedules/${provider.id}`).then(r => r.ok ? r.json() : null).catch(() => null),
+        ]);
+        setNetworkError(!profileRes && !scheduleRes);
+      }
       if (profileRes) {
         setProfileData(profileRes);
         const serverBusinessName = (profileRes.businessName || profileRes.name || '').trim();
         if (serverBusinessName) {
           setBusinessName(serverBusinessName);
-          PROVIDER.company = serverBusinessName;
-          PROVIDER.initials = serverBusinessName.slice(0, 2).toUpperCase();
+          updateProvider({ company: serverBusinessName, initials: serverBusinessName.slice(0, 2).toUpperCase() });
           savePricing({ ...pricing, businessName: serverBusinessName });
         }
-        if (profileRes.contactName) PROVIDER.name = profileRes.contactName;
+        if (profileRes.contactName) updateProvider({ name: profileRes.contactName });
         if (profileRes.verificationStatus) {
           setVerificationStatus?.(profileRes.verificationStatus);
           AsyncStorage.setItem('@provider_verification_status', profileRes.verificationStatus);
+        }
+        // Server is the source of truth for business type — local cache drifts after logout/login.
+        if (profileRes.type && profileRes.type !== pricing?.providerType) {
+          savePricing({ ...pricing, providerType: profileRes.type });
         }
       }
       if (scheduleRes) {
@@ -75,17 +90,13 @@ export default function ProfileScreen({ online, setOnline, refreshControl, scrol
         const enabledDays = Object.keys(apiDays).filter(k => apiDays[k]?.enabled);
         if (enabledDays.length) setHoursSummary(`${enabledDays.length} day${enabledDays.length !== 1 ? 's' : ''} active`);
       }
-      if (pricing?.providerType) setProviderType(pricing.providerType);
+      setProviderType(profileRes?.type || pricing?.providerType || 'mobile');
       if (!profileRes?.businessName && !profileRes?.name && pricing?.businessName) setBusinessName(pricing.businessName);
-      if (PROVIDER.id === 'provider-demo-001') setVerificationStatus?.('verified');
+      if (isDemo) setVerificationStatus?.('verified');
       if (radius) setSavedRadius(parseInt(radius, 10));
-      if (storedUser) {
-        const user = JSON.parse(storedUser);
-        setIsDemoAccount((user.email || '').toLowerCase() === 'auterioapp@gmail.com');
-      }
     } catch {}
     setLoading(false);
-  }, []);
+  }, [provider.id, updateProvider]);
 
   useEffect(() => {
     loadProfileData();
@@ -98,6 +109,7 @@ export default function ProfileScreen({ online, setOnline, refreshControl, scrol
   const hasAddress = !needsAddress || !!profileData?.address;
   const hasBusinessIdentity = isDemoAccount || !!(profileData?.businessName || profileData?.name) && !!profileData?.contactName;
   const profileComplete = isDemoAccount || (hasBusinessIdentity && hasServices && hasHours && hasAddress);
+  const canGoOnline = profileComplete && (isDemoAccount || verificationStatus === 'verified');
 
   useEffect(() => {
     onProfileComplete?.(profileComplete);
@@ -106,7 +118,7 @@ export default function ProfileScreen({ online, setOnline, refreshControl, scrol
   useEffect(() => {
     if (!profileData) return;
     if (profileComplete && verificationStatus === 'unverified' && !isDemoAccount) {
-      authorizedFetch(`${API_URL}/profiles/${PROVIDER.id}`, {
+      authorizedFetch(`${API_URL}/profiles/${provider.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ verificationStatus: 'pending_review' }),
@@ -131,6 +143,16 @@ export default function ProfileScreen({ online, setOnline, refreshControl, scrol
       );
       return;
     }
+    if (val && !canGoOnline) {
+      Alert.alert(
+        'Account not verified',
+        verificationStatus === 'pending_review'
+          ? 'Your account is under review. You can go online once it\'s approved.'
+          : 'Upload your documents in Profile to activate your account before going online.',
+        [{ text: 'OK' }]
+      );
+      return;
+    }
     setOnline(val);
   };
 
@@ -138,6 +160,14 @@ export default function ProfileScreen({ online, setOnline, refreshControl, scrol
     {
       title: 'Business',
       items: [
+        {
+          id: 'business',
+          title: 'Business Type',
+          subtitle: providerType === 'mobile' ? 'Mobile Service Provider' : providerType === 'shop' ? 'Service Shop' : 'Mobile & Shop',
+          icon: 'briefcase-outline',
+          iconBg: '#F0F4FF',
+          iconColor: '#2563EB',
+        },
         {
           id: 'services',
           title: 'Services',
@@ -177,14 +207,6 @@ export default function ProfileScreen({ online, setOnline, refreshControl, scrol
           iconColor: '#16A34A',
           value: providerType === 'shop' ? null : `${savedRadius} mi`,
           valueColor: '#16A34A',
-        },
-        {
-          id: 'business',
-          title: 'Business Information',
-          subtitle: businessName || (providerType === 'mobile' ? 'Mobile Service Provider' : providerType === 'shop' ? 'Service Shop' : 'Mobile & Shop'),
-          icon: 'briefcase-outline',
-          iconBg: '#F0F4FF',
-          iconColor: '#2563EB',
         },
         {
           id: 'pricing',
@@ -309,15 +331,15 @@ export default function ProfileScreen({ online, setOnline, refreshControl, scrol
         <View style={styles.profileHeroCard}>
           <View style={styles.profileAvatar}>
             <Text style={styles.profileAvatarText}>
-              {businessName ? businessName.trim().slice(0, 2).toUpperCase() : PROVIDER.initials}
+              {businessName ? businessName.trim().slice(0, 2).toUpperCase() : provider.initials}
             </Text>
           </View>
           <View style={styles.profileHeroInfo}>
-            {loading
+            {loading && !businessName
               ? <View style={styles.skeletonName} />
-              : <Text style={styles.profileName}>{businessName || PROVIDER.company}</Text>
+              : <Text style={styles.profileName}>{businessName || provider.company}</Text>
             }
-            {loading
+            {loading && !businessName
               ? <View style={styles.skeletonSub} />
               : <Text style={styles.profileSub}>
                   {providerType === 'mobile' ? 'Mobile Service Provider' : providerType === 'shop' ? 'Service Shop' : 'Mobile & Shop'}
@@ -326,7 +348,7 @@ export default function ProfileScreen({ online, setOnline, refreshControl, scrol
             {isDemoAccount && (
               <View style={styles.profileRatingRow}>
                 <Ionicons name="star" size={13} color="#F5B301" />
-                <Text style={styles.profileRatingText}>{PROVIDER.rating} rating</Text>
+                <Text style={styles.profileRatingText}>{provider.rating} rating</Text>
                 <View style={styles.profileDot} />
                 <Text style={styles.profileRatingText}>128 reviews</Text>
               </View>
@@ -359,7 +381,7 @@ export default function ProfileScreen({ online, setOnline, refreshControl, scrol
             </View>
           </View>
           <TouchableOpacity style={styles.heroEditBtn} activeOpacity={0.7} onPress={() => setAccountInfoOpen(true)}>
-            <Ionicons name="pencil-outline" size={16} color="#5E646D" />
+            <Ionicons name="chevron-forward" size={16} color="#C8CDD4" />
           </TouchableOpacity>
         </View>
 
@@ -394,25 +416,27 @@ export default function ProfileScreen({ online, setOnline, refreshControl, scrol
         )}
 
         {/* Availability toggle */}
-        <View style={[styles.profileStatusCard, !profileComplete && styles.profileStatusCardDisabled]}>
+        <View style={[styles.profileStatusCard, !canGoOnline && styles.profileStatusCardDisabled]}>
           <View style={{ flex: 1 }}>
             <Text style={styles.profileStatusTitle}>Availability</Text>
             <Text style={styles.profileStatusMeta}>
               {!profileComplete
                 ? 'Complete your profile to go online'
+                : !canGoOnline
+                ? (verificationStatus === 'pending_review' ? 'Waiting on account review' : 'Verify your account to go online')
                 : online ? 'You are visible for new requests' : 'You are not receiving requests'}
             </Text>
           </View>
           <View style={styles.profileStatusToggle}>
-            <Text style={[styles.profileStatusText, online && profileComplete && styles.profileStatusTextOnline]}>
-              {online && profileComplete ? 'Online' : 'Offline'}
+            <Text style={[styles.profileStatusText, online && canGoOnline && styles.profileStatusTextOnline]}>
+              {canGoOnline ? (online ? 'Online' : 'Offline') : 'Locked'}
             </Text>
             <Switch
-              value={online && profileComplete}
+              value={online && canGoOnline}
               onValueChange={handleSetOnline}
-              disabled={!profileComplete}
+              disabled={!canGoOnline}
               trackColor={{ false: '#E6E8EB', true: '#16A34A' }}
-              thumbColor={online && profileComplete ? '#FFFFFF' : '#8B9098'}
+              thumbColor={online && canGoOnline ? '#FFFFFF' : '#8B9098'}
               style={styles.profileOnlineSwitch}
             />
           </View>
@@ -422,30 +446,47 @@ export default function ProfileScreen({ online, setOnline, refreshControl, scrol
           <View key={section.title} style={styles.menuSection}>
             <Text style={styles.menuSectionTitle}>{section.title}</Text>
             <View style={styles.menuList}>
-              {section.items.map(item => (
-                <MenuItem
-                  key={item.id}
-                  item={item}
-                  onPress={
-                    item.id === 'reviews'     ? () => setReviewsOpen(true) :
-                    item.id === 'services'    ? () => setServicesOpen(true) :
-                    item.id === 'radius'      ? () => setRadiusOpen(true) :
-                    item.id === 'trust'       ? () => setTrustOpen(true) :
-                    item.id === 'hours'       ? () => setHoursOpen(true) :
-                    item.id === 'business'    ? () => setBusinessOpen(true) :
-                    item.id === 'payouts'     ? () => setPayoutsOpen(true) :
-                    item.id === 'settings'    ? () => setSettingsOpen(true) :
-                    item.id === 'pricing'     ? () => setPricingOpen(true) :
-                    item.id === 'calendar'    ? () => setCalendarOpen(true) :
-                    item.id === 'privacy'     ? () => Linking.openURL('https://auterio.com/privacy') :
-                    item.id === 'terms'       ? () => Linking.openURL('https://auterio.com/terms') :
-                    undefined
-                  }
-                />
+              {section.items.map((item, idx) => (
+                <View key={item.id}>
+                  <MenuItem
+                    item={item}
+                    onPress={
+                      item.id === 'reviews'     ? () => setReviewsOpen(true) :
+                      item.id === 'services'    ? () => setServicesOpen(true) :
+                      item.id === 'radius'      ? () => setRadiusOpen(true) :
+                      item.id === 'trust'       ? () => setTrustOpen(true) :
+                      item.id === 'hours'       ? () => setHoursOpen(true) :
+                      item.id === 'business'    ? () => setBusinessOpen(true) :
+                      item.id === 'payouts'     ? () => setPayoutsOpen(true) :
+                      item.id === 'settings'    ? () => setSettingsOpen(true) :
+                      item.id === 'pricing'     ? () => setPricingOpen(true) :
+                      item.id === 'calendar'    ? () => setCalendarOpen(true) :
+                      item.id === 'privacy'     ? () => Linking.openURL('https://auterio.com/privacy') :
+                      item.id === 'terms'       ? () => Linking.openURL('https://auterio.com/terms') :
+                      undefined
+                    }
+                  />
+                  {idx < section.items.length - 1 && <View style={styles.menuSep} />}
+                </View>
               ))}
             </View>
           </View>
         ))}
+
+        {/* Logout */}
+        <TouchableOpacity
+          style={styles.logoutCard}
+          activeOpacity={0.84}
+          onPress={() => {
+            Alert.alert('Logout', 'Are you sure you want to log out?', [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Logout', style: 'destructive', onPress: () => onLogout?.() },
+            ]);
+          }}
+        >
+          <Ionicons name="log-out-outline" size={20} color="#F04416" />
+          <Text style={styles.logoutText}>Logout</Text>
+        </TouchableOpacity>
 
         {/* Version */}
         <Text style={styles.versionText}>AuterioPro v{Constants.expoConfig?.version || '1.0.0'}</Text>
@@ -457,47 +498,38 @@ export default function ProfileScreen({ online, setOnline, refreshControl, scrol
         visible={accountInfoOpen}
         onClose={() => setAccountInfoOpen(false)}
         isDemoAccount={isDemoAccount}
-        onSaved={(name) => { setBusinessName(name); loadProfileData(); }}
       />
       <BusinessProfileScreen
         visible={businessOpen}
         providerType={providerType}
-        businessName={businessName}
         onClose={() => setBusinessOpen(false)}
-        onSave={async ({ type, name }) => {
-          if (!isDemoAccount && name.trim()) {
+        onSave={async ({ type }) => {
+          if (!isDemoAccount) {
             try {
-              const res = await authorizedFetch(`${API_URL}/profiles/${PROVIDER.id}`, {
+              const res = await authorizedFetch(`${API_URL}/profiles/${provider.id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  name: name.trim(),
-                  businessName: name.trim(),
-                  initials: name.trim().slice(0, 2).toUpperCase(),
-                  type,
-                }),
+                body: JSON.stringify({ type }),
               });
               if (!res.ok) throw new Error('Server error');
             } catch {
-              Alert.alert('Error', 'Could not save business name. Check your connection.');
+              Alert.alert('Error', 'Could not save business type. Check your connection.');
               return;
             }
           }
           const current = await loadPricing();
-          await savePricing({ ...current, providerType: type, businessName: name });
+          await savePricing({ ...current, providerType: type });
           setProviderType(type);
-          setBusinessName(name);
-          PROVIDER.company = name || PROVIDER.company;
-          PROVIDER.initials = (name || PROVIDER.company).slice(0, 2).toUpperCase();
           setBusinessOpen(false);
+          loadProfileData();
         }}
       />
       <CalendarScreen visible={calendarOpen} onClose={() => setCalendarOpen(false)} />
       <ReviewsScreen visible={reviewsOpen} onClose={() => setReviewsOpen(false)} isDemo={isDemoAccount} />
       <PayoutsScreen visible={payoutsOpen} onClose={() => setPayoutsOpen(false)} isDemo={isDemoAccount} />
-      <ServicesScreen visible={servicesOpen} onClose={() => { setServicesOpen(false); loadProfileData(); }} />
+      <ServicesScreen visible={servicesOpen} onClose={() => { setServicesOpen(false); loadProfileData(); }} isDemoAccount={isDemoAccount} />
       <TrustComplianceScreen visible={trustOpen} onClose={() => setTrustOpen(false)} verificationStatus={verificationStatus} />
-      <PricingScreen visible={pricingOpen} onClose={() => setPricingOpen(false)} />
+      <PricingScreen visible={pricingOpen} onClose={() => setPricingOpen(false)} isDemoAccount={isDemoAccount} />
       <WorkingHoursScreen
         visible={hoursOpen}
         onClose={() => { setHoursOpen(false); loadProfileData(); }}
@@ -506,12 +538,12 @@ export default function ProfileScreen({ online, setOnline, refreshControl, scrol
       <AppSettingsScreen
         visible={settingsOpen}
         onClose={() => { setSettingsOpen(false); loadProfileData(); }}
-        onLogout={onLogout}
       />
       <ServiceRadiusScreen
         visible={radiusOpen}
         onClose={() => { setRadiusOpen(false); loadProfileData(); }}
         onSave={r => setSavedRadius(r)}
+        isDemoAccount={isDemoAccount}
       />
     </View>
   );
@@ -562,7 +594,7 @@ const styles = StyleSheet.create({
   profileAvatar: { width: 58, height: 58, borderRadius: 29, backgroundColor: '#17191D', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   profileAvatarText: { color: '#FFFFFF', fontSize: 18, lineHeight: 22, fontWeight: '900' },
   profileHeroInfo: { flex: 1, minWidth: 0 },
-  heroEditBtn: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#ECEEF0', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
+  heroEditBtn: { alignItems: 'center', justifyContent: 'center', flexShrink: 0, paddingHorizontal: 4 },
   profileName: { color: '#17191D', fontSize: 18, lineHeight: 23, fontWeight: '700' },
   profileSub: { color: '#5E646D', fontSize: 12, lineHeight: 16, fontWeight: '600', marginTop: 2 },
   networkErrorBanner: {
@@ -605,9 +637,10 @@ const styles = StyleSheet.create({
 
   menuSection: { marginBottom: 6, marginTop: 18 },
   menuSectionTitle: { color: '#8B9098', fontSize: 11, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: 8, marginLeft: 2 },
-  menuList: { gap: 8 },
-  menuItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', paddingHorizontal: 12, paddingVertical: 10, gap: 10 },
-  menuItemRequired: { borderColor: '#FDE68A', backgroundColor: '#FFFBEB' },
+  menuList: { backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', overflow: 'hidden' },
+  menuItem: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10, gap: 10 },
+  menuItemRequired: { backgroundColor: '#FFFBEB' },
+  menuSep: { height: 1, backgroundColor: '#F0F1F3', marginLeft: 62 },
   menuIcon: { width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   menuInfo: { flex: 1, minWidth: 0 },
   menuTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
@@ -620,4 +653,6 @@ const styles = StyleSheet.create({
   requiredBadge: { backgroundColor: '#FEF3C7', borderRadius: 5, paddingHorizontal: 6, paddingVertical: 2 },
   requiredBadgeText: { color: '#D97706', fontSize: 10, fontWeight: '700' },
   versionText: { color: '#C4C9D4', fontSize: 12, fontWeight: '500', textAlign: 'center', marginTop: 16, marginBottom: 4 },
+  logoutCard: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 1, borderColor: '#ECEEF0', paddingVertical: 16, marginTop: 20 },
+  logoutText: { color: '#F04416', fontSize: 15, fontWeight: '700' },
 });

@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
-import { ActivityIndicator, Alert, Modal, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Alert, Animated, Dimensions, Modal, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { authorizedFetch } from '../apiClient';
-import { API_URL, PROVIDER } from '../constants';
+import { API_URL } from '../constants';
+import { useProvider } from '../ProviderContext';
 import { loadPricing } from '../utils/pricingStore';
 
 const INITIAL_DAYS = [
@@ -117,12 +118,26 @@ function TimeColumn({ label, h, m, p, onChange }) {
 }
 
 export default function WorkingHoursScreen({ visible, onClose, onSave }) {
+  const { provider } = useProvider();
   const [hasAppointments, setHasAppointments] = useState(false);
   const [days, setDays] = useState(INITIAL_DAYS);
   const [slotDuration, setSlotDuration] = useState(60);
   const [editingId, setEditingId] = useState(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [modalVisible, setModalVisible] = useState(visible);
+  const slideAnim = useRef(new Animated.Value(Dimensions.get('window').width)).current;
+
+  useEffect(() => {
+    if (visible) {
+      setModalVisible(true);
+      Animated.timing(slideAnim, { toValue: 0, duration: 280, useNativeDriver: true }).start();
+    } else {
+      Animated.timing(slideAnim, { toValue: Dimensions.get('window').width, duration: 250, useNativeDriver: true }).start(() => {
+        setModalVisible(false);
+      });
+    }
+  }, [visible]);
 
   useEffect(() => {
     if (visible) {
@@ -137,7 +152,7 @@ export default function WorkingHoursScreen({ visible, onClose, onSave }) {
   async function loadSchedule() {
     setLoading(true);
     try {
-      const res = await authorizedFetch(`${API_URL}/schedules/${PROVIDER.id}`);
+      const res = await authorizedFetch(`${API_URL}/schedules/${provider.id}`);
       const data = await res.json();
       const newDays = INITIAL_DAYS.map(day => {
         const d = data.days?.[day.id];
@@ -168,7 +183,7 @@ export default function WorkingHoursScreen({ visible, onClose, onSave }) {
       });
       const body = { days: apiDays };
       if (hasAppointments) body.slotDuration = slotDuration;
-      await authorizedFetch(`${API_URL}/schedules/${PROVIDER.id}`, {
+      await authorizedFetch(`${API_URL}/schedules/${provider.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -188,8 +203,8 @@ export default function WorkingHoursScreen({ visible, onClose, onSave }) {
   };
 
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
-      <View style={styles.container}>
+    <Modal visible={modalVisible} animationType="none" transparent onRequestClose={onClose}>
+      <Animated.View style={[styles.container, { transform: [{ translateX: slideAnim }] }]}>
         <View style={styles.header}>
           <TouchableOpacity onPress={onClose} style={styles.backBtn} activeOpacity={0.7}>
             <Ionicons name="arrow-back" size={22} color="#17191D" />
@@ -296,7 +311,7 @@ export default function WorkingHoursScreen({ visible, onClose, onSave }) {
             </View>
           </ScrollView>
         )}
-      </View>
+      </Animated.View>
     </Modal>
   );
 }

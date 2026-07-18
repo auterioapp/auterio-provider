@@ -3,7 +3,7 @@ import { Alert, Modal, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, V
 import { Ionicons } from '@expo/vector-icons';
 import useScrollToTop from '../hooks/useScrollToTop';
 import { getServiceMeta, formatMoney, getServiceMode, getRequestDistance, getCityState } from '../utils/serviceUtils';
-import { PROVIDER } from '../constants';
+import { useProvider } from '../ProviderContext';
 
 const DEMO_INCOMING_REQUEST = {
   id: 'demo-request-001',
@@ -63,6 +63,7 @@ function ProfileSetupBanner({ onGoToProfile }) {
 }
 
 export default function HomeScreen({ online, setOnline, requests = [], requestAnim, acceptingId, pendingCount, activeJobs, onOpenRequest, onViewAll, allowScheduling, onAccept, onDecline, refreshControl, scrollSignal, verificationStatus, isDemo, profileComplete, onGoToProfile }) {
+  const { provider } = useProvider();
   const scrollRef = useScrollToTop(scrollSignal);
   const [showAllRequests, setShowAllRequests] = useState(false);
   const [showDemoRequest, setShowDemoRequest] = useState(true);
@@ -70,7 +71,8 @@ export default function HomeScreen({ online, setOnline, requests = [], requestAn
   const featuredRequest = requests[0] || null;
   const extraCount = requests.length - 1;
   const hasRealRequests = requests.length > 0;
-  const showDemoPromo = !hasRealRequests && !showDemoRequest && !showDemoBooking;
+  const showDemoPromo = isDemo && !hasRealRequests && !showDemoRequest && !showDemoBooking;
+  const isLocked = !isDemo && verificationStatus !== 'verified';
 
   return (
     <>
@@ -79,20 +81,25 @@ export default function HomeScreen({ online, setOnline, requests = [], requestAn
         <View><Text style={[styles.title, styles.homeTitle]}>Dashboard</Text></View>
         <View style={styles.headerActions}>
           <TouchableOpacity
-            activeOpacity={verificationStatus === 'unverified' ? 0.6 : 1}
-            onPress={verificationStatus === 'unverified' ? () => Alert.alert('Account not verified', 'Upload your documents in Profile to activate your account and go online.') : undefined}
+            activeOpacity={isLocked ? 0.6 : 1}
+            onPress={isLocked ? () => Alert.alert(
+              'Account not verified',
+              verificationStatus === 'pending_review'
+                ? 'Your account is under review. You can go online once it\'s approved.'
+                : 'Upload your documents in Profile to activate your account and go online.'
+            ) : undefined}
           >
-            <View style={[styles.onlinePill, online && verificationStatus !== 'unverified' && styles.onlinePillActive, verificationStatus === 'unverified' && styles.onlinePillLocked]}>
-              {verificationStatus === 'unverified'
+            <View style={[styles.onlinePill, online && !isLocked && styles.onlinePillActive, isLocked && styles.onlinePillLocked]}>
+              {isLocked
                 ? <Ionicons name="lock-closed" size={12} color="#9CA3AF" style={{ marginRight: 4 }} />
                 : null}
-              <Text style={[styles.onlineText, online && verificationStatus !== 'unverified' && styles.onlineTextActive]}>{verificationStatus === 'unverified' ? 'Locked' : online ? 'Online' : 'Offline'}</Text>
+              <Text style={[styles.onlineText, online && !isLocked && styles.onlineTextActive]}>{isLocked ? 'Locked' : online ? 'Online' : 'Offline'}</Text>
               <Switch
-                value={online && verificationStatus !== 'unverified'}
-                onValueChange={verificationStatus === 'unverified' ? undefined : setOnline}
-                disabled={verificationStatus === 'unverified'}
+                value={online && !isLocked}
+                onValueChange={isLocked ? undefined : setOnline}
+                disabled={isLocked}
                 trackColor={{ false: '#E6E8EB', true: '#DEE0E3' }}
-                thumbColor={online && verificationStatus !== 'unverified' ? '#17191D' : '#8B9098'}
+                thumbColor={online && !isLocked ? '#17191D' : '#8B9098'}
                 style={styles.onlineSwitch}
               />
             </View>
@@ -104,7 +111,7 @@ export default function HomeScreen({ online, setOnline, requests = [], requestAn
         </View>
       </View>
 
-      <Text style={[styles.greeting, styles.homeTitle]}>Good morning, {PROVIDER.name}</Text>
+      <Text style={[styles.greeting, styles.homeTitle]}>Good morning, {provider.name}</Text>
       <Text style={styles.subGreeting}>Here's what's happening with your business today.</Text>
 
       <View style={styles.metricsGrid}>
@@ -161,7 +168,7 @@ export default function HomeScreen({ online, setOnline, requests = [], requestAn
         </View>
       )}
 
-      {!hasRealRequests && showDemoRequest && (
+      {isDemo && !hasRealRequests && showDemoRequest && (
         <>
           <IncomingRequest
             order={DEMO_INCOMING_REQUEST}
@@ -178,7 +185,7 @@ export default function HomeScreen({ online, setOnline, requests = [], requestAn
         </>
       )}
 
-      {!hasRealRequests && showDemoBooking && (
+      {isDemo && !hasRealRequests && showDemoBooking && (
         <>
           <IncomingRequest
             order={DEMO_BOOKING_REQUEST}

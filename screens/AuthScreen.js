@@ -3,8 +3,8 @@ import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TextInput
 import { Ionicons } from '@expo/vector-icons';
 import { API_URL } from '../constants';
 
-export default function AuthScreen({ mode = 'login', onLogin, onRegisterCredentials, onBack }) {
-  const [isLogin, setIsLogin] = useState(mode !== 'register');
+export default function AuthScreen({ mode = 'login', onLogin, onRegisterCredentials, onSwitchToRegister, onBack }) {
+  const isLogin = mode !== 'register';
   const [loginValue, setLoginValue] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -92,7 +92,6 @@ export default function AuthScreen({ mode = 'login', onLogin, onRegisterCredenti
       if (!res.ok) throw new Error(data.error || 'Something went wrong');
       setForgotStep(null);
       setForgotPhone(''); setForgotCode(''); setForgotNewPwd(''); setForgotConfirmPwd(''); setForgotDevCode(null);
-      setIsLogin(true);
       alert('Password reset successfully. Please sign in with your new password.');
     } catch (e) {
       setForgotError(e.message || 'Something went wrong');
@@ -261,7 +260,7 @@ export default function AuthScreen({ mode = 'login', onLogin, onRegisterCredenti
             <TouchableOpacity onPress={() => setForgotStep('phone')} style={{ alignItems: 'flex-end', marginTop: -10, marginBottom: 16 }}>
               <Text style={styles.switchLink}>Forgot password?</Text>
             </TouchableOpacity>
-            <TouchableOpacity onPress={() => setIsLogin(false)} style={styles.switchWrap}>
+            <TouchableOpacity onPress={onSwitchToRegister} style={styles.switchWrap}>
               <Text style={styles.switchText}>
                 {"Don't have an account? "}
                 <Text style={styles.switchLink}>Sign Up</Text>

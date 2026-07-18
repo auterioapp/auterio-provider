@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
-import { Alert, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useEffect, useRef, useState } from 'react';
+import { Alert, Animated, Dimensions, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { authorizedFetch } from '../apiClient';
 import { loadPricing, savePricing, DEFAULT_PRICING } from '../utils/pricingStore';
-import { API_URL, PROVIDER } from '../constants';
+import { API_URL } from '../constants';
+import { useProvider } from '../ProviderContext';
 
 
 function Section({ icon, iconColor, title, children }) {
@@ -107,20 +108,34 @@ function FeeRow({ label, sub, price, onPrice, enabled, onEnabled, border }) {
   );
 }
 
-export default function PricingScreen({ visible, onClose }) {
+export default function PricingScreen({ visible, onClose, isDemoAccount }) {
+  const { provider } = useProvider();
   const [v, setV] = useState(DEFAULT_PRICING);
   const set = (key) => (val) => setV(prev => ({ ...prev, [key]: val }));
   const isMobile = v.providerType !== 'shop';
+  const [modalVisible, setModalVisible] = useState(visible);
+  const slideAnim = useRef(new Animated.Value(Dimensions.get('window').width)).current;
 
   useEffect(() => {
     if (visible) loadPricing().then(setV);
   }, [visible]);
 
+  useEffect(() => {
+    if (visible) {
+      setModalVisible(true);
+      Animated.timing(slideAnim, { toValue: 0, duration: 280, useNativeDriver: true }).start();
+    } else {
+      Animated.timing(slideAnim, { toValue: Dimensions.get('window').width, duration: 250, useNativeDriver: true }).start(() => {
+        setModalVisible(false);
+      });
+    }
+  }, [visible]);
+
   const handleSave = async () => {
     await savePricing(v);
     const rate = parseFloat(v.laborRate);
-    if (!isNaN(rate)) {
-      authorizedFetch(`${API_URL}/profiles/${PROVIDER.id}`, {
+    if (!isNaN(rate) && !isDemoAccount) {
+      authorizedFetch(`${API_URL}/profiles/${provider.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ laborRate: rate }),
@@ -131,7 +146,8 @@ export default function PricingScreen({ visible, onClose }) {
   };
 
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
+    <Modal visible={modalVisible} animationType="none" transparent onRequestClose={onClose}>
+      <Animated.View style={[styles.slideContainer, { transform: [{ translateX: slideAnim }] }]}>
       <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <View style={styles.header}>
           <TouchableOpacity onPress={onClose} style={styles.backBtn} activeOpacity={0.7}>
@@ -276,11 +292,13 @@ export default function PricingScreen({ visible, onClose }) {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+      </Animated.View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
+  slideContainer: { flex: 1, backgroundColor: '#F5F6F8' },
   container: { flex: 1, backgroundColor: '#F5F6F8' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 72, paddingBottom: 14, backgroundColor: '#F5F6F8' },
   backBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },

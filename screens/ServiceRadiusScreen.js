@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, Modal, PanResponder, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, Dimensions, Modal, PanResponder, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import MapView, { Circle, Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { authorizedFetch } from '../apiClient';
-import { API_URL, GOOGLE_API_KEY, PROVIDER } from '../constants';
+import { API_URL, GOOGLE_API_KEY } from '../constants';
+import { useProvider } from '../ProviderContext';
 
 const MIN = 5;
 const MAX = 50;
@@ -18,7 +19,8 @@ function milesToMeters(miles) {
   return miles * 1609.34;
 }
 
-export default function ServiceRadiusScreen({ visible, onClose, onSave }) {
+export default function ServiceRadiusScreen({ visible, onClose, onSave, isDemoAccount }) {
+  const { provider } = useProvider();
   const [radius, setRadius] = useState(DEFAULT_RADIUS);
   const [saved, setSaved] = useState(false);
   const [center, setCenter] = useState(null);
@@ -26,6 +28,19 @@ export default function ServiceRadiusScreen({ visible, onClose, onSave }) {
   const [address, setAddress] = useState('');
   const [suggestions, setSuggestions] = useState([]);
   const addressRef = useRef('');
+  const [modalVisible, setModalVisible] = useState(visible);
+  const slideAnim = useRef(new Animated.Value(Dimensions.get('window').width)).current;
+
+  useEffect(() => {
+    if (visible) {
+      setModalVisible(true);
+      Animated.timing(slideAnim, { toValue: 0, duration: 280, useNativeDriver: true }).start();
+    } else {
+      Animated.timing(slideAnim, { toValue: Dimensions.get('window').width, duration: 250, useNativeDriver: true }).start(() => {
+        setModalVisible(false);
+      });
+    }
+  }, [visible]);
   const debounceRef = useRef(null);
 
   const onAddressChange = (text) => {
@@ -57,10 +72,12 @@ export default function ServiceRadiusScreen({ visible, onClose, onSave }) {
 
   useEffect(() => {
     if (!visible) return;
-    authorizedFetch(`${API_URL}/profiles/${PROVIDER.id}`)
-      .then(r => r.ok ? r.json() : null)
-      .then(data => { if (data?.address) { setAddress(data.address); addressRef.current = data.address; } })
-      .catch(() => {});
+    if (!isDemoAccount) {
+      authorizedFetch(`${API_URL}/profiles/${provider.id}`)
+        .then(r => r.ok ? r.json() : null)
+        .then(data => { if (data?.address) { setAddress(data.address); addressRef.current = data.address; } })
+        .catch(() => {});
+    }
     AsyncStorage.getItem(STORAGE_KEY).then(val => {
       const parsed = val ? parseInt(val, 10) : DEFAULT_RADIUS;
       const clamped = Math.max(MIN, Math.min(MAX, parsed));
@@ -121,9 +138,9 @@ export default function ServiceRadiusScreen({ visible, onClose, onSave }) {
   const handleSave = async () => {
     await AsyncStorage.setItem(STORAGE_KEY, String(radiusRef.current));
     const addr = addressRef.current.trim();
-    if (addr) {
+    if (addr && !isDemoAccount) {
       try {
-        await authorizedFetch(`${API_URL}/profiles/${PROVIDER.id}`, {
+        await authorizedFetch(`${API_URL}/profiles/${provider.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ address: addr }),
@@ -147,8 +164,8 @@ export default function ServiceRadiusScreen({ visible, onClose, onSave }) {
   };
 
   return (
-    <Modal visible={visible} animationType="slide" onRequestClose={handleClose}>
-      <View style={styles.container}>
+    <Modal visible={modalVisible} animationType="none" transparent onRequestClose={handleClose}>
+      <Animated.View style={[styles.container, { transform: [{ translateX: slideAnim }] }]}>
         <View style={styles.header}>
           <TouchableOpacity onPress={handleClose} style={styles.backBtn} activeOpacity={0.7}>
             <Ionicons name="arrow-back" size={22} color="#17191D" />
@@ -262,14 +279,14 @@ export default function ServiceRadiusScreen({ visible, onClose, onSave }) {
             <Text style={styles.saveBtnText}>{saved ? 'Saved!' : 'Save'}</Text>
           </TouchableOpacity>
         </View>
-      </View>
+      </Animated.View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F5F6F8' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 72, paddingBottom: 10, backgroundColor: '#F5F6F8' },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 72, paddingBottom: 14, backgroundColor: '#F5F6F8' },
   backBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { color: '#17191D', fontSize: 17, fontWeight: '700' },
   headerRight: { width: 36 },
