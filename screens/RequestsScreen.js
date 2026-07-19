@@ -83,7 +83,7 @@ function fmtScheduledTime(isoStr) {
 }
 
 const MODE_CONFIG = {
-  mobile: { color: '#F97316', bg: '#FFF7F0', icon: 'navigate-outline', label: 'Mobile', sub: 'Comes to you' },
+  mobile: { color: '#F04416', bg: '#FFF7F0', icon: 'navigate-outline', label: 'Mobile', sub: 'Comes to you' },
   shop:   { color: '#2563EB', bg: '#EFF6FF', icon: 'business-outline',  label: 'Shop',   sub: 'Drop off'     },
 };
 

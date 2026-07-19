@@ -77,13 +77,13 @@ function Step1_BusinessType({ value, onChange }) {
               onPress={() => onChange(opt.id)}
             >
               <View style={[s.typeIconWrap, sel && s.typeIconWrapSel]}>
-                <Ionicons name={opt.icon} size={26} color={sel ? '#FF6B00' : '#6B7280'} />
+                <Ionicons name={opt.icon} size={26} color={sel ? '#F04416' : '#5E646D'} />
               </View>
               <Text style={[s.typeTitle, sel && s.typeTitleSel]}>{opt.title}</Text>
               <Text style={s.typeCardDesc}>{opt.desc}</Text>
               {sel && (
                 <View style={s.typeCheck}>
-                  <Ionicons name="checkmark-circle" size={18} color="#FF6B00" />
+                  <Ionicons name="checkmark-circle" size={18} color="#F04416" />
                 </View>
               )}
             </TouchableOpacity>
@@ -105,7 +105,7 @@ function ServiceToggleRow({ id, icon, label, on, onPress }) {
       onPress={onPress}
     >
       <View style={[s.svcIcon, on && s.svcIconOn]}>
-        <Ionicons name={icon} size={20} color={on ? '#FF6B00' : '#6B7280'} />
+        <Ionicons name={icon} size={20} color={on ? '#F04416' : '#5E646D'} />
       </View>
       <Text style={[s.svcTitle, on && s.svcTitleOn]}>{label}</Text>
       <View style={[s.checkbox, on && s.checkboxOn]}>
@@ -163,7 +163,7 @@ function Step3_Hours({ days, onToggle }) {
           <Switch
             value={day.enabled}
             onValueChange={() => onToggle(i)}
-            trackColor={{ false: '#E5E7EB', true: '#FF6B00' }}
+            trackColor={{ false: '#E5E7EB', true: '#F04416' }}
             thumbColor="#fff"
           />
           <View style={s.dayInfo}>
@@ -237,7 +237,7 @@ function Step4_Zone({ providerType, radius, onRadiusChange, address, onAddressCh
 function ReviewRow({ icon, title, value, onEdit }) {
   return (
     <View style={s.reviewRow}>
-      <View style={s.reviewIcon}><Ionicons name={icon} size={19} color="#FF6B00" /></View>
+      <View style={s.reviewIcon}><Ionicons name={icon} size={19} color="#F04416" /></View>
       <View style={s.reviewInfo}>
         <Text style={s.reviewTitle}>{title}</Text>
         <Text style={s.reviewValue}>{value}</Text>
@@ -500,18 +500,18 @@ const s = StyleSheet.create({
   headerSide: { width: 44 },
   headerCenter: { flex: 1, alignItems: 'center' },
   backBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
-  headerStepText: { fontSize: 12, fontWeight: '600', color: '#6B7280', marginBottom: 6 },
+  headerStepText: { fontSize: 12, fontWeight: '600', color: '#5E646D', marginBottom: 6 },
   dots: { flexDirection: 'row', gap: 6 },
   dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#E5E7EB' },
-  dotActive: { width: 24, backgroundColor: '#FF6B00' },
-  dotDone: { backgroundColor: '#FF6B00', opacity: 0.35 },
+  dotActive: { width: 24, backgroundColor: '#F04416' },
+  dotDone: { backgroundColor: '#F04416', opacity: 0.35 },
   skipText: { color: '#9CA3AF', fontSize: 13, fontWeight: '600' },
 
   scroll: { padding: 24, paddingBottom: 32 },
 
   stepContent: {},
   stepTitle: { fontSize: 24, fontWeight: '800', color: '#111827', marginBottom: 8 },
-  stepDesc: { fontSize: 14, color: '#6B7280', lineHeight: 20, marginBottom: 24 },
+  stepDesc: { fontSize: 14, color: '#5E646D', lineHeight: 20, marginBottom: 24 },
   sectionLabel: {
     fontSize: 12, fontWeight: '700', color: '#374151',
     textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 10,
@@ -524,14 +524,14 @@ const s = StyleSheet.create({
     padding: 14, alignItems: 'center', gap: 8,
     borderWidth: 2, borderColor: 'transparent',
   },
-  typeCardSel: { backgroundColor: 'rgba(255,107,0,0.05)', borderColor: '#FF6B00' },
+  typeCardSel: { backgroundColor: 'rgba(240,68,22,0.05)', borderColor: '#F04416' },
   typeIconWrap: {
     width: 52, height: 52, borderRadius: 14,
     backgroundColor: '#F3F4F6', alignItems: 'center', justifyContent: 'center',
   },
-  typeIconWrapSel: { backgroundColor: 'rgba(255,107,0,0.12)' },
+  typeIconWrapSel: { backgroundColor: 'rgba(240,68,22,0.12)' },
   typeTitle: { fontSize: 14, fontWeight: '700', color: '#374151' },
-  typeTitleSel: { color: '#FF6B00' },
+  typeTitleSel: { color: '#F04416' },
   typeCardDesc: { fontSize: 11, color: '#9CA3AF', textAlign: 'center', lineHeight: 14 },
   typeCheck: { position: 'absolute', top: 8, right: 8 },
 
@@ -542,20 +542,20 @@ const s = StyleSheet.create({
     padding: 14, marginBottom: 8,
     borderWidth: 1.5, borderColor: 'transparent',
   },
-  svcRowOn: { backgroundColor: 'rgba(255,107,0,0.04)', borderColor: 'rgba(255,107,0,0.3)' },
+  svcRowOn: { backgroundColor: 'rgba(240,68,22,0.04)', borderColor: 'rgba(240,68,22,0.3)' },
   svcIcon: {
     width: 38, height: 38, borderRadius: 10,
     backgroundColor: '#EBEBEB', alignItems: 'center', justifyContent: 'center',
   },
-  svcIconOn: { backgroundColor: 'rgba(255,107,0,0.12)' },
-  svcTitle: { flex: 1, fontSize: 14, fontWeight: '600', color: '#6B7280' },
+  svcIconOn: { backgroundColor: 'rgba(240,68,22,0.12)' },
+  svcTitle: { flex: 1, fontSize: 14, fontWeight: '600', color: '#5E646D' },
   svcTitleOn: { color: '#111827' },
   checkbox: {
     width: 22, height: 22, borderRadius: 6,
     borderWidth: 2, borderColor: '#D1D5DB',
     alignItems: 'center', justifyContent: 'center',
   },
-  checkboxOn: { backgroundColor: '#FF6B00', borderColor: '#FF6B00' },
+  checkboxOn: { backgroundColor: '#F04416', borderColor: '#F04416' },
 
   // Working hours
   dayRow: {
@@ -565,7 +565,7 @@ const s = StyleSheet.create({
   dayInfo: { flex: 1 },
   dayLabel: { fontSize: 15, fontWeight: '600', color: '#111827' },
   dayLabelOff: { color: '#9CA3AF' },
-  dayTime: { fontSize: 12, color: '#FF6B00', marginTop: 2 },
+  dayTime: { fontSize: 12, color: '#F04416', marginTop: 2 },
 
   // Zone
   zoneCard: {
@@ -584,7 +584,7 @@ const s = StyleSheet.create({
     shadowColor: '#000', shadowOpacity: 0.06, shadowRadius: 4,
     shadowOffset: { width: 0, height: 1 }, elevation: 2,
   },
-  radiusValue: { fontSize: 30, fontWeight: '800', color: '#FF6B00', minWidth: 80, textAlign: 'center' },
+  radiusValue: { fontSize: 30, fontWeight: '800', color: '#F04416', minWidth: 80, textAlign: 'center' },
   radiusHint: { fontSize: 12, color: '#9CA3AF', textAlign: 'center' },
   addressInput: {
     backgroundColor: '#fff', borderRadius: 10, padding: 14,
@@ -593,12 +593,12 @@ const s = StyleSheet.create({
 
   reviewCard: { backgroundColor: '#F9FAFB', borderRadius: 16, borderWidth: 1, borderColor: '#E5E7EB', overflow: 'hidden' },
   reviewRow: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderBottomWidth: 1, borderBottomColor: '#ECEEF0' },
-  reviewIcon: { width: 38, height: 38, borderRadius: 10, backgroundColor: 'rgba(255,107,0,0.1)', alignItems: 'center', justifyContent: 'center' },
+  reviewIcon: { width: 38, height: 38, borderRadius: 10, backgroundColor: 'rgba(240,68,22,0.1)', alignItems: 'center', justifyContent: 'center' },
   reviewInfo: { flex: 1 },
-  reviewTitle: { color: '#8B9098', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', marginBottom: 3 },
+  reviewTitle: { color: '#5E646D', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', marginBottom: 3 },
   reviewValue: { color: '#17191D', fontSize: 13, lineHeight: 18, fontWeight: '600' },
   reviewEdit: { paddingHorizontal: 10, paddingVertical: 7, borderRadius: 10, backgroundColor: '#FFF3E8' },
-  reviewEditText: { color: '#FF6B00', fontSize: 12, fontWeight: '800' },
+  reviewEditText: { color: '#F04416', fontSize: 12, fontWeight: '800' },
   reviewNotice: { flexDirection: 'row', gap: 9, backgroundColor: '#EFF6FF', borderRadius: 12, padding: 13, marginTop: 16 },
   reviewNoticeText: { flex: 1, color: '#2563EB', fontSize: 12, lineHeight: 17, fontWeight: '600' },
 
@@ -608,7 +608,7 @@ const s = StyleSheet.create({
     borderTopWidth: 1, borderTopColor: '#F3F4F6', gap: 10,
   },
   hint: { fontSize: 13, color: '#9CA3AF', textAlign: 'center', fontWeight: '500' },
-  nextBtn: { backgroundColor: '#FF6B00', borderRadius: 14, paddingVertical: 17, alignItems: 'center' },
+  nextBtn: { backgroundColor: '#F04416', borderRadius: 14, paddingVertical: 17, alignItems: 'center' },
   nextBtnOff: { backgroundColor: '#D1D5DB' },
   nextBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
 });

@@ -97,7 +97,7 @@ export default function HomeScreen({ online, setOnline, requests = [], requestAn
         icon: 'checkmark-circle',
         color: '#16A34A',
         title: 'Job completed',
-        meta: `${meta.title} · ${formatActivityDate(order.completedAt || order.updatedAt)}`,
+        meta: `${meta.title} Â· ${formatActivityDate(order.completedAt || order.updatedAt)}`,
         value: formatCurrency(amount),
       };
     });
@@ -135,7 +135,7 @@ export default function HomeScreen({ online, setOnline, requests = [], requestAn
                 onValueChange={isLocked ? undefined : setOnline}
                 disabled={isLocked}
                 trackColor={{ false: '#E6E8EB', true: '#DEE0E3' }}
-                thumbColor={online && !isLocked ? '#17191D' : '#8B9098'}
+                thumbColor={online && !isLocked ? '#17191D' : '#5E646D'}
                 style={styles.onlineSwitch}
               />
             </View>
@@ -147,7 +147,7 @@ export default function HomeScreen({ online, setOnline, requests = [], requestAn
         </View>
       </View>
 
-      <Text style={[styles.greeting, styles.homeTitle]}>Good morning, {provider.name}</Text>
+      <Text style={[styles.greeting, styles.homeTitle]}>Good morning, {provider.name?.split(' ')[0]}</Text>
       <Text style={styles.subGreeting}>Here's what's happening with your business today.</Text>
 
       <View style={styles.metricsGrid}>
@@ -183,13 +183,13 @@ export default function HomeScreen({ online, setOnline, requests = [], requestAn
           <Text style={styles.demoPromoHeading}>Preview incoming requests</Text>
           <TouchableOpacity style={styles.demoPromoCard} activeOpacity={0.86} onPress={() => setShowDemoRequest(true)}>
             <View style={[styles.demoPromoIcon, { backgroundColor: '#FFF0E6' }]}>
-              <Ionicons name="navigate-outline" size={20} color="#F97316" />
+              <Ionicons name="navigate-outline" size={20} color="#F04416" />
             </View>
             <View style={styles.demoPromoInfo}>
               <Text style={styles.demoPromoTitle}>Mobile request</Text>
               <Text style={styles.demoPromoSub}>Provider goes to the customer</Text>
             </View>
-            <Ionicons name="chevron-forward" size={18} color="#F97316" />
+            <Ionicons name="chevron-forward" size={18} color="#F04416" />
           </TouchableOpacity>
           <TouchableOpacity style={[styles.demoPromoCard, styles.demoPromoCardBlue]} activeOpacity={0.86} onPress={() => setShowDemoBooking(true)}>
             <View style={[styles.demoPromoIcon, { backgroundColor: '#DBEAFE' }]}>
@@ -357,7 +357,7 @@ export default function HomeScreen({ online, setOnline, requests = [], requestAn
 
 
 const INCOMING_MODE = {
-  mobile: { color: '#F97316', borderColor: 'rgba(240,68,22,0.42)', icon: 'navigate-outline',  label: 'Mobile',  sub: 'Comes to you',   locIcon: 'location-outline'  },
+  mobile: { color: '#F04416', borderColor: 'rgba(240,68,22,0.42)', icon: 'navigate-outline',  label: 'Mobile',  sub: 'Comes to you',   locIcon: 'location-outline'  },
   shop:   { color: '#2563EB', borderColor: 'rgba(37,99,235,0.35)',  icon: 'business-outline', label: 'Shop',    sub: 'Drop off',       locIcon: 'storefront-outline' },
 };
 
@@ -447,7 +447,7 @@ const styles = StyleSheet.create({
   onlinePill: { height: 34, borderRadius: 17, backgroundColor: '#F5F6F7', borderWidth: 1, borderColor: '#E6E8EB', flexDirection: 'row', alignItems: 'center', paddingLeft: 11, paddingRight: 0 },
   onlinePillActive: { backgroundColor: '#F5F6F7', borderColor: '#DEE0E3' },
   onlinePillLocked: { backgroundColor: '#F9FAFB', borderColor: '#E5E7EB' },
-  onlineText: { color: '#8B9098', fontSize: 11, fontWeight: '700' },
+  onlineText: { color: '#5E646D', fontSize: 11, fontWeight: '700' },
   onlineTextActive: { color: '#16A34A' },
   onlineSwitch: { transform: [{ scaleX: 0.62 }, { scaleY: 0.62 }], marginLeft: -5 },
   bellBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#F5F6F7', borderWidth: 1, borderColor: '#E6E8EB', alignItems: 'center', justifyContent: 'center' },
@@ -510,10 +510,10 @@ const styles = StyleSheet.create({
   sheetRowInfo: { flex: 1, minWidth: 0 },
   sheetRowTitle: { color: '#17191D', fontSize: 14, fontWeight: '700' },
   sheetRowSub: { color: '#5E646D', fontSize: 12, marginTop: 1 },
-  sheetRowAddr: { color: '#8B9098', fontSize: 11, marginTop: 2 },
+  sheetRowAddr: { color: '#5E646D', fontSize: 11, marginTop: 2 },
   sheetRowRight: { alignItems: 'flex-end', gap: 2 },
   sheetRowPrice: { color: '#17191D', fontSize: 14, fontWeight: '800' },
-  sheetRowEta: { color: '#8B9098', fontSize: 11 },
+  sheetRowEta: { color: '#5E646D', fontSize: 11 },
   demoPromoWrap: { gap: 8, marginBottom: 10 },
   demoPromoHeading: { color: '#9CA3AF', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginLeft: 2, marginBottom: 2 },
   demoPromoCard: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#FFF7F0', borderRadius: 10, borderWidth: 1.5, borderColor: '#FDCBA6', paddingHorizontal: 14, paddingVertical: 13 },
@@ -543,7 +543,7 @@ const styles = StyleSheet.create({
   activityMeta: { color: '#5E646D', fontSize: 11, marginTop: 3 },
   activityValue: { color: '#17191D', fontSize: 13, fontWeight: '700' },
   emptyState: { alignItems: 'center', justifyContent: 'center', paddingVertical: 20, gap: 8 },
-  emptyStateText: { color: '#8B9098', fontSize: 13, fontWeight: '500' },
+  emptyStateText: { color: '#5E646D', fontSize: 13, fontWeight: '500' },
   setupBanner: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#EFF6FF', borderRadius: 10, borderWidth: 1, borderColor: '#BFDBFE', paddingHorizontal: 14, paddingVertical: 12, marginBottom: 12 },
   setupBannerIcon: { width: 38, height: 38, borderRadius: 10, backgroundColor: '#DBEAFE', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   setupBannerBody: { flex: 1, minWidth: 0 },

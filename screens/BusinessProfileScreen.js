@@ -71,7 +71,7 @@ export default function BusinessProfileScreen({ visible, providerType, onClose, 
                   onPress={() => selectType(t.key)}
                 >
                   <View style={[styles.typeIcon, { backgroundColor: selected ? t.bg : '#F3F4F5' }]}>
-                    <Ionicons name={t.icon} size={20} color={selected ? t.color : '#8B9098'} />
+                    <Ionicons name={t.icon} size={20} color={selected ? t.color : '#5E646D'} />
                   </View>
                   <View style={styles.typeInfo}>
                     <Text style={[styles.typeTitle, selected && { color: t.color }]}>{t.title}</Text>
@@ -107,7 +107,7 @@ const styles = StyleSheet.create({
   typeIcon: { width: 42, height: 42, borderRadius: 11, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   typeInfo: { flex: 1 },
   typeTitle: { color: '#17191D', fontSize: 14, fontWeight: '700', marginBottom: 2 },
-  typeSub: { color: '#8B9098', fontSize: 12, lineHeight: 16 },
+  typeSub: { color: '#5E646D', fontSize: 12, lineHeight: 16 },
   typeRadio: { width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: '#D1D5DB', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   typeRadioFill: { width: 10, height: 10, borderRadius: 5 },
 });

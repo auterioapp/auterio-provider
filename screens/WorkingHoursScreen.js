@@ -124,6 +124,7 @@ export default function WorkingHoursScreen({ visible, onClose, onSave }) {
   const [slotDuration, setSlotDuration] = useState(60);
   const [editingId, setEditingId] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   const [saving, setSaving] = useState(false);
   const [modalVisible, setModalVisible] = useState(visible);
   const slideAnim = useRef(new Animated.Value(Dimensions.get('window').width)).current;
@@ -151,6 +152,7 @@ export default function WorkingHoursScreen({ visible, onClose, onSave }) {
 
   async function loadSchedule() {
     setLoading(true);
+    setLoadError(false);
     try {
       const res = await authorizedFetch(`${API_URL}/schedules/${provider.id}`);
       const data = await res.json();
@@ -164,7 +166,7 @@ export default function WorkingHoursScreen({ visible, onClose, onSave }) {
       setDays(newDays);
       setSlotDuration(data.slotDuration || 60);
     } catch {
-      // use defaults silently
+      setLoadError(true);
     } finally {
       setLoading(false);
     }
@@ -229,6 +231,12 @@ export default function WorkingHoursScreen({ visible, onClose, onSave }) {
           </View>
         ) : (
           <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+            {loadError && (
+              <View style={styles.errorBanner}>
+                <Ionicons name="alert-circle-outline" size={16} color="#DC2626" />
+                <Text style={styles.errorBannerText}>Couldn't load your saved hours — showing defaults. Close and reopen to retry.</Text>
+              </View>
+            )}
             <Text style={styles.sectionNote}>Set your working days, hours, and appointment slot duration.</Text>
 
             <Text style={styles.sectionTitle}>Working Hours</Text>
@@ -302,7 +310,7 @@ export default function WorkingHoursScreen({ visible, onClose, onSave }) {
             )}
 
             <View style={styles.infoCard}>
-              <Ionicons name="information-circle-outline" size={18} color="#6B7280" />
+              <Ionicons name="information-circle-outline" size={18} color="#5E646D" />
               <Text style={styles.infoText}>
                 {hasAppointments
                   ? 'Customers will only be able to book during your working hours. Slot duration determines how many appointments can be booked per day.'
@@ -325,9 +333,11 @@ const styles = StyleSheet.create({
   saveBtnText: { color: '#7C3AED', fontSize: 15, fontWeight: '700' },
   loadingContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   content: { paddingHorizontal: 16, paddingBottom: 40 },
-  sectionNote: { color: '#6B7280', fontSize: 13, lineHeight: 20, marginBottom: 14 },
+  sectionNote: { color: '#5E646D', fontSize: 13, lineHeight: 20, marginBottom: 14 },
+  errorBanner: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, backgroundColor: '#FBEAEA', borderWidth: 1, borderColor: 'rgba(220,38,38,0.2)', borderRadius: 10, padding: 12, marginBottom: 14 },
+  errorBannerText: { flex: 1, color: '#B42318', fontSize: 12.5, lineHeight: 17, fontWeight: '600' },
   sectionTitle: { color: '#17191D', fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 8, marginTop: 4 },
-  sectionSubNote: { color: '#6B7280', fontSize: 13, marginBottom: 10, marginTop: -4 },
+  sectionSubNote: { color: '#5E646D', fontSize: 13, marginBottom: 10, marginTop: -4 },
   card: { backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 1, borderColor: '#ECEEF0', paddingHorizontal: 16, marginBottom: 20 },
   dayRow: { paddingVertical: 14 },
   rowBorder: { borderTopWidth: 1, borderTopColor: '#F0F1F3' },
@@ -341,7 +351,7 @@ const styles = StyleSheet.create({
   pickerRow: { flexDirection: 'row', alignItems: 'center', marginTop: 14, backgroundColor: '#F5F6F8', borderRadius: 12, padding: 12 },
   pickerDivider: { width: 1, backgroundColor: '#E5E7EB', alignSelf: 'stretch', marginHorizontal: 12 },
   col: { flex: 1, alignItems: 'center' },
-  colLabel: { color: '#6B7280', fontSize: 12, fontWeight: '700', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 0.5 },
+  colLabel: { color: '#5E646D', fontSize: 12, fontWeight: '700', marginBottom: 10, textTransform: 'uppercase', letterSpacing: 0.5 },
   timeBox: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   spinnerGroup: { alignItems: 'center', gap: 4 },
   arrowBtn: { padding: 4 },
@@ -350,15 +360,15 @@ const styles = StyleSheet.create({
   ampmGroup: { gap: 6, marginLeft: 4 },
   ampmBtn: { paddingHorizontal: 8, paddingVertical: 6, borderRadius: 8, backgroundColor: '#E5E7EB' },
   ampmBtnActive: { backgroundColor: '#7C3AED' },
-  ampmText: { color: '#6B7280', fontSize: 12, fontWeight: '700' },
+  ampmText: { color: '#5E646D', fontSize: 12, fontWeight: '700' },
   ampmTextActive: { color: '#FFFFFF' },
 
   slotRow: { flexDirection: 'row', gap: 10, marginBottom: 20 },
   slotChip: { flex: 1, paddingVertical: 12, borderRadius: 12, backgroundColor: '#FFFFFF', borderWidth: 1.5, borderColor: '#ECEEF0', alignItems: 'center' },
   slotChipActive: { borderColor: '#7C3AED', backgroundColor: '#F5F0FF' },
-  slotChipText: { color: '#6B7280', fontSize: 14, fontWeight: '600' },
+  slotChipText: { color: '#5E646D', fontSize: 14, fontWeight: '600' },
   slotChipTextActive: { color: '#7C3AED', fontWeight: '700' },
 
   infoCard: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', paddingHorizontal: 14, paddingVertical: 12 },
-  infoText: { flex: 1, color: '#6B7280', fontSize: 13, lineHeight: 18 },
+  infoText: { flex: 1, color: '#5E646D', fontSize: 13, lineHeight: 18 },
 });

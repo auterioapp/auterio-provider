@@ -104,7 +104,7 @@ export default function AccountInfoScreen({ visible, onClose, isDemoAccount }) {
               activeOpacity={0.8}
               onPress={() => Alert.alert('Profile Photo', 'This feature is coming soon.')}
             >
-              <Ionicons name="camera-outline" size={26} color="#8B9098" />
+              <Ionicons name="camera-outline" size={26} color="#5E646D" />
             </TouchableOpacity>
             <View style={styles.heroInfo}>
               <View style={styles.heroNameRow}>
@@ -156,7 +156,7 @@ export default function AccountInfoScreen({ visible, onClose, isDemoAccount }) {
             {editingDescription ? (
               <View style={[styles.fieldRow, styles.fieldIconTopRow]}>
                 <View style={[styles.fieldIcon, styles.fieldIconTop]}>
-                  <Ionicons name="document-text-outline" size={18} color="#8B9098" />
+                  <Ionicons name="document-text-outline" size={18} color="#5E646D" />
                 </View>
                 <View style={styles.fieldContent}>
                   <Text style={styles.fieldLabel}>Business Description (Optional)</Text>
@@ -188,7 +188,7 @@ export default function AccountInfoScreen({ visible, onClose, isDemoAccount }) {
                 onPress={() => !isDemoAccount && setEditingDescription(true)}
               >
                 <View style={styles.fieldIcon}>
-                  <Ionicons name="document-text-outline" size={18} color="#8B9098" />
+                  <Ionicons name="document-text-outline" size={18} color="#5E646D" />
                 </View>
                 <View style={styles.fieldContent}>
                   <Text style={styles.fieldLabel}>Business Description (Optional)</Text>
@@ -214,7 +214,7 @@ export default function AccountInfoScreen({ visible, onClose, isDemoAccount }) {
               onPress={() => Alert.alert('Change Password', 'This feature is coming soon.')}
             >
               <View style={styles.fieldIcon}>
-                <Ionicons name="lock-closed-outline" size={18} color="#8B9098" />
+                <Ionicons name="lock-closed-outline" size={18} color="#5E646D" />
               </View>
               <Text style={styles.navRowLabel}>Change Password</Text>
               <Ionicons name="chevron-forward" size={16} color="#C4C9D1" />
@@ -240,7 +240,7 @@ function FieldRow({ icon, label, value, mono, hint, right, iconTop, iconMid }) {
     <View>
       <View style={[styles.fieldRow, !!hint && styles.fieldRowNoBottomPad]}>
         <View style={[styles.fieldIcon, iconTop && styles.fieldIconTop, iconMid && styles.fieldIconMid]}>
-          <Ionicons name={icon} size={18} color="#8B9098" />
+          <Ionicons name={icon} size={18} color="#5E646D" />
         </View>
         <View style={styles.fieldContent}>
           <Text style={styles.fieldLabel}>{label}</Text>
@@ -280,7 +280,7 @@ const styles = StyleSheet.create({
   verifBadgeTextVerified: { color: '#16A34A' },
   verifBadgeTextPending: { color: '#D97706' },
 
-  sectionLabel: { fontSize: 11, fontWeight: '700', color: '#8B9098', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 8 },
+  sectionLabel: { fontSize: 11, fontWeight: '700', color: '#5E646D', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 8 },
   fieldHint: { fontSize: 12, color: '#9CA3AF', marginTop: 6, marginBottom: 4, lineHeight: 16 },
 
   fieldGroup: {
@@ -296,7 +296,7 @@ const styles = StyleSheet.create({
   fieldIconTop: { alignSelf: 'flex-start', marginTop: 2 },
   fieldIconMid: { alignSelf: 'flex-start', marginTop: 10 },
   fieldContent: { flex: 1, minWidth: 0 },
-  fieldLabel: { fontSize: 12, lineHeight: 16, fontWeight: '500', color: '#6B7280', marginBottom: 2 },
+  fieldLabel: { fontSize: 12, lineHeight: 16, fontWeight: '500', color: '#5E646D', marginBottom: 2 },
   fieldValue: { fontSize: 14, lineHeight: 18, fontWeight: '700', color: '#17191D' },
   fieldValueMono: { fontSize: 14, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace', letterSpacing: 0.5 },
   providerIdValue: {

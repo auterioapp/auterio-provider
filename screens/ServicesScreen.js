@@ -394,7 +394,7 @@ export default function ServicesScreen({ visible, onClose, isDemoAccount }) {
                     <Ionicons
                       name={opt.id === 'none' ? 'shield-outline' : opt.id === 'custom' ? 'create-outline' : 'shield-checkmark-outline'}
                       size={20}
-                      color={selected ? '#16A34A' : '#8B9098'}
+                      color={selected ? '#16A34A' : '#5E646D'}
                     />
                     <Text style={[styles.warrantyLabel, selected && styles.warrantyLabelSelected]}>{opt.label}</Text>
                     {selected && <Ionicons name="checkmark-circle" size={18} color="#16A34A" style={{ marginLeft: 'auto' }} />}
@@ -438,7 +438,7 @@ export default function ServicesScreen({ visible, onClose, isDemoAccount }) {
           </TouchableOpacity>
 
           <View style={styles.infoCard}>
-            <Ionicons name="information-circle-outline" size={16} color="#6B7280" />
+            <Ionicons name="information-circle-outline" size={16} color="#5E646D" />
             <Text style={styles.infoText}>Pricing & Rates are used to calculate estimates for all selected services.</Text>
           </View>
 
@@ -517,7 +517,7 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 72, paddingBottom: 14 },
   backBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { color: '#17191D', fontSize: 17, fontWeight: '700' },
-  pageNote: { color: '#6B7280', fontSize: 13, lineHeight: 20, marginBottom: 12 },
+  pageNote: { color: '#5E646D', fontSize: 13, lineHeight: 20, marginBottom: 12 },
   content: { paddingHorizontal: 16, paddingBottom: 48 },
   sectionLabel: { color: '#17191D', fontSize: 13, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4, marginTop: 20 },
 
@@ -528,7 +528,7 @@ const styles = StyleSheet.create({
   iconBox: { width: 44, height: 44, borderRadius: 12, borderWidth: 1.5, borderColor: '#E5E7EB', backgroundColor: '#FAFAFA', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   info: { flex: 1 },
   svcTitle: { color: '#17191D', fontSize: 14, fontWeight: '700', marginBottom: 2 },
-  svcSub: { color: '#6B7280', fontSize: 12, lineHeight: 16 },
+  svcSub: { color: '#5E646D', fontSize: 12, lineHeight: 16 },
   switch: { transform: [{ scaleX: 0.85 }, { scaleY: 0.85 }] },
 
   catCard: { backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 1, borderColor: '#ECEEF0', marginBottom: 8, overflow: 'hidden' },
@@ -539,18 +539,18 @@ const styles = StyleSheet.create({
   catBadgeText: { color: '#fff', fontSize: 11, fontWeight: '700' },
   catToggleBtn: { paddingHorizontal: 6 },
   catToggleText: { color: '#9CA3AF', fontSize: 12 },
-  catToggleTextOn: { color: '#FF6B00' },
+  catToggleTextOn: { color: '#F04416' },
 
   warrantyLabel: { color: '#5E646D', fontSize: 14, fontWeight: '500', flex: 1, marginLeft: 10 },
   warrantyLabelSelected: { color: '#17191D', fontWeight: '700' },
 
   customWarrantyRow: { flexDirection: 'row', gap: 12, paddingBottom: 14, paddingTop: 2 },
   customWarrantyField: { flex: 1 },
-  customWarrantyLabel: { color: '#8B9098', fontSize: 11, fontWeight: '600', marginBottom: 4 },
+  customWarrantyLabel: { color: '#5E646D', fontSize: 11, fontWeight: '600', marginBottom: 4 },
   customWarrantyInput: { backgroundColor: '#F5F6F8', borderRadius: 10, borderWidth: 1, borderColor: '#ECEEF0', paddingHorizontal: 12, paddingVertical: 9, fontSize: 14, color: '#17191D' },
 
   pricingBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, backgroundColor: '#7C3AED', borderRadius: 16, paddingVertical: 18, marginTop: 20, marginBottom: 14 },
   pricingBtnText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
   infoCard: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
-  infoText: { flex: 1, color: '#6B7280', fontSize: 13, lineHeight: 19 },
+  infoText: { flex: 1, color: '#5E646D', fontSize: 13, lineHeight: 19 },
 });

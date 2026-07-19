@@ -177,7 +177,7 @@ export default function ServiceRadiusScreen({ visible, onClose, onSave, isDemoAc
         <Text style={styles.subtitle}>Set the area where you want to receive service requests.</Text>
 
         <View style={styles.addressCard}>
-          <Ionicons name="location-outline" size={18} color="#6B7280" />
+          <Ionicons name="location-outline" size={18} color="#5E646D" />
           <TextInput
             style={styles.addressInput}
             placeholder="Enter your shop / base address"
@@ -290,7 +290,7 @@ const styles = StyleSheet.create({
   backBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { color: '#17191D', fontSize: 17, fontWeight: '700' },
   headerRight: { width: 36 },
-  subtitle: { color: '#6B7280', fontSize: 14, lineHeight: 20, fontWeight: '400', paddingHorizontal: 16, marginBottom: 10 },
+  subtitle: { color: '#5E646D', fontSize: 14, lineHeight: 20, fontWeight: '400', paddingHorizontal: 16, marginBottom: 10 },
   addressCard: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 1, borderColor: '#ECEEF0', marginHorizontal: 16, paddingHorizontal: 14, paddingVertical: 12, marginBottom: 4 },
   addressInput: { flex: 1, color: '#17191D', fontSize: 15 },
   suggestionsBox: { backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', marginHorizontal: 16, marginBottom: 8, overflow: 'hidden' },
@@ -303,7 +303,7 @@ const styles = StyleSheet.create({
   sliderLabel: { color: '#17191D', fontSize: 15, fontWeight: '700' },
   sliderValue: { color: '#16A34A', fontSize: 15, fontWeight: '700' },
   sliderRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  rangeLabel: { color: '#6B7280', fontSize: 12, fontWeight: '500', width: 34 },
+  rangeLabel: { color: '#5E646D', fontSize: 12, fontWeight: '500', width: 34 },
   trackWrapper: { flex: 1, height: 28, justifyContent: 'center' },
   trackBg: { position: 'absolute', left: 0, right: 0, height: 6, borderRadius: 3, backgroundColor: '#E5E7EB' },
   trackFill: { position: 'absolute', left: 0, height: 6, borderRadius: 3, backgroundColor: '#7C3AED' },
@@ -311,13 +311,13 @@ const styles = StyleSheet.create({
   mapContainer: { flex: 1, marginHorizontal: 0, overflow: 'hidden' },
   map: { flex: 1 },
   mapLoading: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, backgroundColor: '#F0F1F3' },
-  mapLoadingText: { color: '#6B7280', fontSize: 14, fontWeight: '500' },
+  mapLoadingText: { color: '#5E646D', fontSize: 14, fontWeight: '500' },
   footer: { backgroundColor: '#FFFFFF', paddingHorizontal: 16, paddingTop: 14, paddingBottom: 36, borderTopWidth: 1, borderTopColor: '#ECEEF0', gap: 12 },
   statusCard: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   statusIcon: { width: 36, height: 36, borderRadius: 18, backgroundColor: '#16A34A', alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   statusInfo: { flex: 1 },
   statusTitle: { color: '#17191D', fontSize: 14, fontWeight: '700' },
-  statusDesc: { color: '#6B7280', fontSize: 13, lineHeight: 18, marginTop: 2 },
+  statusDesc: { color: '#5E646D', fontSize: 13, lineHeight: 18, marginTop: 2 },
   saveBtn: { height: 54, borderRadius: 14, backgroundColor: '#7C3AED', alignItems: 'center', justifyContent: 'center' },
   saveBtnText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
 });

@@ -102,7 +102,7 @@ export default function PayoutHistoryScreen({ visible, onClose, isDemo }) {
           ))}
 
           <View style={styles.infoCard}>
-            <Ionicons name="information-circle-outline" size={18} color="#6B7280" />
+            <Ionicons name="information-circle-outline" size={18} color="#5E646D" />
             <Text style={styles.infoText}>Payouts usually arrive in 1-3 business days.</Text>
           </View>
 
@@ -122,9 +122,9 @@ const styles = StyleSheet.create({
   headerRight: { width: 36 },
   tabBar: { flexDirection: 'row', paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: '#F0F1F3', marginBottom: 16 },
   tabItem: { marginRight: 24, paddingVertical: 12, borderBottomWidth: 2, borderBottomColor: 'transparent', marginBottom: -1 },
-  tabItemActive: { borderBottomColor: '#F97316' },
+  tabItemActive: { borderBottomColor: '#F04416' },
   tabText: { color: '#9CA3AF', fontSize: 14, fontWeight: '600' },
-  tabTextActive: { color: '#F97316', fontWeight: '700' },
+  tabTextActive: { color: '#F04416', fontWeight: '700' },
   content: { paddingHorizontal: 16, paddingBottom: 40 },
   emptyText: { color: '#9CA3AF', fontSize: 14, textAlign: 'center', marginTop: 40 },
   monthHeader: { color: '#17191D', fontSize: 15, fontWeight: '800', marginBottom: 10, marginTop: 4 },
@@ -132,11 +132,11 @@ const styles = StyleSheet.create({
   payoutRow: { flexDirection: 'row', alignItems: 'stretch', paddingVertical: 14 },
   payoutRowBorder: { borderTopWidth: 1, borderTopColor: '#F0F1F3' },
   payoutLeft: { flex: 1, justifyContent: 'space-between' },
-  payoutDate: { color: '#6B7280', fontSize: 13, fontWeight: '400', marginBottom: 5 },
+  payoutDate: { color: '#5E646D', fontSize: 13, fontWeight: '400', marginBottom: 5 },
   payoutAmount: { color: '#17191D', fontSize: 16, fontWeight: '800' },
   payoutRight: { alignItems: 'flex-end', justifyContent: 'space-between', paddingLeft: 12 },
   payoutStatus: { fontSize: 13, fontWeight: '700' },
   payoutChevron: { marginTop: 2 },
   infoCard: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: '#F5F6F8', borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', paddingHorizontal: 14, paddingVertical: 12 },
-  infoText: { flex: 1, color: '#6B7280', fontSize: 13, lineHeight: 18 },
+  infoText: { flex: 1, color: '#5E646D', fontSize: 13, lineHeight: 18 },
 });

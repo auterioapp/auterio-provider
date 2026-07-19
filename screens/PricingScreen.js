@@ -285,7 +285,7 @@ export default function PricingScreen({ visible, onClose, isDemoAccount }) {
           </Section>
 
           <View style={styles.footerNote}>
-            <Ionicons name="information-circle-outline" size={16} color="#6B7280" />
+            <Ionicons name="information-circle-outline" size={16} color="#5E646D" />
             <Text style={styles.footerNoteText}>
               These rates are used to generate estimates. Final prices may vary based on job complexity and parts required.
             </Text>
@@ -307,7 +307,7 @@ const styles = StyleSheet.create({
   saveBtn: { paddingHorizontal: 4 },
   saveBtnText: { color: '#F04416', fontSize: 15, fontWeight: '700' },
   content: { paddingHorizontal: 16, paddingBottom: 48 },
-  pageNote: { color: '#6B7280', fontSize: 13, lineHeight: 19, marginBottom: 16 },
+  pageNote: { color: '#5E646D', fontSize: 13, lineHeight: 19, marginBottom: 16 },
 
   section: { marginBottom: 16 },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 8 },
@@ -318,16 +318,16 @@ const styles = StyleSheet.create({
   rowBorder: { borderTopWidth: 1, borderTopColor: '#F0F1F3' },
   rowInfo: { flex: 1 },
   rowLabel: { color: '#17191D', fontSize: 14, fontWeight: '700', marginBottom: 2 },
-  rowSub: { color: '#6B7280', fontSize: 11, lineHeight: 15, fontWeight: '500' },
+  rowSub: { color: '#5E646D', fontSize: 11, lineHeight: 15, fontWeight: '500' },
 
   inputWrap: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: '#ECEEF0', borderRadius: 10, backgroundColor: '#F9FAFB', overflow: 'hidden' },
   inputPrefix: { paddingLeft: 9, color: '#17191D', fontSize: 14, fontWeight: '600' },
   input: { minWidth: 54, maxWidth: 72, paddingHorizontal: 6, paddingVertical: 8, color: '#17191D', fontSize: 14, fontWeight: '700', textAlign: 'right' },
   inputNoPrefix: { paddingLeft: 10, textAlign: 'center' },
-  inputUnit: { paddingRight: 8, color: '#6B7280', fontSize: 12, fontWeight: '600' },
+  inputUnit: { paddingRight: 8, color: '#5E646D', fontSize: 12, fontWeight: '600' },
 
   feeRight: { flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 0 },
 
   footerNote: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', paddingHorizontal: 14, paddingVertical: 12 },
-  footerNoteText: { flex: 1, color: '#6B7280', fontSize: 12, lineHeight: 18, fontWeight: '500' },
+  footerNoteText: { flex: 1, color: '#5E646D', fontSize: 12, lineHeight: 18, fontWeight: '500' },
 });

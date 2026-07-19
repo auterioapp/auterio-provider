@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Animated, AppState, Dimensions, Easing, KeyboardAvoidingView, Linking, Modal, PanResponder, Platform, RefreshControl, ScrollView, Share, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
@@ -6,6 +6,7 @@ import * as Haptics from 'expo-haptics';
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
 import * as Location from 'expo-location';
+import * as ImagePicker from 'expo-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
@@ -1992,7 +1993,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
           </TouchableOpacity>
 
           <View style={styles.estimateApprovalNote}>
-            <Ionicons name="lock-closed-outline" size={14} color="#8B9098" />
+            <Ionicons name="lock-closed-outline" size={14} color="#5E646D" />
             <Text style={styles.estimateApprovalText}>Customer approval required to start work</Text>
           </View>
         </ScrollView>
@@ -2013,13 +2014,13 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
               </View>
 
               <View style={styles.estimateSearchBox}>
-                <Ionicons name="search-outline" size={16} color="#8B9098" />
+                <Ionicons name="search-outline" size={16} color="#5E646D" />
                 <TextInput
                   style={styles.estimateSearchInput}
                   value={estimateSearch}
                   onChangeText={setEstimateSearch}
                   placeholder={estimatePickerMode === 'labor' ? 'Search labor' : 'Search parts'}
-                  placeholderTextColor="#8B9098"
+                  placeholderTextColor="#5E646D"
                 />
               </View>
 
@@ -2051,7 +2052,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
                   value={customEstimateName}
                   onChangeText={setCustomEstimateName}
                   placeholder={estimatePickerMode === 'labor' ? 'Labor name' : 'Part name'}
-                  placeholderTextColor="#8B9098"
+                  placeholderTextColor="#5E646D"
                 />
                 <View style={styles.customEstimateRow}>
                   {estimatePickerMode === 'labor' && (
@@ -2060,7 +2061,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
                       value={customEstimateHours}
                       onChangeText={setCustomEstimateHours}
                       placeholder="Hours"
-                      placeholderTextColor="#8B9098"
+                      placeholderTextColor="#5E646D"
                       keyboardType="decimal-pad"
                     />
                   )}
@@ -2069,7 +2070,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
                     value={customEstimateAmount}
                     onChangeText={setCustomEstimateAmount}
                     placeholder={estimatePickerMode === 'labor' ? 'Labor price' : 'Part price'}
-                    placeholderTextColor="#8B9098"
+                    placeholderTextColor="#5E646D"
                     keyboardType="decimal-pad"
                   />
                 </View>
@@ -2173,7 +2174,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
               onWorkflowChange?.({ stage: 'estimate', estimateItems, estimateRemovedItems });
             }}
           >
-            <Ionicons name="create-outline" size={20} color="#FF6B00" />
+            <Ionicons name="create-outline" size={20} color="#F04416" />
             <Text style={styles.declinedReviseBtnText}>Send Revised Estimate</Text>
           </TouchableOpacity>
 
@@ -2235,7 +2236,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
                 <Text style={styles.approvalAmount}>{formatCurrency(sentTotal)}</Text>
                 <Text style={styles.approvalSentTime}>{sentLabel}</Text>
               </View>
-              <Ionicons name="chevron-forward" size={20} color="#8B9098" />
+              <Ionicons name="chevron-forward" size={20} color="#5E646D" />
             </View>
             <View style={styles.approvalViewRow}>
               <Ionicons name="eye-outline" size={15} color="#5E646D" />
@@ -2391,7 +2392,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
                   {approveOptional ? 'Full Estimate' : 'Required Only'}
                 </Text>
               </View>
-              <Ionicons name="chevron-forward" size={16} color="#8B9098" />
+              <Ionicons name="chevron-forward" size={16} color="#5E646D" />
             </View>
           </TouchableOpacity>
 
@@ -2406,7 +2407,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
             </View>
             {additionalApprovals.length === 0 ? (
               <View style={styles.additionalEmptyBox}>
-                <Ionicons name="document-text-outline" size={20} color="#8B9098" />
+                <Ionicons name="document-text-outline" size={20} color="#5E646D" />
                 <Text style={styles.additionalEmptyText}>No additional approvals yet.</Text>
               </View>
             ) : (
@@ -2436,7 +2437,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
                       <View style={styles.crFieldGroup}>
                         <Text style={styles.crFieldLabel}>Evidence</Text>
                         <View style={styles.crEvidenceRow}>
-                          <Ionicons name="camera-outline" size={13} color="#8B9098" />
+                          <Ionicons name="camera-outline" size={13} color="#5E646D" />
                           <Text style={styles.crEvidenceText}>{item.evidence}</Text>
                         </View>
                       </View>
@@ -2445,7 +2446,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
                       <Ionicons
                         name={isApproved ? 'checkmark-circle' : isDeclined ? 'close-circle' : 'time-outline'}
                         size={14}
-                        color={isApproved ? '#16A34A' : isDeclined ? '#DC2626' : '#8B9098'}
+                        color={isApproved ? '#16A34A' : isDeclined ? '#DC2626' : '#5E646D'}
                       />
                       <Text style={[styles.crStatusText, isApproved && styles.crStatusTextApproved, isDeclined && styles.crStatusTextDeclined]}>
                         {isApproved ? 'Approved by customer' : isDeclined ? 'Declined by customer' : 'Waiting for customer...'}
@@ -2497,7 +2498,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
               onChangeText={updateWorkCustomerNote}
               multiline
               placeholder="Add a short note for the customer"
-              placeholderTextColor="#8B9098"
+              placeholderTextColor="#5E646D"
             />
           </View>
 
@@ -2537,7 +2538,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
                   value={changeRequestName}
                   onChangeText={setChangeRequestName}
                   placeholder="Example: Battery terminal replacement"
-                  placeholderTextColor="#8B9098"
+                  placeholderTextColor="#5E646D"
                 />
 
                 <Text style={styles.changeRequestLabel}>Why is it required?</Text>
@@ -2547,7 +2548,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
                   onChangeText={setChangeRequestReason}
                   multiline
                   placeholder="Explain why the approved repair cannot be completed without this change."
-                  placeholderTextColor="#8B9098"
+                  placeholderTextColor="#5E646D"
                 />
 
                 <Text style={styles.changeRequestLabel}>Price</Text>
@@ -2556,7 +2557,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
                   value={changeRequestAmount}
                   onChangeText={setChangeRequestAmount}
                   placeholder="64.00"
-                  placeholderTextColor="#8B9098"
+                  placeholderTextColor="#5E646D"
                   keyboardType="decimal-pad"
                 />
 
@@ -2657,7 +2658,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
               onChangeText={updateWorkSummary}
               multiline
               placeholder="Describe completed work"
-              placeholderTextColor="#8B9098"
+              placeholderTextColor="#5E646D"
             />
             {!!workCustomerNote.trim() && (
               <>
@@ -2696,8 +2697,8 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
               </View>
             </View>
             <View style={styles.approvedEstimateRight}>
-              <Text style={{ color: '#8B9098', fontSize: 11, fontWeight: '700' }}>Review</Text>
-              <Ionicons name="chevron-forward" size={16} color="#8B9098" />
+              <Text style={{ color: '#5E646D', fontSize: 11, fontWeight: '700' }}>Review</Text>
+              <Ionicons name="chevron-forward" size={16} color="#5E646D" />
             </View>
           </TouchableOpacity>
 
@@ -2787,7 +2788,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
                     value={batteryVoltage}
                     onChangeText={updateBatteryVoltage}
                     placeholder="0.0"
-                    placeholderTextColor="#8B9098"
+                    placeholderTextColor="#5E646D"
                     keyboardType={diagnosisSchema.metric.keyboardType || 'default'}
                   />
                   {!!diagnosisSchema.metric.unit && <Text style={styles.diagnosisVoltageUnit}>{diagnosisSchema.metric.unit}</Text>}
@@ -2822,7 +2823,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
               value={diagnosisNotes}
               onChangeText={updateDiagnosisNotes}
               placeholder="Add diagnosis notes"
-              placeholderTextColor="#8B9098"
+              placeholderTextColor="#5E646D"
               multiline
               textAlignVertical="top"
             />
@@ -2884,13 +2885,23 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
       setComplaintConfirmations(nextConfirmations);
       onWorkflowChange?.({ stage: 'arrived', complaintConfirmations: nextConfirmations });
     };
-    const saveRequiredPhoto = (key) => {
-      pulseTabChange();
-      const nextPhotos = { ...requiredPhotos, [key]: { uri: `demo-${key}`, demo: true } };
-      setRequiredPhotos(nextPhotos);
-      onWorkflowChange?.({ stage: 'arrived', requiredPhotos: nextPhotos });
+    const takeRequiredPhoto = async (key) => {
+      try {
+        const permission = await ImagePicker.requestCameraPermissionsAsync();
+        if (!permission.granted) {
+          Alert.alert('Camera access needed', 'Enable camera access in your device settings to add required photos.');
+          return;
+        }
+        const result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.7 });
+        if (result.canceled || !result.assets?.[0]?.uri) return;
+        pulseTabChange();
+        const nextPhotos = { ...requiredPhotos, [key]: { uri: result.assets[0].uri } };
+        setRequiredPhotos(nextPhotos);
+        onWorkflowChange?.({ stage: 'arrived', requiredPhotos: nextPhotos });
+      } catch (error) {
+        console.log('Camera error:', error.message);
+      }
     };
-    const takeRequiredPhoto = (key) => saveRequiredPhoto(key);
     return (
       <View style={styles.requestDetailShell}>
         <View style={styles.requestDetailHeader}>
@@ -2979,7 +2990,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
                   </View>
                   <Text style={styles.arrivedNextSubtitle} numberOfLines={1}>{arrivedChecklistData[item.key] || item.subtitle}</Text>
                 </View>
-                <Ionicons name="chevron-forward" size={18} color="#8B9098" />
+                <Ionicons name="chevron-forward" size={18} color="#5E646D" />
               </TouchableOpacity>
                 );
               })}
@@ -3042,7 +3053,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
                     value={checklistDraft}
                     onChangeText={setChecklistDraft}
                     placeholder="Add optional arrival notes"
-                    placeholderTextColor="#8B9098"
+                    placeholderTextColor="#5E646D"
                     multiline
                     textAlignVertical="top"
                   />
@@ -3169,7 +3180,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
                 <TouchableOpacity key={option.id} style={styles.navChoiceRow} activeOpacity={0.84} onPress={() => openNavigationApp(option.id)}>
                   <Ionicons name={option.icon} size={20} color="#F04416" />
                   <Text style={styles.navChoiceText}>{option.label}</Text>
-                  <Ionicons name="chevron-forward" size={18} color="#8B9098" />
+                  <Ionicons name="chevron-forward" size={18} color="#5E646D" />
                 </TouchableOpacity>
               ))}
             </View>
@@ -3285,9 +3296,9 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
                 <Text style={styles.detailPaymentMethod}>•••• 4821</Text>
               </View>
               <TouchableOpacity style={styles.detailInvoiceLink} onPress={() => setCompletedInvoicePreviewOpen(true)}>
-                <Ionicons name="document-text-outline" size={14} color="#FF6B00" />
+                <Ionicons name="document-text-outline" size={14} color="#F04416" />
                 <Text style={styles.detailInvoiceLinkText}>View Invoice</Text>
-                <Ionicons name="chevron-forward" size={13} color="#FF6B00" />
+                <Ionicons name="chevron-forward" size={13} color="#F04416" />
               </TouchableOpacity>
             </View>
           </View>
@@ -3319,7 +3330,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
           <TouchableOpacity style={styles.detailServiceLink} onPress={() => setCompletedServiceDetailsOpen(true)} activeOpacity={0.7}>
             <Ionicons name="construct-outline" size={17} color="#5E646D" />
             <Text style={styles.detailServiceLinkText}>Service Details</Text>
-            <Ionicons name="chevron-forward" size={17} color="#8B9098" style={{ marginLeft: 'auto' }} />
+            <Ionicons name="chevron-forward" size={17} color="#5E646D" style={{ marginLeft: 'auto' }} />
           </TouchableOpacity>
 
           {/* Warranty */}
@@ -3338,7 +3349,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
                 </View>
                 <View style={{ flex: 1 }} />
                 <Text style={styles.detailWarrantyCovered}>What's Covered</Text>
-                <Ionicons name="chevron-forward" size={14} color="#FF6B00" />
+                <Ionicons name="chevron-forward" size={14} color="#F04416" />
               </TouchableOpacity>
             );
           })()}
@@ -3394,12 +3405,12 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
               <Text style={styles.sdSectionTitle}>Time</Text>
               <View style={styles.sdCard}>
                 <View style={styles.sdRow}>
-                  <Ionicons name="time-outline" size={15} color="#8B9098" />
+                  <Ionicons name="time-outline" size={15} color="#5E646D" />
                   <Text style={styles.sdRowLabel}>Service Duration</Text>
                   <Text style={styles.sdRowValue}>{durationLabel || '—'}</Text>
                 </View>
                 <View style={[styles.sdRow, styles.sdRowBorder]}>
-                  <Ionicons name="calendar-outline" size={15} color="#8B9098" />
+                  <Ionicons name="calendar-outline" size={15} color="#5E646D" />
                   <Text style={styles.sdRowLabel}>Date & Time</Text>
                   <Text style={styles.sdRowValue}>
                     {completedDate ? dateLabel(completedDate) : ''}{completedDate ? `  ·  ${timeLabel(completedDate)}` : ''}
@@ -3420,7 +3431,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
                   {completedPhotos.map((photo, i) => (
                     <View key={i} style={styles.sdPhotoItem}>
                       <View style={styles.sdPhotoPlaceholder}>
-                        <Ionicons name="image-outline" size={22} color="#8B9098" />
+                        <Ionicons name="image-outline" size={22} color="#5E646D" />
                       </View>
                       <Text style={styles.sdPhotoLabel} numberOfLines={1}>{typeof photo === 'string' ? photo : `Photo ${i + 1}`}</Text>
                     </View>
@@ -3429,7 +3440,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
               </>}
 
               {!servicesPerformed.length && !completedPhotos.length && (customerNote === 'No note provided' || !customerNote) && (
-                <Text style={{ color: '#8B9098', fontSize: 13, textAlign: 'center', marginTop: 40 }}>No service details available</Text>
+                <Text style={{ color: '#5E646D', fontSize: 13, textAlign: 'center', marginTop: 40 }}>No service details available</Text>
               )}
 
             </ScrollView>
@@ -3540,7 +3551,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
 
               {/* Payment + Warranty */}
               <View style={styles.invFooterRow}>
-                <Ionicons name="card-outline" size={14} color="#8B9098" />
+                <Ionicons name="card-outline" size={14} color="#5E646D" />
                 <Text style={styles.invFooterText}>Payment method: <Text style={{ color: '#17191D', fontWeight: '700' }}>Visa •••• 4821</Text></Text>
               </View>
               <View style={styles.invWarrantyRow}>
@@ -4054,7 +4065,7 @@ function CustomerEstimatePreview({ job, estimate, onClose }) {
           </View>
 
           <View style={styles.customerPreviewOnlyNote}>
-            <Ionicons name="eye-outline" size={15} color="#8B9098" />
+            <Ionicons name="eye-outline" size={15} color="#5E646D" />
             <Text style={styles.customerPreviewOnlyText}>Preview only. Customer approval happens in the Auterio app.</Text>
           </View>
         </ScrollView>
@@ -4211,7 +4222,7 @@ function InvoicePreviewModal({ visible, onClose, job, vin, invoiceEstimate, invo
             </View>
 
             <View style={styles.invoicePaymentRow}>
-              <Ionicons name="card-outline" size={16} color="#6B7280" />
+              <Ionicons name="card-outline" size={16} color="#5E646D" />
               <Text style={styles.invoicePaymentText}>Payment method: <Text style={{ color: '#17191D', fontWeight: '700' }}>{paymentMethod}</Text></Text>
             </View>
 
@@ -4341,7 +4352,7 @@ function DeclineBookingModal({ order, onClose, onConfirm }) {
       <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' }}>
         <View style={{ backgroundColor: '#FFFFFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40 }}>
           <Text style={{ color: '#17191D', fontSize: 18, fontWeight: '800', marginBottom: 6 }}>Decline Booking</Text>
-          <Text style={{ color: '#6B7280', fontSize: 14, marginBottom: 20 }}>Let the client know why you can't accept this booking request.</Text>
+          <Text style={{ color: '#5E646D', fontSize: 14, marginBottom: 20 }}>Let the client know why you can't accept this booking request.</Text>
           <TextInput
             style={{ backgroundColor: '#F5F6F8', borderRadius: 12, padding: 14, fontSize: 14, color: '#17191D', minHeight: 90, textAlignVertical: 'top', borderWidth: 1, borderColor: '#ECEEF0', marginBottom: 20 }}
             placeholder="Reason for declining (optional)"
@@ -4359,7 +4370,7 @@ function DeclineBookingModal({ order, onClose, onConfirm }) {
             <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>Decline Booking</Text>
           </TouchableOpacity>
           <TouchableOpacity style={{ paddingVertical: 12, alignItems: 'center' }} onPress={() => { setNote(''); onClose(); }}>
-            <Text style={{ color: '#6B7280', fontSize: 15, fontWeight: '600' }}>Cancel</Text>
+            <Text style={{ color: '#5E646D', fontSize: 15, fontWeight: '600' }}>Cancel</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -4391,7 +4402,7 @@ function CounterOfferModal({ order, onClose, onConfirm }) {
         <View style={{ backgroundColor: '#FFFFFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40, maxHeight: '85%' }}>
           <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
             <Text style={{ color: '#17191D', fontSize: 18, fontWeight: '800', marginBottom: 6 }}>Suggest Another Time</Text>
-            <Text style={{ color: '#6B7280', fontSize: 14, marginBottom: 20 }}>Pick a date and time that works for you.</Text>
+            <Text style={{ color: '#5E646D', fontSize: 14, marginBottom: 20 }}>Pick a date and time that works for you.</Text>
 
             <Text style={{ color: '#9CA3AF', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.6, marginBottom: 10 }}>Select Date</Text>
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginBottom: 20 }} contentContainerStyle={{ gap: 8 }}>
@@ -4400,7 +4411,7 @@ function CounterOfferModal({ order, onClose, onConfirm }) {
                 return (
                   <TouchableOpacity key={i} onPress={() => setSelectedDate(d)} activeOpacity={0.8}
                     style={{ width: 56, alignItems: 'center', paddingVertical: 10, borderRadius: 12, borderWidth: 1.5, borderColor: sel ? '#7C3AED' : '#ECEEF0', backgroundColor: sel ? '#F5F0FF' : '#F9FAFB', gap: 3 }}>
-                    <Text style={{ fontSize: 11, fontWeight: '600', color: sel ? '#7C3AED' : '#6B7280' }}>{DAY_NAMES[d.getDay()]}</Text>
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: sel ? '#7C3AED' : '#5E646D' }}>{DAY_NAMES[d.getDay()]}</Text>
                     <Text style={{ fontSize: 18, fontWeight: '800', color: sel ? '#7C3AED' : '#17191D' }}>{d.getDate()}</Text>
                     <Text style={{ fontSize: 10, fontWeight: '600', color: sel ? '#7C3AED' : '#9CA3AF' }}>{MONTH_NAMES[d.getMonth()]}</Text>
                   </TouchableOpacity>
@@ -4445,7 +4456,7 @@ function CounterOfferModal({ order, onClose, onConfirm }) {
               <Text style={{ color: '#fff', fontSize: 16, fontWeight: '700' }}>Send Suggestion</Text>
             </TouchableOpacity>
             <TouchableOpacity style={{ paddingVertical: 12, alignItems: 'center' }} onPress={() => { setNote(''); setSelectedDate(null); setSelectedSlot(null); onClose(); }}>
-              <Text style={{ color: '#6B7280', fontSize: 15, fontWeight: '600' }}>Cancel</Text>
+              <Text style={{ color: '#5E646D', fontSize: 15, fontWeight: '600' }}>Cancel</Text>
             </TouchableOpacity>
           </ScrollView>
         </View>
@@ -4824,7 +4835,7 @@ const apptStyles = StyleSheet.create({
   header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingTop: 14, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: '#F0F1F3' },
   headerIcon: { width: 38, height: 38, borderRadius: 10, backgroundColor: '#EFF6FF', alignItems: 'center', justifyContent: 'center' },
   title: { color: '#17191D', fontSize: 17, fontWeight: '800' },
-  sub: { color: '#6B7280', fontSize: 12, marginTop: 2 },
+  sub: { color: '#5E646D', fontSize: 12, marginTop: 2 },
   closeBtn: { width: 34, height: 34, borderRadius: 17, backgroundColor: '#F3F4F5', alignItems: 'center', justifyContent: 'center' },
   content: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 12 },
   requestedBanner: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#FFF7ED', borderRadius: 12, borderWidth: 1, borderColor: '#FED7AA', padding: 12, marginBottom: 12 },
@@ -4836,7 +4847,7 @@ const apptStyles = StyleSheet.create({
   quickRow: { flexDirection: 'row', gap: 8, marginBottom: 4 },
   quickCard: { flex: 1, borderRadius: 10, backgroundColor: '#F9FAFB', borderWidth: 1, borderColor: '#ECEEF0', padding: 10, gap: 4 },
   quickLabel: { color: '#17191D', fontSize: 12, fontWeight: '700', lineHeight: 16 },
-  quickSub: { color: '#6B7280', fontSize: 10, fontWeight: '500' },
+  quickSub: { color: '#5E646D', fontSize: 10, fontWeight: '500' },
   daysRow: { gap: 8, paddingRight: 4 },
   dayChip: { minWidth: 68, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 10, backgroundColor: '#F3F4F5', borderWidth: 1, borderColor: '#ECEEF0', alignItems: 'center', justifyContent: 'center' },
   dayChipActive: { backgroundColor: '#2563EB', borderColor: '#2563EB' },
@@ -4881,7 +4892,7 @@ const styles = StyleSheet.create({
   headerActions: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   onlinePill: { height: 34, borderRadius: 17, backgroundColor: '#F5F6F7', borderWidth: 1, borderColor: '#E6E8EB', flexDirection: 'row', alignItems: 'center', paddingLeft: 11, paddingRight: 0 },
   onlinePillActive: { backgroundColor: '#F5F6F7', borderColor: '#DEE0E3' },
-  onlineText: { color: '#8B9098', fontSize: 11, fontWeight: '700' },
+  onlineText: { color: '#5E646D', fontSize: 11, fontWeight: '700' },
   onlineTextActive: { color: '#16A34A' },
   onlineSwitch: { transform: [{ scaleX: 0.62 }, { scaleY: 0.62 }], marginLeft: -5 },
   bellBtn: { width: 38, height: 38, borderRadius: 19, backgroundColor: '#F5F6F7', borderWidth: 1, borderColor: '#E6E8EB', alignItems: 'center', justifyContent: 'center' },
@@ -5096,7 +5107,7 @@ const styles = StyleSheet.create({
   profileStatusTitle: { color: '#17191D', fontSize: 14, lineHeight: 18, fontWeight: '700' },
   profileStatusMeta: { color: '#5E646D', fontSize: 11, lineHeight: 15, fontWeight: '600', marginTop: 2 },
   profileStatusToggle: { flexDirection: 'row', alignItems: 'center', gap: 5, flexShrink: 0 },
-  profileStatusText: { color: '#8B9098', fontSize: 13, lineHeight: 16, fontWeight: '700' },
+  profileStatusText: { color: '#5E646D', fontSize: 13, lineHeight: 16, fontWeight: '700' },
   profileStatusTextOnline: { color: '#128A3A' },
   profileOnlineSwitch: { transform: [{ scaleX: 0.72 }, { scaleY: 0.72 }], marginLeft: -3 },
   profileStatsPanel: { minHeight: 76, borderRadius: 8, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', flexDirection: 'row', alignItems: 'center', paddingHorizontal: 6, marginBottom: 10 },
@@ -5130,7 +5141,7 @@ const styles = StyleSheet.create({
   miniProgressTrack: { position: 'absolute', left: 25, right: 25, top: 7, height: 1, backgroundColor: '#E1E4E8' },
   miniProgressItem: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 2 },
   miniProgressDot: { width: 17, height: 14, borderRadius: 7, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E1E4E8' },
-  miniProgressText: { color: '#8B9098', fontSize: 7, lineHeight: 9, fontWeight: '600' },
+  miniProgressText: { color: '#5E646D', fontSize: 7, lineHeight: 9, fontWeight: '600' },
   waitingBanner: { minHeight: 24, borderRadius: 7, backgroundColor: 'rgba(240,68,22,0.08)', flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 8, marginBottom: 8 },
   waitingBannerText: { color: '#5E646D', fontSize: 10, fontWeight: '500' },
   activeJobActions: { flexDirection: 'row', gap: 7 },
@@ -5236,7 +5247,7 @@ const styles = StyleSheet.create({
   completedSummaryRow: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 14, paddingVertical: 13 },
   completedSummaryRowBorder: { borderTopWidth: 1, borderTopColor: '#ECEEF0' },
   completedSummaryIcon: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center' },
-  completedSummaryLabel: { color: '#8B9098', fontSize: 11, fontWeight: '600', marginBottom: 1 },
+  completedSummaryLabel: { color: '#5E646D', fontSize: 11, fontWeight: '600', marginBottom: 1 },
   completedSummaryValue: { color: '#17191D', fontSize: 14, fontWeight: '700' },
   completedInvoicePaid: { backgroundColor: '#DCFCE7', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
   completedInvoicePaidText: { color: '#16A34A', fontSize: 10, fontWeight: '800', letterSpacing: 0.5 },
@@ -5250,7 +5261,7 @@ const styles = StyleSheet.create({
   detailCompletedBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 4 },
   detailCompletedBadgeText: { color: '#16A34A', fontSize: 13, fontWeight: '700' },
   detailTitle: { color: '#17191D', fontSize: 21, fontWeight: '800', marginBottom: 4 },
-  detailSubtitle: { color: '#8B9098', fontSize: 12, marginBottom: 14 },
+  detailSubtitle: { color: '#5E646D', fontSize: 12, marginBottom: 14 },
   detailProviderCard: { backgroundColor: '#F3F4F5', borderRadius: 14, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: '#ECEEF0' },
   detailProviderMain: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   detailProviderLogo: { width: 48, height: 48, borderRadius: 12, backgroundColor: '#E0E7FF', alignItems: 'center', justifyContent: 'center' },
@@ -5269,7 +5280,7 @@ const styles = StyleSheet.create({
   detailProviderBtnText: { color: '#5E646D', fontSize: 10, fontWeight: '500' },
   detailPriceCard: { backgroundColor: '#F3F4F5', borderRadius: 14, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: '#ECEEF0' },
   detailPriceTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 2 },
-  detailPriceLabel: { color: '#8B9098', fontSize: 12, fontWeight: '500' },
+  detailPriceLabel: { color: '#5E646D', fontSize: 12, fontWeight: '500' },
   detailPriceValue: { color: '#17191D', fontSize: 26, fontWeight: '900', fontVariant: ['tabular-nums'], marginBottom: 8 },
   detailPaidBadge: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(22,163,74,0.1)', borderRadius: 20, paddingVertical: 5, paddingHorizontal: 12, borderWidth: 1, borderColor: 'rgba(22,163,74,0.22)' },
   detailPaidText: { color: '#16A34A', fontSize: 11, fontWeight: '800', letterSpacing: 0.5 },
@@ -5279,11 +5290,11 @@ const styles = StyleSheet.create({
   detailVisaText: { color: '#FFFFFF', fontSize: 11, fontWeight: '900', fontStyle: 'italic', letterSpacing: 0.5 },
   detailPaymentMethod: { color: '#17191D', fontSize: 13, fontWeight: '600' },
   detailInvoiceLink: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  detailInvoiceLinkText: { color: '#FF6B00', fontSize: 13, fontWeight: '700' },
+  detailInvoiceLinkText: { color: '#F04416', fontSize: 13, fontWeight: '700' },
   detailGrid: { flexDirection: 'row', gap: 8, marginBottom: 10 },
   detailGridCard: { flex: 1, backgroundColor: '#F3F4F5', borderRadius: 14, padding: 10, borderWidth: 1, borderColor: '#ECEEF0' },
   detailGridHeader: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 5 },
-  detailGridTitle: { color: '#8B9098', fontSize: 11, fontWeight: '600' },
+  detailGridTitle: { color: '#5E646D', fontSize: 11, fontWeight: '600' },
   detailGridMain: { color: '#17191D', fontSize: 12, fontWeight: '500', marginBottom: 2 },
   detailVinPill: { alignSelf: 'flex-start', backgroundColor: '#ECEEF0', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2, marginTop: 2 },
   detailVinPillText: { color: '#5E646D', fontSize: 11, fontWeight: '600' },
@@ -5293,9 +5304,9 @@ const styles = StyleSheet.create({
   detailWarrantyLabel: { color: '#17191D', fontSize: 12, fontWeight: '600' },
   detailWarrantyRange: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   detailWarrantyDays: { color: '#16A34A', fontSize: 12, fontWeight: '500' },
-  detailWarrantyOr: { color: '#8B9098', fontSize: 12 },
+  detailWarrantyOr: { color: '#5E646D', fontSize: 12 },
   detailWarrantyMiles: { color: '#16A34A', fontSize: 12, fontWeight: '500' },
-  detailWarrantyCovered: { color: '#FF6B00', fontSize: 12, fontWeight: '600' },
+  detailWarrantyCovered: { color: '#F04416', fontSize: 12, fontWeight: '600' },
   detailBreakdownCard: { backgroundColor: '#F3F4F5', borderRadius: 14, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: '#ECEEF0' },
   detailBreakdownTitle: { color: '#17191D', fontSize: 13, fontWeight: '800', marginBottom: 10 },
   detailBreakdownRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 },
@@ -5305,7 +5316,7 @@ const styles = StyleSheet.create({
   detailBreakdownTotal: { color: '#17191D', fontSize: 15, fontWeight: '800' },
   detailBreakdownTotalValue: { color: '#17191D', fontSize: 15, fontWeight: '800' },
   sdContent: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 40 },
-  sdSectionTitle: { color: '#8B9098', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6, marginTop: 14 },
+  sdSectionTitle: { color: '#5E646D', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6, marginTop: 14 },
   sdCard: { backgroundColor: '#F3F4F5', borderRadius: 14, borderWidth: 1, borderColor: '#ECEEF0', overflow: 'hidden' },
   sdRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingVertical: 13 },
   sdRowBorder: { borderTopWidth: 1, borderTopColor: '#ECEEF0' },
@@ -5316,37 +5327,37 @@ const styles = StyleSheet.create({
   sdPhotosRow: { flexDirection: 'row', gap: 10 },
   sdPhotoItem: { flex: 1, alignItems: 'center', gap: 6 },
   sdPhotoPlaceholder: { width: '100%', aspectRatio: 1, backgroundColor: '#F3F4F5', borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', alignItems: 'center', justifyContent: 'center' },
-  sdPhotoLabel: { color: '#8B9098', fontSize: 11 },
+  sdPhotoLabel: { color: '#5E646D', fontSize: 11 },
   invHeaderCard: { backgroundColor: '#F3F4F5', borderRadius: 14, borderWidth: 1, borderColor: '#ECEEF0', padding: 14, marginBottom: 10 },
   invHeaderTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   invIconWrap: { width: 38, height: 38, borderRadius: 10, backgroundColor: '#F3EEFF', alignItems: 'center', justifyContent: 'center' },
   invTitle: { color: '#17191D', fontSize: 16, fontWeight: '800' },
-  invMeta: { color: '#8B9098', fontSize: 12, marginTop: 2 },
+  invMeta: { color: '#5E646D', fontSize: 12, marginTop: 2 },
   invPaidBadge: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(22,163,74,0.1)', borderRadius: 20, paddingVertical: 5, paddingHorizontal: 10, borderWidth: 1, borderColor: 'rgba(22,163,74,0.2)' },
   invPaidText: { color: '#16A34A', fontSize: 11, fontWeight: '800', letterSpacing: 0.4 },
   invPartyCard: { backgroundColor: '#F3F4F5', borderRadius: 14, borderWidth: 1, borderColor: '#ECEEF0', paddingHorizontal: 14, marginBottom: 10 },
   invPartyRow: { paddingVertical: 12 },
-  invPartyLabel: { color: '#8B9098', fontSize: 10, fontWeight: '800', letterSpacing: 0.8, marginBottom: 4 },
+  invPartyLabel: { color: '#5E646D', fontSize: 10, fontWeight: '800', letterSpacing: 0.8, marginBottom: 4 },
   invPartyName: { color: '#17191D', fontSize: 14, fontWeight: '700' },
-  invPartySub: { color: '#8B9098', fontSize: 12, marginTop: 2 },
+  invPartySub: { color: '#5E646D', fontSize: 12, marginTop: 2 },
   invDivider: { height: 1, backgroundColor: '#ECEEF0' },
   invSection: { backgroundColor: '#F3F4F5', borderRadius: 14, borderWidth: 1, borderColor: '#ECEEF0', paddingHorizontal: 14, marginBottom: 10 },
-  invSectionLabel: { color: '#8B9098', fontSize: 10, fontWeight: '800', letterSpacing: 0.8, paddingTop: 12, paddingBottom: 6 },
+  invSectionLabel: { color: '#5E646D', fontSize: 10, fontWeight: '800', letterSpacing: 0.8, paddingTop: 12, paddingBottom: 6 },
   invLineRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 10 },
   invLineBorder: { borderTopWidth: 1, borderTopColor: '#ECEEF0' },
   invLineName: { color: '#17191D', fontSize: 13, fontWeight: '600' },
-  invLineSub: { color: '#8B9098', fontSize: 11, marginTop: 2 },
+  invLineSub: { color: '#5E646D', fontSize: 11, marginTop: 2 },
   invLineAmt: { color: '#17191D', fontSize: 13, fontWeight: '700', marginLeft: 12 },
   invTotalsCard: { backgroundColor: '#F3F4F5', borderRadius: 14, borderWidth: 1, borderColor: '#ECEEF0', paddingHorizontal: 14, marginBottom: 12 },
   invTotalRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12 },
-  invTotalLabel: { color: '#8B9098', fontSize: 14 },
+  invTotalLabel: { color: '#5E646D', fontSize: 14 },
   invTotalValue: { color: '#17191D', fontSize: 14, fontWeight: '600' },
   invTotalBold: { color: '#17191D', fontSize: 15, fontWeight: '800' },
   invTotalBoldValue: { color: '#17191D', fontSize: 17, fontWeight: '900' },
   invFooterRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 10 },
-  invFooterText: { color: '#8B9098', fontSize: 13 },
+  invFooterText: { color: '#5E646D', fontSize: 13 },
   invWarrantyRow: { flexDirection: 'row', alignItems: 'center', gap: 6, justifyContent: 'center' },
-  invWarrantyText: { color: '#8B9098', fontSize: 12 },
+  invWarrantyText: { color: '#5E646D', fontSize: 12 },
 
   cpContent: { paddingHorizontal: 20, paddingTop: 24, paddingBottom: 40, alignItems: 'center' },
   cpAvatarWrap: { width: 110, height: 110, borderRadius: 55, backgroundColor: '#F3F4F5', alignItems: 'center', justifyContent: 'center', marginBottom: 14 },
@@ -5357,10 +5368,10 @@ const styles = StyleSheet.create({
   cpVerifiedText: { color: '#2563EB', fontSize: 12, fontWeight: '700' },
   cpReturningPill: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#DCFCE7', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 5 },
   cpReturningText: { color: '#16A34A', fontSize: 12, fontWeight: '700' },
-  cpJobsCount: { color: '#8B9098', fontSize: 13, fontWeight: '600', marginBottom: 18 },
+  cpJobsCount: { color: '#5E646D', fontSize: 13, fontWeight: '600', marginBottom: 18 },
   cpStatsCard: { flexDirection: 'row', width: '100%', backgroundColor: '#F3F4F5', borderRadius: 14, borderWidth: 1, borderColor: '#ECEEF0', paddingVertical: 16, marginBottom: 14 },
   cpStatItem: { flex: 1, alignItems: 'center', gap: 6, paddingHorizontal: 4 },
-  cpStatLabel: { color: '#8B9098', fontSize: 10, fontWeight: '600', textAlign: 'center' },
+  cpStatLabel: { color: '#5E646D', fontSize: 10, fontWeight: '600', textAlign: 'center' },
   cpStatValue: { color: '#17191D', fontSize: 16, fontWeight: '800' },
   cpStatDivider: { width: 1, backgroundColor: '#ECEEF0' },
   cpActionsRow: { flexDirection: 'row', width: '100%', gap: 10, marginBottom: 14 },
@@ -5371,7 +5382,7 @@ const styles = StyleSheet.create({
   cpListRowBorder: { borderTopWidth: 1, borderTopColor: '#ECEEF0' },
   cpListLabel: { flex: 1, color: '#17191D', fontSize: 14, fontWeight: '600' },
   cpListValue: { color: '#5E646D', fontSize: 13, fontWeight: '600' },
-  cpFooterNote: { color: '#8B9098', fontSize: 12, textAlign: 'center', lineHeight: 17 },
+  cpFooterNote: { color: '#5E646D', fontSize: 12, textAlign: 'center', lineHeight: 17 },
 
   jaBackdropFill: { flex: 1, backgroundColor: 'rgba(23,25,29,0.15)' },
   jaMenu: { position: 'absolute', top: 118, right: 16, width: 210, backgroundColor: '#FFFFFF', borderRadius: 14, paddingVertical: 4, shadowColor: '#000', shadowOpacity: 0.16, shadowRadius: 16, shadowOffset: { width: 0, height: 6 }, elevation: 10 },
@@ -5381,7 +5392,7 @@ const styles = StyleSheet.create({
 
   mapView: { ...StyleSheet.absoluteFillObject },
   mapPlaceholder: { alignItems: 'center', justifyContent: 'center', gap: 6 },
-  mapPlaceholderText: { color: '#8B9098', fontSize: 12, fontWeight: '600' },
+  mapPlaceholderText: { color: '#5E646D', fontSize: 12, fontWeight: '600' },
   mapStartMarker: { width: 18, height: 18, borderRadius: 9, backgroundColor: '#17191D', borderWidth: 3, borderColor: '#FFFFFF' },
   mapEndMarker: { width: 32, height: 38, borderRadius: 16, backgroundColor: '#F04416', alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderColor: '#FFFFFF' },
   mapBubble: { position: 'absolute', left: '45%', top: 34, borderRadius: 8, backgroundColor: 'rgba(23,25,29,0.9)', paddingHorizontal: 8, paddingVertical: 6 },
@@ -5428,7 +5439,7 @@ const styles = StyleSheet.create({
   diagnosisNotesBlock: { marginBottom: 14 },
   diagnosisNotesLabel: { color: '#17191D', fontSize: 12, lineHeight: 16, fontWeight: '800', marginBottom: 7 },
   diagnosisNotesInput: { minHeight: 86, borderRadius: 8, borderWidth: 1, borderColor: '#E1E4E8', backgroundColor: '#F3F4F5', color: '#17191D', fontSize: 12, lineHeight: 17, fontWeight: '600', paddingHorizontal: 12, paddingVertical: 10 },
-  diagnosisNotesCount: { color: '#8B9098', fontSize: 10, lineHeight: 13, fontWeight: '700', textAlign: 'right', marginTop: 4 },
+  diagnosisNotesCount: { color: '#5E646D', fontSize: 10, lineHeight: 13, fontWeight: '700', textAlign: 'right', marginTop: 4 },
   recommendedBlock: { marginBottom: 14 },
   recommendedTitle: { color: '#17191D', fontSize: 15, lineHeight: 19, fontWeight: '800', marginBottom: 3 },
   recommendedSubtitle: { color: '#5E646D', fontSize: 11, lineHeight: 15, fontWeight: '600', marginBottom: 9 },
@@ -5472,7 +5483,7 @@ const styles = StyleSheet.create({
   invoicePartyRow: { paddingVertical: 12 },
   invoicePartyLabel: { color: '#9CA3AF', fontSize: 10, fontWeight: '800', letterSpacing: 0.8, marginBottom: 4 },
   invoicePartyName: { color: '#17191D', fontSize: 14, fontWeight: '700' },
-  invoicePartySub: { color: '#6B7280', fontSize: 12, marginTop: 2, fontWeight: '500' },
+  invoicePartySub: { color: '#5E646D', fontSize: 12, marginTop: 2, fontWeight: '500' },
   invoiceDivider: { height: 1, backgroundColor: '#F0F1F3' },
   invoiceSection: { backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 1, borderColor: '#ECEEF0', paddingHorizontal: 14, marginBottom: 10 },
   invoiceSectionLabel: { color: '#9CA3AF', fontSize: 10, fontWeight: '800', letterSpacing: 0.8, paddingTop: 12, paddingBottom: 6 },
@@ -5483,17 +5494,17 @@ const styles = StyleSheet.create({
   invoiceLineAmount: { color: '#17191D', fontSize: 13, fontWeight: '700', marginLeft: 12 },
   invoiceTotalsCard: { backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 1, borderColor: '#ECEEF0', paddingHorizontal: 14, marginBottom: 10 },
   invoiceTotalRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 12 },
-  invoiceTotalLabel: { color: '#6B7280', fontSize: 14, fontWeight: '500' },
+  invoiceTotalLabel: { color: '#5E646D', fontSize: 14, fontWeight: '500' },
   invoiceTotalValue: { color: '#17191D', fontSize: 14, fontWeight: '600' },
   invoiceTotalLabelBold: { color: '#17191D', fontSize: 15, fontWeight: '800' },
   invoiceTotalValueBold: { color: '#17191D', fontSize: 17, fontWeight: '800' },
   invoicePaymentRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 16, paddingHorizontal: 2 },
-  invoicePaymentText: { color: '#6B7280', fontSize: 13, fontWeight: '500' },
+  invoicePaymentText: { color: '#5E646D', fontSize: 13, fontWeight: '500' },
   invoiceWarrantyRow: { flexDirection: 'row', alignItems: 'center', gap: 6, justifyContent: 'center', marginBottom: 8 },
-  invoiceWarrantyText: { color: '#6B7280', fontSize: 12, fontWeight: '500' },
+  invoiceWarrantyText: { color: '#5E646D', fontSize: 12, fontWeight: '500' },
   callFeeToggleInfo: { flex: 1, marginRight: 10 },
   callFeeToggleLabel: { color: '#17191D', fontSize: 13, fontWeight: '700' },
-  callFeeToggleSub: { color: '#6B7280', fontSize: 11, marginTop: 2 },
+  callFeeToggleSub: { color: '#5E646D', fontSize: 11, marginTop: 2 },
   estimatePickerOverlay: { flex: 1, justifyContent: 'flex-end', padding: 15 },
   estimatePickerCard: { maxHeight: '82%', borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', padding: 14, marginBottom: 18, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 12 },
   estimateSearchBox: { height: 42, borderRadius: 8, borderWidth: 1, borderColor: '#E1E4E8', backgroundColor: '#F3F4F5', flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 11, marginBottom: 10 },
@@ -5543,7 +5554,7 @@ const styles = StyleSheet.create({
   customerPreviewLine: { minHeight: 34, borderTopWidth: 1, borderTopColor: '#E1E4E8', flexDirection: 'row', alignItems: 'center', gap: 10 },
   customerPreviewLineInfo: { flex: 1, minWidth: 0 },
   customerPreviewLineLabel: { color: '#17191D', fontSize: 12, lineHeight: 16, fontWeight: '700' },
-  customerPreviewLineMeta: { color: '#8B9098', fontSize: 10, lineHeight: 13, fontWeight: '700', marginTop: 1 },
+  customerPreviewLineMeta: { color: '#5E646D', fontSize: 10, lineHeight: 13, fontWeight: '700', marginTop: 1 },
   customerPreviewLineAmount: { width: 86, color: '#17191D', fontSize: 12, lineHeight: 16, fontWeight: '800', textAlign: 'right' },
   customerPreviewLineStrong: { fontWeight: '900' },
   customerPreviewTotalAmount: { color: '#16A34A', fontSize: 15, lineHeight: 19 },
@@ -5569,13 +5580,13 @@ const styles = StyleSheet.create({
   workSummaryApprovalBadgeText: { color: '#FFFFFF', fontSize: 10, fontWeight: '800' },
   workSummaryApprovalBadgeTextPartial: { color: '#16A34A' },
   workSummaryOptionalNote: { flexDirection: 'row', alignItems: 'center', gap: 5, marginBottom: 6 },
-  workSummaryOptionalNoteText: { color: '#8B9098', fontSize: 11, fontWeight: '600' },
+  workSummaryOptionalNoteText: { color: '#5E646D', fontSize: 11, fontWeight: '600' },
   workSummaryDivider: { height: 1, backgroundColor: '#E1E4E8', marginBottom: 8 },
   approvalConfirmedCard: { borderRadius: 10, borderWidth: 1, borderColor: 'rgba(22,163,74,0.22)', backgroundColor: 'rgba(22,163,74,0.06)', padding: 12, marginBottom: 10 },
   approvalConfirmedTop: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
   approvalConfirmedIconWrap: { width: 38, height: 38, borderRadius: 10, backgroundColor: 'rgba(22,163,74,0.12)', alignItems: 'center', justifyContent: 'center' },
   approvalConfirmedTitle: { color: '#17191D', fontSize: 14, fontWeight: '800', lineHeight: 18 },
-  approvalConfirmedTime: { color: '#8B9098', fontSize: 11, fontWeight: '600', marginTop: 1 },
+  approvalConfirmedTime: { color: '#5E646D', fontSize: 11, fontWeight: '600', marginTop: 1 },
   approvalConfirmedBadge: { borderRadius: 20, paddingVertical: 4, paddingHorizontal: 10, backgroundColor: '#16A34A' },
   approvalConfirmedBadgePartial: { backgroundColor: 'transparent', borderWidth: 1, borderColor: '#16A34A' },
   approvalConfirmedBadgeText: { color: '#FFFFFF', fontSize: 10, fontWeight: '800' },
@@ -5584,13 +5595,13 @@ const styles = StyleSheet.create({
   approvalConfirmedAmountLabel: { color: '#5E646D', fontSize: 12, fontWeight: '600' },
   approvalConfirmedAmount: { color: '#16A34A', fontSize: 18, fontWeight: '900' },
   approvalConfirmedNote: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: 'rgba(22,163,74,0.15)' },
-  approvalConfirmedNoteText: { flex: 1, color: '#8B9098', fontSize: 11, lineHeight: 15, fontWeight: '600' },
+  approvalConfirmedNoteText: { flex: 1, color: '#5E646D', fontSize: 11, lineHeight: 15, fontWeight: '600' },
   declinedNoticeCard: { alignItems: 'center', paddingVertical: 24, paddingHorizontal: 16, marginBottom: 12 },
   declinedNoticeIcon: { width: 64, height: 64, borderRadius: 32, backgroundColor: 'rgba(220,38,38,0.1)', alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
   declinedNoticeTitle: { color: '#17191D', fontSize: 20, lineHeight: 25, fontWeight: '900', marginBottom: 6, textAlign: 'center' },
   declinedNoticeSubtitle: { color: '#5E646D', fontSize: 13, lineHeight: 18, textAlign: 'center' },
   declinedReasonCard: { borderRadius: 10, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', padding: 14, marginBottom: 10 },
-  declinedReasonLabel: { color: '#8B9098', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 },
+  declinedReasonLabel: { color: '#5E646D', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 6 },
   declinedReasonValue: { color: '#17191D', fontSize: 14, fontWeight: '700' },
   declinedFeeCard: { borderRadius: 10, borderWidth: 1, borderColor: 'rgba(22,163,74,0.2)', backgroundColor: 'rgba(22,163,74,0.06)', padding: 14, marginBottom: 20 },
   declinedFeeRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
@@ -5598,8 +5609,8 @@ const styles = StyleSheet.create({
   declinedFeeAmount: { color: '#16A34A', fontSize: 16, fontWeight: '900' },
   declinedFeeNote: { color: '#5E646D', fontSize: 12, lineHeight: 17 },
   declinedActionsTitle: { color: '#5E646D', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.5, marginBottom: 10 },
-  declinedReviseBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, borderWidth: 1.5, borderColor: '#FF6B00', borderRadius: 12, paddingVertical: 15, marginBottom: 10 },
-  declinedReviseBtnText: { color: '#FF6B00', fontSize: 15, fontWeight: '700' },
+  declinedReviseBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, borderWidth: 1.5, borderColor: '#F04416', borderRadius: 12, paddingVertical: 15, marginBottom: 10 },
+  declinedReviseBtnText: { color: '#F04416', fontSize: 15, fontWeight: '700' },
   declinedCloseBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, borderWidth: 1.5, borderColor: '#E1E4E8', borderRadius: 12, paddingVertical: 15, marginBottom: 24 },
   declinedCloseBtnText: { color: '#5E646D', fontSize: 15, fontWeight: '600' },
   approvalContent: { paddingHorizontal: 15, paddingTop: 10, paddingBottom: 34 },
@@ -5635,7 +5646,7 @@ const styles = StyleSheet.create({
   repairLiveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#16A34A' },
   repairLiveText: { color: '#16A34A', fontSize: 11, fontWeight: '700' },
   repairFieldBlock: { marginTop: 10 },
-  repairFieldLabel: { color: '#8B9098', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4 },
+  repairFieldLabel: { color: '#5E646D', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4, marginBottom: 4 },
   repairFieldText: { color: '#5E646D', fontSize: 12, lineHeight: 16 },
   repairPhotosRow: { gap: 8, paddingRight: 2 },
   repairPhotoTile: { width: 84, height: 84, borderRadius: 10, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', alignItems: 'center', justifyContent: 'center', padding: 6, gap: 4 },
@@ -5659,7 +5670,7 @@ const styles = StyleSheet.create({
   additionalRequiredBtn: { flex: 1, height: 46, borderRadius: 10, backgroundColor: '#F04416', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, paddingHorizontal: 10 },
   additionalRequiredText: { color: '#FFFFFF', fontSize: 14, fontWeight: '700', textAlign: 'center', flexShrink: 1 },
   additionalEmptyBox: { alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 16 },
-  additionalEmptyText: { color: '#8B9098', fontSize: 12, fontWeight: '600' },
+  additionalEmptyText: { color: '#5E646D', fontSize: 12, fontWeight: '600' },
   crCard: { borderRadius: 10, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#F3F4F5', padding: 12, marginTop: 8, gap: 10 },
   crCardApproved: { borderColor: 'rgba(22,163,74,0.3)', backgroundColor: 'rgba(22,163,74,0.06)' },
   crCardDeclined: { borderColor: 'rgba(220,38,38,0.3)', backgroundColor: 'rgba(220,38,38,0.06)' },
@@ -5670,7 +5681,7 @@ const styles = StyleSheet.create({
   crAmount: { color: '#F04416', fontSize: 14, fontWeight: '800' },
   crAmountApproved: { color: '#16A34A' },
   crAmountDeclined: { color: '#DC2626' },
-  crFieldLabel: { color: '#8B9098', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4 },
+  crFieldLabel: { color: '#5E646D', fontSize: 11, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4 },
   crDesc: { color: '#17191D', fontSize: 12, lineHeight: 16, fontWeight: '500' },
   crEvidenceRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 5 },
   crEvidenceText: { flex: 1, color: '#5E646D', fontSize: 11, lineHeight: 15, fontWeight: '500' },
@@ -5678,7 +5689,7 @@ const styles = StyleSheet.create({
   crStatusPending: {},
   crStatusApproved: {},
   crStatusDeclined: {},
-  crStatusText: { fontSize: 11, fontWeight: '600', color: '#8B9098' },
+  crStatusText: { fontSize: 11, fontWeight: '600', color: '#5E646D' },
   crStatusTextApproved: { color: '#16A34A' },
   crStatusTextDeclined: { color: '#DC2626' },
   additionalItem: { borderRadius: 8, borderWidth: 1, padding: 11, marginBottom: 9 },
@@ -5686,10 +5697,10 @@ const styles = StyleSheet.create({
   additionalItemTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 10 },
   additionalItemInfo: { flex: 1, minWidth: 0 },
   additionalItemKind: { color: '#F04416', fontSize: 10, lineHeight: 13, fontWeight: '900', textTransform: 'uppercase', marginBottom: 6 },
-  additionalItemFieldLabel: { color: '#8B9098', fontSize: 9, lineHeight: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4, marginTop: 8, marginBottom: 2 },
+  additionalItemFieldLabel: { color: '#5E646D', fontSize: 9, lineHeight: 12, fontWeight: '700', textTransform: 'uppercase', letterSpacing: 0.4, marginTop: 8, marginBottom: 2 },
   additionalItemTitle: { color: '#17191D', fontSize: 13, lineHeight: 17, fontWeight: '700' },
   additionalItemDescription: { color: '#17191D', fontSize: 12, lineHeight: 16, fontWeight: '500' },
-  additionalEvidenceLabel: { color: '#8B9098', fontSize: 10, lineHeight: 13, fontWeight: '700' },
+  additionalEvidenceLabel: { color: '#5E646D', fontSize: 10, lineHeight: 13, fontWeight: '700' },
   additionalEvidenceRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 7 },
   additionalEvidenceText: { flex: 1, minWidth: 0, color: '#5E646D', fontSize: 10, lineHeight: 13, fontWeight: '700' },
   additionalItemAmount: { color: '#17191D', fontSize: 15, lineHeight: 19, fontWeight: '900', flexShrink: 0 },
@@ -5756,7 +5767,7 @@ const styles = StyleSheet.create({
   startInspectionBtn: { height: 58, borderRadius: 10, backgroundColor: '#16A34A', alignItems: 'center', justifyContent: 'center', marginTop: 2 },
   startInspectionText: { color: '#FFFFFF', fontSize: 17, lineHeight: 21, fontWeight: '800' },
   startInspectionBtnDisabled: { backgroundColor: '#E6E8EB' },
-  startInspectionTextDisabled: { color: '#8B9098' },
+  startInspectionTextDisabled: { color: '#5E646D' },
   checklistKeyboardAvoider: { flex: 1 },
   checklistModalOverlay: { flex: 1, justifyContent: 'flex-end', padding: 15 },
   checklistModalCard: { maxHeight: '86%', borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', padding: 14, marginBottom: 18, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 12 },
@@ -5865,8 +5876,8 @@ const styles = StyleSheet.create({
   serviceIconWrap: { width: 48, height: 48, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   serviceInfo: { flex: 1, minWidth: 0 },
   serviceType: { color: '#17191D', fontSize: 14, lineHeight: 18, fontWeight: '800', marginBottom: 2, flexShrink: 1 },
-  serviceTypeSuffix: { fontSize: 11, fontWeight: '500', color: '#8B9098' },
-  arrivedContinueHint: { color: '#8B9098', fontSize: 11, fontWeight: '600', textAlign: 'center', marginTop: 8 },
+  serviceTypeSuffix: { fontSize: 11, fontWeight: '500', color: '#5E646D' },
+  arrivedContinueHint: { color: '#5E646D', fontSize: 11, fontWeight: '600', textAlign: 'center', marginTop: 8 },
   serviceVehicle: { color: '#5E646D', fontSize: 12, lineHeight: 16, fontWeight: '600', marginBottom: 3 },
   serviceAddress: { color: '#5E646D', fontSize: 12, fontWeight: '600' },
   vehicleTrustedLine: { minHeight: 16 },
@@ -5877,7 +5888,7 @@ const styles = StyleSheet.create({
   stepperCircle: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#FFFFFF', borderWidth: 1.5, borderColor: '#E1E4E8', alignItems: 'center', justifyContent: 'center' },
   stepperCircleCompleted: { backgroundColor: '#F04416', borderColor: '#F04416' },
   stepperCircleCurrent: { backgroundColor: '#F04416', borderColor: '#F04416' },
-  stepperLabel: { color: '#8B9098', fontSize: 8, fontWeight: '700', textAlign: 'center' },
+  stepperLabel: { color: '#5E646D', fontSize: 8, fontWeight: '700', textAlign: 'center' },
   stepperLabelActive: { color: '#F04416' },
   jobDetailHeading: { color: '#17191D', fontSize: 15, fontWeight: '700', marginBottom: 11 },
   jobDetailRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingVertical: 10, gap: 12 },

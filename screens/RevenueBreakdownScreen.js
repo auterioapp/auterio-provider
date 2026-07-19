@@ -88,7 +88,7 @@ function DonutChart({ segments }) {
         textAnchor="middle"
         fontSize="13"
         fontWeight="500"
-        fill="#6B7280"
+        fill="#5E646D"
       >
         Total Revenue
       </SvgText>
@@ -167,7 +167,7 @@ export default function RevenueBreakdownScreen({ visible, onClose, isDemo }) {
 
           {/* Disclaimer */}
           <View style={styles.infoCard}>
-            <Ionicons name="information-circle-outline" size={18} color="#6B7280" />
+            <Ionicons name="information-circle-outline" size={18} color="#5E646D" />
             <Text style={styles.infoText}>Percentages may not add up to 100% due to rounding.</Text>
           </View>
 
@@ -182,7 +182,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F5F6F8' },
   emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40, gap: 12 },
   emptyTitle: { color: '#17191D', fontSize: 18, fontWeight: '700', textAlign: 'center' },
-  emptySub: { color: '#6B7280', fontSize: 14, textAlign: 'center', lineHeight: 20 },
+  emptySub: { color: '#5E646D', fontSize: 14, textAlign: 'center', lineHeight: 20 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 72, paddingBottom: 14, backgroundColor: '#F5F6F8' },
   backBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
   headerTitle: { color: '#17191D', fontSize: 17, fontWeight: '700' },
@@ -203,7 +203,7 @@ const styles = StyleSheet.create({
   legendDot: { width: 12, height: 12, borderRadius: 6, flexShrink: 0 },
   legendLabel: { flex: 1, color: '#17191D', fontSize: 14, fontWeight: '600' },
   legendAmount: { color: '#17191D', fontSize: 14, fontWeight: '700', marginRight: 12 },
-  legendPct: { color: '#6B7280', fontSize: 13, fontWeight: '500', width: 42, textAlign: 'right' },
+  legendPct: { color: '#5E646D', fontSize: 13, fontWeight: '500', width: 42, textAlign: 'right' },
   infoCard: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, backgroundColor: '#F5F6F8', borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', paddingHorizontal: 14, paddingVertical: 12 },
-  infoText: { flex: 1, color: '#6B7280', fontSize: 13, lineHeight: 18 },
+  infoText: { flex: 1, color: '#5E646D', fontSize: 13, lineHeight: 18 },
 });

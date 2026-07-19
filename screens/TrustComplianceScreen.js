@@ -20,12 +20,12 @@ const REAL_DOCUMENTS = [
 
 const STATUS_COLOR = { Verified: '#16A34A', Approved: '#16A34A', Submitted: '#16A34A', 'Under Review': '#D97706', 'Not Submitted': '#9CA3AF', Expired: '#DC2626' };
 
-export default function TrustComplianceScreen({ visible, onClose, verificationStatus }) {
+export default function TrustComplianceScreen({ visible, onClose, verificationStatus, isDemo }) {
   const isVerified = verificationStatus === 'verified';
   const isPending = verificationStatus === 'pending_review';
   const docStatus = isVerified ? 'Verified' : isPending ? 'Under Review' : 'Not Submitted';
   const docMeta = isPending ? 'Under review by our team' : isVerified ? '' : 'Upload required';
-  const documents = isVerified ? DEMO_DOCUMENTS : REAL_DOCUMENTS.map(d => ({ ...d, status: docStatus, meta: docMeta }));
+  const documents = isDemo ? DEMO_DOCUMENTS : REAL_DOCUMENTS.map(d => ({ ...d, status: docStatus, meta: docMeta }));
   const [modalVisible, setModalVisible] = useState(visible);
   const slideAnim = useRef(new Animated.Value(Dimensions.get('window').width)).current;
 
@@ -74,7 +74,7 @@ export default function TrustComplianceScreen({ visible, onClose, verificationSt
                 </View>
                 <View style={styles.info}>
                   <Text style={styles.docTitle}>{doc.title}</Text>
-                  <Text style={[styles.docStatus, { color: STATUS_COLOR[doc.status] || '#6B7280' }]}>
+                  <Text style={[styles.docStatus, { color: STATUS_COLOR[doc.status] || '#5E646D' }]}>
                     {doc.status}
                   </Text>
                 </View>
@@ -98,7 +98,7 @@ const styles = StyleSheet.create({
   statusBanner: { flexDirection: 'row', alignItems: 'flex-start', gap: 10, borderRadius: 12, borderWidth: 1, padding: 12, marginBottom: 12 },
   statusBannerUnverified: { backgroundColor: '#F9FAFB', borderColor: '#E5E7EB' },
   statusBannerPending: { backgroundColor: 'rgba(217,119,6,0.06)', borderColor: 'rgba(217,119,6,0.2)' },
-  statusBannerText: { flex: 1, color: '#6B7280', fontSize: 13, lineHeight: 18 },
+  statusBannerText: { flex: 1, color: '#5E646D', fontSize: 13, lineHeight: 18 },
   statusBannerTextPending: { color: '#92400E' },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 72, paddingBottom: 14, backgroundColor: '#F5F6F8' },
   backBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
@@ -112,7 +112,7 @@ const styles = StyleSheet.create({
   info: { flex: 1 },
   docTitle: { color: '#17191D', fontSize: 15, fontWeight: '700', marginBottom: 3 },
   docStatus: { fontSize: 13, fontWeight: '700' },
-  docMeta: { color: '#6B7280', fontSize: 12, fontWeight: '500', flexShrink: 0, textAlign: 'right', maxWidth: 120 },
+  docMeta: { color: '#5E646D', fontSize: 12, fontWeight: '500', flexShrink: 0, textAlign: 'right', maxWidth: 120 },
   chevron: { marginLeft: 6, flexShrink: 0 },
-  footerNote: { color: '#6B7280', fontSize: 13, lineHeight: 20, marginTop: 20, paddingHorizontal: 4 },
+  footerNote: { color: '#5E646D', fontSize: 13, lineHeight: 20, marginTop: 20, paddingHorizontal: 4 },
 });

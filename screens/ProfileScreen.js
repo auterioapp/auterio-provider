@@ -227,7 +227,7 @@ export default function ProfileScreen({ online, setOnline, refreshControl, scrol
           subtitle: 'View your verification status',
           icon: 'shield-checkmark-outline',
           iconBg: verificationStatus === 'verified' ? '#ECFDF5' : '#F5F6F7',
-          iconColor: verificationStatus === 'verified' ? '#16A34A' : '#8B9098',
+          iconColor: verificationStatus === 'verified' ? '#16A34A' : '#5E646D',
           value: verificationStatus === 'verified' ? 'Verified' : verificationStatus === 'pending_review' ? 'Under Review' : null,
           valueColor: verificationStatus === 'verified' ? '#16A34A' : '#D97706',
         },
@@ -436,7 +436,7 @@ export default function ProfileScreen({ online, setOnline, refreshControl, scrol
               onValueChange={handleSetOnline}
               disabled={!canGoOnline}
               trackColor={{ false: '#E6E8EB', true: '#16A34A' }}
-              thumbColor={online && canGoOnline ? '#FFFFFF' : '#8B9098'}
+              thumbColor={online && canGoOnline ? '#FFFFFF' : '#5E646D'}
               style={styles.profileOnlineSwitch}
             />
           </View>
@@ -528,7 +528,7 @@ export default function ProfileScreen({ online, setOnline, refreshControl, scrol
       <ReviewsScreen visible={reviewsOpen} onClose={() => setReviewsOpen(false)} isDemo={isDemoAccount} />
       <PayoutsScreen visible={payoutsOpen} onClose={() => setPayoutsOpen(false)} isDemo={isDemoAccount} />
       <ServicesScreen visible={servicesOpen} onClose={() => { setServicesOpen(false); loadProfileData(); }} isDemoAccount={isDemoAccount} />
-      <TrustComplianceScreen visible={trustOpen} onClose={() => setTrustOpen(false)} verificationStatus={verificationStatus} />
+      <TrustComplianceScreen visible={trustOpen} onClose={() => setTrustOpen(false)} verificationStatus={verificationStatus} isDemo={isDemoAccount} />
       <PricingScreen visible={pricingOpen} onClose={() => setPricingOpen(false)} isDemoAccount={isDemoAccount} />
       <WorkingHoursScreen
         visible={hoursOpen}
@@ -631,12 +631,12 @@ const styles = StyleSheet.create({
   profileStatusTitle: { color: '#17191D', fontSize: 14, lineHeight: 18, fontWeight: '700' },
   profileStatusMeta: { color: '#5E646D', fontSize: 11, lineHeight: 15, fontWeight: '600', marginTop: 2 },
   profileStatusToggle: { flexDirection: 'row', alignItems: 'center', gap: 5, flexShrink: 0 },
-  profileStatusText: { color: '#8B9098', fontSize: 13, lineHeight: 16, fontWeight: '700' },
+  profileStatusText: { color: '#5E646D', fontSize: 13, lineHeight: 16, fontWeight: '700' },
   profileStatusTextOnline: { color: '#128A3A' },
   profileOnlineSwitch: { transform: [{ scaleX: 0.72 }, { scaleY: 0.72 }], marginLeft: -3 },
 
   menuSection: { marginBottom: 6, marginTop: 18 },
-  menuSectionTitle: { color: '#8B9098', fontSize: 11, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: 8, marginLeft: 2 },
+  menuSectionTitle: { color: '#5E646D', fontSize: 11, fontWeight: '700', letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: 8, marginLeft: 2 },
   menuList: { backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', overflow: 'hidden' },
   menuItem: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10, gap: 10 },
   menuItemRequired: { backgroundColor: '#FFFBEB' },
@@ -645,11 +645,11 @@ const styles = StyleSheet.create({
   menuInfo: { flex: 1, minWidth: 0 },
   menuTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   menuTitle: { color: '#17191D', fontSize: 14, lineHeight: 18, fontWeight: '700' },
-  menuSubtitle: { color: '#6B7280', fontSize: 12, lineHeight: 16, fontWeight: '500', marginTop: 2 },
+  menuSubtitle: { color: '#5E646D', fontSize: 12, lineHeight: 16, fontWeight: '500', marginTop: 2 },
   menuRight: { alignItems: 'flex-end', flexShrink: 0 },
   menuValueRow: { flexDirection: 'row', alignItems: 'center' },
   menuValue: { color: '#17191D', fontSize: 14, lineHeight: 18, fontWeight: '700' },
-  menuValueSub: { color: '#6B7280', fontSize: 11, lineHeight: 14, fontWeight: '500', marginTop: 1 },
+  menuValueSub: { color: '#5E646D', fontSize: 11, lineHeight: 14, fontWeight: '500', marginTop: 1 },
   requiredBadge: { backgroundColor: '#FEF3C7', borderRadius: 5, paddingHorizontal: 6, paddingVertical: 2 },
   requiredBadgeText: { color: '#D97706', fontSize: 10, fontWeight: '700' },
   versionText: { color: '#C4C9D4', fontSize: 12, fontWeight: '500', textAlign: 'center', marginTop: 16, marginBottom: 4 },

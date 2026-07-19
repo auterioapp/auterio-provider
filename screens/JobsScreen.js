@@ -110,11 +110,11 @@ export default function JobsScreen({ jobs, jobWorkflows = {}, onOpen, refreshCon
             value={searchQuery}
             onChangeText={setSearchQuery}
             placeholder="Search jobs, customers, services..."
-            placeholderTextColor="#8B9098"
+            placeholderTextColor="#5E646D"
           />
           {!!searchQuery && (
             <TouchableOpacity onPress={() => setSearchQuery('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-              <Ionicons name="close-circle" size={16} color="#8B9098" />
+              <Ionicons name="close-circle" size={16} color="#5E646D" />
             </TouchableOpacity>
           )}
         </View>
@@ -211,11 +211,11 @@ function ActiveJobCard({ job, onOpen, completed }) {
         <View style={styles.jobCardBody}>
           <Text style={styles.jobCardTitle} numberOfLines={1}>{serviceType}</Text>
           <View style={styles.jobCardMetaRow}>
-            <Ionicons name="car-outline" size={12} color="#8B9098" />
+            <Ionicons name="car-outline" size={12} color="#5E646D" />
             <Text style={styles.jobCardMetaText} numberOfLines={1}>{vehicle}</Text>
           </View>
           <View style={styles.jobCardMetaRow}>
-            <Ionicons name="person-outline" size={12} color="#8B9098" />
+            <Ionicons name="person-outline" size={12} color="#5E646D" />
             <Text style={styles.jobCardMetaText} numberOfLines={1}>{customerName}</Text>
           </View>
         </View>
@@ -238,7 +238,7 @@ export function MiniJobProgress({ status, accent }) {
         return (
           <View key={step.key} style={styles.miniProgressItem}>
             <View style={[styles.miniProgressDot, done && { backgroundColor: accent }]}>
-              <Ionicons name={step.icon} size={10} color={done ? '#FFFFFF' : '#8B9098'} />
+              <Ionicons name={step.icon} size={10} color={done ? '#FFFFFF' : '#5E646D'} />
             </View>
             <Text style={[styles.miniProgressText, done && { color: accent }]}>{step.label}</Text>
           </View>
@@ -284,7 +284,7 @@ function ScheduledJobCard({ job, onOpen }) {
 
   const avatarBg = isShopVisit ? '#EFF6FF' : '#EAF7EE';
   const avatarColor = isShopVisit ? '#2563EB' : '#16A34A';
-  const timeLabel = `${dayLabel}${timeBig ? ` · ${timeBig}${ampm ? ' ' + ampm : ''}` : ''}`;
+  const timeLabel = `${dayLabel}${timeBig ? ` Â· ${timeBig}${ampm ? ' ' + ampm : ''}` : ''}`;
 
   return (
     <TouchableOpacity style={[styles.jobCard, { borderColor: avatarColor + '55' }]} onPress={() => onOpen(job)} activeOpacity={0.88}>
@@ -295,11 +295,11 @@ function ScheduledJobCard({ job, onOpen }) {
         <View style={styles.jobCardBody}>
           <Text style={styles.jobCardTitle} numberOfLines={1}>{serviceType}</Text>
           <View style={styles.jobCardMetaRow}>
-            <Ionicons name="car-outline" size={12} color="#8B9098" />
+            <Ionicons name="car-outline" size={12} color="#5E646D" />
             <Text style={styles.jobCardMetaText} numberOfLines={1}>{vehicle}</Text>
           </View>
           <View style={styles.jobCardMetaRow}>
-            <Ionicons name="person-outline" size={12} color="#8B9098" />
+            <Ionicons name="person-outline" size={12} color="#5E646D" />
             <Text style={styles.jobCardMetaText} numberOfLines={1}>{customerName}</Text>
           </View>
           <View style={styles.jobCardMetaRow}>
@@ -342,7 +342,7 @@ const styles = StyleSheet.create({
   activeJobsList: { gap: 6 },
   emptyJobsCard: { minHeight: 150, borderRadius: 12, borderWidth: 1.5, borderColor: '#D8DBE0', borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 24 },
   emptyJobsTitle: { color: '#17191D', fontSize: 15, fontWeight: '800', marginTop: 6 },
-  emptyJobsText: { color: '#8B9098', fontSize: 12, fontWeight: '500' },
+  emptyJobsText: { color: '#5E646D', fontSize: 12, fontWeight: '500' },
   emptyJobsLink: { color: '#2563EB', fontSize: 13, fontWeight: '700', marginTop: 6 },
   jobCard: { backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 1.5, paddingHorizontal: 14, paddingTop: 8, paddingBottom: 14 },
   jobCardMainRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
@@ -353,17 +353,17 @@ const styles = StyleSheet.create({
   jobCardBadgeText: { fontSize: 9, fontWeight: '700' },
   jobCardTitle: { color: '#17191D', fontSize: 15, fontWeight: '700' },
   jobCardMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 3 },
-  jobCardMetaText: { color: '#6B7280', fontSize: 12 },
+  jobCardMetaText: { color: '#5E646D', fontSize: 12 },
   jobCardAside: { alignItems: 'flex-end', flexShrink: 0 },
   jobCardPrice: { color: '#17191D', fontSize: 15, fontWeight: '800' },
-  jobCardNum: { color: '#8B9098', fontSize: 11, fontWeight: '600', marginTop: 4 },
+  jobCardNum: { color: '#5E646D', fontSize: 11, fontWeight: '600', marginTop: 4 },
   scheduleNoticeBanner: { flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: '#BFDBFE', borderRadius: 10, padding: 11, marginTop: 12 },
   scheduleNoticeText: { color: '#1D4ED8', fontSize: 12, fontWeight: '600', flex: 1 },
   miniProgressRow: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 8, position: 'relative', paddingTop: 1 },
   miniProgressTrack: { position: 'absolute', left: 25, right: 25, top: 7, height: 1, backgroundColor: '#E1E4E8' },
   miniProgressItem: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 2 },
   miniProgressDot: { width: 17, height: 14, borderRadius: 7, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E1E4E8' },
-  miniProgressText: { color: '#8B9098', fontSize: 7, lineHeight: 9, fontWeight: '600' },
+  miniProgressText: { color: '#5E646D', fontSize: 7, lineHeight: 9, fontWeight: '600' },
   activeJobActionBtn: { flex: 1, height: 30, borderRadius: 8, borderWidth: 1, backgroundColor: '#FFFFFF', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5 },
   activeJobActionText: { fontSize: 11, fontWeight: '700' },
 });

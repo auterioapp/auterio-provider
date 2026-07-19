@@ -58,6 +58,7 @@ export default function CalendarScreen({ visible, onClose, onOpenJob }) {
   const [weekStart, setWeekStart] = useState(() => getMonday(new Date()));
   const [appointments, setAppointments] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [modalVisible, setModalVisible] = useState(visible);
   const slideAnim = useRef(new Animated.Value(Dimensions.get('window').width)).current;
@@ -88,8 +89,9 @@ export default function CalendarScreen({ visible, onClose, onOpenJob }) {
         return ta - tb;
       });
       setAppointments(all);
+      setLoadError(false);
     } catch {
-      // keep existing data
+      setLoadError(true);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -166,6 +168,12 @@ export default function CalendarScreen({ visible, onClose, onOpenJob }) {
             showsVerticalScrollIndicator={false}
             refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadAppointments(true); }} />}
           >
+            {loadError && (
+              <View style={styles.errorBanner}>
+                <Ionicons name="alert-circle-outline" size={16} color="#DC2626" />
+                <Text style={styles.errorBannerText}>Couldn't refresh appointments — showing the last loaded data. Pull down to retry.</Text>
+              </View>
+            )}
             {grouped.map(({ day, items }, i) => {
               const isToday = sameDay(day, today);
               const isPast = day < today && !isToday;
@@ -234,7 +242,7 @@ const styles = StyleSheet.create({
   weekArrow: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   weekLabelWrap: { flex: 1, alignItems: 'center' },
   weekLabel: { color: '#17191D', fontSize: 15, fontWeight: '700' },
-  weekCount: { color: '#6B7280', fontSize: 12, marginTop: 2 },
+  weekCount: { color: '#5E646D', fontSize: 12, marginTop: 2 },
 
   dayStrip: { flexDirection: 'row', backgroundColor: '#FFFFFF', paddingVertical: 10, paddingHorizontal: 8, borderBottomWidth: 1, borderBottomColor: '#ECEEF0' },
   dayStripCell: { flex: 1, alignItems: 'center', gap: 4 },
@@ -249,6 +257,8 @@ const styles = StyleSheet.create({
 
   loadingBox: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   content: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 40 },
+  errorBanner: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, backgroundColor: '#FBEAEA', borderWidth: 1, borderColor: 'rgba(220,38,38,0.2)', borderRadius: 10, padding: 12, marginBottom: 14 },
+  errorBannerText: { flex: 1, color: '#B42318', fontSize: 12.5, lineHeight: 17, fontWeight: '600' },
 
   daySection: { marginBottom: 16 },
   daySectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8, paddingHorizontal: 2 },
@@ -268,7 +278,7 @@ const styles = StyleSheet.create({
   apptSlot: { color: '#9CA3AF', fontSize: 11, marginTop: 2 },
   apptInfo: { flex: 1 },
   apptService: { color: '#17191D', fontSize: 14, fontWeight: '700' },
-  apptCustomer: { color: '#6B7280', fontSize: 12, marginTop: 2 },
+  apptCustomer: { color: '#5E646D', fontSize: 12, marginTop: 2 },
   apptVehicle: { color: '#9CA3AF', fontSize: 11, marginTop: 1 },
   statusBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
   statusText: { fontSize: 11, fontWeight: '700' },

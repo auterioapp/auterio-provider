@@ -28,7 +28,7 @@ export default function WelcomeScreen({ onSignIn, onSignUp }) {
         <View style={styles.bottom}>
           <View style={styles.trustRow}>
             <View style={styles.trustItem}>
-              <Ionicons name="people-outline" size={26} color="#FF6B00" />
+              <Ionicons name="people-outline" size={26} color="#F04416" />
               <Text style={styles.trustTitle}>More Clients</Text>
               <Text style={styles.trustSub}>Reach customers{'\n'}in your area</Text>
             </View>
@@ -77,9 +77,9 @@ const styles = StyleSheet.create({
   logo: { width: 36, height: 36, borderRadius: 8 },
   logoText: { color: '#fff', fontSize: 20, fontWeight: '800' },
   heroContent: { padding: 20, paddingTop: 48, paddingBottom: 40 },
-  heroLabel: { color: '#FF6B00', fontSize: 11, fontWeight: '800', letterSpacing: 1.5, marginBottom: 12 },
+  heroLabel: { color: '#F04416', fontSize: 11, fontWeight: '800', letterSpacing: 1.5, marginBottom: 12 },
   heroTitle: { color: '#fff', fontSize: 36, fontWeight: '800', lineHeight: 42, marginBottom: 2 },
-  heroTitleOrange: { color: '#FF6B00', fontSize: 36, fontWeight: '800', marginBottom: 16 },
+  heroTitleOrange: { color: '#F04416', fontSize: 36, fontWeight: '800', marginBottom: 16 },
   heroSub: { color: 'rgba(255,255,255,0.55)', fontSize: 15, lineHeight: 22 },
   spacer: { flex: 1, minHeight: 40 },
   bottom: { padding: 20, paddingBottom: 48 },
@@ -88,7 +88,7 @@ const styles = StyleSheet.create({
   trustDivider: { width: 1, height: 56, backgroundColor: 'rgba(255,255,255,0.1)' },
   trustTitle: { color: '#fff', fontSize: 11, fontWeight: '700', textAlign: 'center' },
   trustSub: { color: 'rgba(255,255,255,0.45)', fontSize: 10, textAlign: 'center', lineHeight: 14 },
-  createBtn: { backgroundColor: '#FF6B00', borderRadius: 14, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 12 },
+  createBtn: { backgroundColor: '#F04416', borderRadius: 14, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 12 },
   createBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
   signInBtn: { borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.25)', borderRadius: 14, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 20 },
   signInText: { color: '#fff', fontSize: 15, fontWeight: '600' },

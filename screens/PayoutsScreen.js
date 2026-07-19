@@ -124,7 +124,7 @@ export default function PayoutsScreen({ visible, onClose, isDemo }) {
                   {!isDemo && (
                     <TouchableOpacity activeOpacity={0.7} onPress={handleManageDashboard} style={styles.editBtn}>
                       {loading
-                        ? <ActivityIndicator size="small" color="#F97316" />
+                        ? <ActivityIndicator size="small" color="#F04416" />
                         : <Text style={styles.editBtnText}>Edit</Text>
                       }
                     </TouchableOpacity>
@@ -149,8 +149,8 @@ export default function PayoutsScreen({ visible, onClose, isDemo }) {
                 disabled={connecting}
               >
                 {connecting
-                  ? <ActivityIndicator size="small" color="#F97316" />
-                  : <Ionicons name="add-circle-outline" size={17} color="#F97316" />
+                  ? <ActivityIndicator size="small" color="#F04416" />
+                  : <Ionicons name="add-circle-outline" size={17} color="#F04416" />
                 }
                 <Text style={styles.addAccountText}>
                   {connecting ? 'Opening setup...' : bank ? 'Add another account' : 'Add bank account'}
@@ -164,47 +164,39 @@ export default function PayoutsScreen({ visible, onClose, isDemo }) {
             <Text style={styles.sectionLabel}>Transfer speed</Text>
             <View style={styles.card}>
 
-              <TouchableOpacity
-                style={styles.optionRow}
-                activeOpacity={0.84}
-                onPress={() => Alert.alert('Instant Transfer', 'Available once your account is verified.')}
-              >
-                <View style={[styles.optionIcon, { backgroundColor: '#F3EEFF' }]}>
-                  <Ionicons name="flash" size={19} color="#7C3AED" />
+              <View style={[styles.optionRow, styles.optionRowDisabled]}>
+                <View style={[styles.optionIcon, styles.optionIconDisabled]}>
+                  <Ionicons name="flash" size={19} color="#B9BFC8" />
                 </View>
                 <View style={styles.optionInfo}>
                   <View style={styles.optionTitleRow}>
-                    <Text style={styles.optionTitle}>Instant Transfer</Text>
+                    <Text style={[styles.optionTitle, styles.optionTitleDisabled]}>Instant Transfer</Text>
                     <View style={styles.feeChip}>
                       <Text style={styles.feeChipText}>1.5% fee</Text>
                     </View>
                   </View>
                   <Text style={styles.optionSub}>Arrives in minutes</Text>
                 </View>
-                <Ionicons name="chevron-forward" size={18} color="#C8CDD4" />
-              </TouchableOpacity>
+                <Text style={styles.comingSoonTag}>Coming soon</Text>
+              </View>
 
               <View style={styles.rowDivider} />
 
-              <TouchableOpacity
-                style={styles.optionRow}
-                activeOpacity={0.84}
-                onPress={() => Alert.alert('Standard Transfer', 'Available once your account is verified.')}
-              >
-                <View style={[styles.optionIcon, { backgroundColor: '#EFF6FF' }]}>
-                  <Ionicons name="calendar-outline" size={19} color="#2563EB" />
+              <View style={[styles.optionRow, styles.optionRowDisabled]}>
+                <View style={[styles.optionIcon, styles.optionIconDisabled]}>
+                  <Ionicons name="calendar-outline" size={19} color="#B9BFC8" />
                 </View>
                 <View style={styles.optionInfo}>
                   <View style={styles.optionTitleRow}>
-                    <Text style={styles.optionTitle}>Standard Transfer</Text>
+                    <Text style={[styles.optionTitle, styles.optionTitleDisabled]}>Standard Transfer</Text>
                     <View style={styles.freeChip}>
                       <Text style={styles.freeChipText}>Free</Text>
                     </View>
                   </View>
                   <Text style={styles.optionSub}>1–3 business days</Text>
                 </View>
-                <Ionicons name="chevron-forward" size={18} color="#C8CDD4" />
-              </TouchableOpacity>
+                <Text style={styles.comingSoonTag}>Coming soon</Text>
+              </View>
 
             </View>
           </View>
@@ -249,7 +241,7 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: 16, paddingBottom: 48, gap: 24 },
 
   section: { gap: 10 },
-  sectionLabel: { color: '#6B7280', fontSize: 12, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.6, marginLeft: 2 },
+  sectionLabel: { color: '#5E646D', fontSize: 12, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.6, marginLeft: 2 },
 
   accountCard: {
     flexDirection: 'row', alignItems: 'center', gap: 14,
@@ -262,12 +254,12 @@ const styles = StyleSheet.create({
   },
   accountInfo: { flex: 1 },
   accountName: { color: '#17191D', fontSize: 15, fontWeight: '700', marginBottom: 3 },
-  accountNumber: { color: '#6B7280', fontSize: 13, fontWeight: '500', letterSpacing: 1 },
+  accountNumber: { color: '#5E646D', fontSize: 13, fontWeight: '500', letterSpacing: 1 },
   accountRight: { alignItems: 'flex-end', gap: 8 },
   defaultBadge: { backgroundColor: '#ECFDF5', borderRadius: 6, paddingHorizontal: 8, paddingVertical: 3 },
   defaultBadgeText: { color: '#16A34A', fontSize: 11, fontWeight: '700' },
   editBtn: { paddingVertical: 2, minWidth: 28, alignItems: 'center' },
-  editBtnText: { color: '#F97316', fontSize: 13, fontWeight: '700' },
+  editBtnText: { color: '#F04416', fontSize: 13, fontWeight: '700' },
 
   emptyAccountCard: {
     backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 1, borderColor: '#ECEEF0',
@@ -286,7 +278,7 @@ const styles = StyleSheet.create({
     paddingVertical: 13,
   },
   addAccountBtnDisabled: { opacity: 0.6 },
-  addAccountText: { color: '#F97316', fontSize: 14, fontWeight: '600' },
+  addAccountText: { color: '#F04416', fontSize: 14, fontWeight: '600' },
 
   card: { backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 1, borderColor: '#ECEEF0', overflow: 'hidden' },
   optionRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 16, gap: 14 },
@@ -298,8 +290,12 @@ const styles = StyleSheet.create({
   feeChipText: { color: '#D97706', fontSize: 11, fontWeight: '700' },
   freeChip: { backgroundColor: '#ECFDF5', borderRadius: 6, paddingHorizontal: 7, paddingVertical: 2 },
   freeChipText: { color: '#16A34A', fontSize: 11, fontWeight: '700' },
-  optionSub: { color: '#6B7280', fontSize: 13, fontWeight: '500' },
+  optionSub: { color: '#5E646D', fontSize: 13, fontWeight: '500' },
   rowDivider: { height: 1, backgroundColor: '#F0F1F3', marginHorizontal: 16 },
+  optionRowDisabled: { opacity: 0.55 },
+  optionIconDisabled: { backgroundColor: '#F3F4F5' },
+  optionTitleDisabled: { color: '#5E646D' },
+  comingSoonTag: { color: '#9CA3AF', fontSize: 11, fontWeight: '700' },
 
   warningCard: {
     flexDirection: 'row', alignItems: 'flex-start', gap: 12,
@@ -308,7 +304,7 @@ const styles = StyleSheet.create({
   },
   warningInfo: { flex: 1 },
   warningTitle: { color: '#92400E', fontSize: 14, fontWeight: '700', marginBottom: 3 },
-  warningSub: { color: '#6B7280', fontSize: 13, lineHeight: 18 },
+  warningSub: { color: '#5E646D', fontSize: 13, lineHeight: 18 },
 
   securityCard: {
     flexDirection: 'row', alignItems: 'center', gap: 14,
@@ -321,5 +317,5 @@ const styles = StyleSheet.create({
   },
   securityInfo: { flex: 1 },
   securityTitle: { color: '#1D4ED8', fontSize: 14, fontWeight: '700', marginBottom: 3 },
-  securitySub: { color: '#6B7280', fontSize: 13, lineHeight: 18 },
+  securitySub: { color: '#5E646D', fontSize: 13, lineHeight: 18 },
 });

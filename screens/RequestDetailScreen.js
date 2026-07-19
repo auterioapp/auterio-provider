@@ -254,7 +254,7 @@ export function RequestInfoRow({ icon, color, label, value, chevron, onPress, va
       </View>
       <Text style={[styles.requestInfoLabel, labelStyle]}>{label}</Text>
       <Text style={[styles.requestInfoValue, valueStyle]} numberOfLines={2}>{value}</Text>
-      {chevron && <Ionicons style={styles.requestInfoChevron} name="chevron-forward" size={16} color="#8B9098" />}
+      {chevron && <Ionicons style={styles.requestInfoChevron} name="chevron-forward" size={16} color="#5E646D" />}
     </RowComponent>
   );
 }

@@ -98,14 +98,14 @@ const styles = StyleSheet.create({
   backBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', marginBottom: 24 },
 
   titleWrap: { marginBottom: 28 },
-  progressLabel: { color: '#FF6B00', fontSize: 11, fontWeight: '800', letterSpacing: 1.2, marginBottom: 10 },
+  progressLabel: { color: '#F04416', fontSize: 11, fontWeight: '800', letterSpacing: 1.2, marginBottom: 10 },
   title: { fontSize: 26, fontWeight: '800', color: '#111827', marginBottom: 8 },
-  subtitle: { fontSize: 14, color: '#6B7280', lineHeight: 20 },
+  subtitle: { fontSize: 14, color: '#5E646D', lineHeight: 20 },
 
   toggle: { flexDirection: 'row', backgroundColor: '#F3F4F5', borderRadius: 12, padding: 4, marginBottom: 24, borderWidth: 1, borderColor: '#E5E7EB' },
   toggleBtn: { flex: 1, paddingVertical: 11, alignItems: 'center', borderRadius: 9 },
   toggleBtnActive: { backgroundColor: '#111827', shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 4, shadowOffset: { width: 0, height: 2 }, elevation: 3 },
-  toggleText: { fontSize: 14, fontWeight: '700', color: '#6B7280' },
+  toggleText: { fontSize: 14, fontWeight: '700', color: '#5E646D' },
   toggleTextActive: { color: '#fff' },
 
   fieldWrap: { marginBottom: 16 },
@@ -114,7 +114,7 @@ const styles = StyleSheet.create({
 
   spacer: { flex: 1, minHeight: 32 },
 
-  btn: { backgroundColor: '#FF6B00', borderRadius: 14, paddingVertical: 17, alignItems: 'center' },
+  btn: { backgroundColor: '#F04416', borderRadius: 14, paddingVertical: 17, alignItems: 'center' },
   btnDisabled: { opacity: 0.4 },
   btnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
 });

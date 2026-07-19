@@ -289,23 +289,23 @@ const styles = StyleSheet.create({
   backBtn: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center', marginBottom: 24 },
 
   titleWrap: { marginBottom: 28 },
-  progressLabel: { color: '#FF6B00', fontSize: 11, fontWeight: '800', letterSpacing: 1.2, marginBottom: 10 },
+  progressLabel: { color: '#F04416', fontSize: 11, fontWeight: '800', letterSpacing: 1.2, marginBottom: 10 },
   title: { fontSize: 28, fontWeight: '800', color: '#111827', marginBottom: 10, lineHeight: 34 },
-  subtitle: { fontSize: 15, color: '#6B7280', lineHeight: 22 },
+  subtitle: { fontSize: 15, color: '#5E646D', lineHeight: 22 },
 
   input: { backgroundColor: '#fff', borderRadius: 14, padding: 16, fontSize: 15, color: '#111827', marginBottom: 12, borderWidth: 1.5, borderColor: '#E5E7EB' },
 
   passwordWrap: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', borderRadius: 14, borderWidth: 1.5, borderColor: '#E5E7EB', marginBottom: 20, paddingRight: 12 },
   passwordInput: { flex: 1, padding: 16, fontSize: 15, color: '#111827' },
-  passwordHint: { color: '#8B9098', fontSize: 12, marginTop: -12, marginBottom: 18, marginLeft: 2 },
+  passwordHint: { color: '#5E646D', fontSize: 12, marginTop: -12, marginBottom: 18, marginLeft: 2 },
   eyeBtn: { padding: 4 },
 
-  btn: { backgroundColor: '#FF6B00', borderRadius: 14, paddingVertical: 17, alignItems: 'center', marginBottom: 20 },
+  btn: { backgroundColor: '#F04416', borderRadius: 14, paddingVertical: 17, alignItems: 'center', marginBottom: 20 },
   btnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
 
   switchWrap: { alignItems: 'center', marginBottom: 24 },
-  switchText: { fontSize: 14, color: '#6B7280' },
-  switchLink: { color: '#FF6B00', fontWeight: '700', fontSize: 14 },
+  switchText: { fontSize: 14, color: '#5E646D' },
+  switchLink: { color: '#F04416', fontWeight: '700', fontSize: 14 },
 
   errorText: { color: '#DC2626', fontSize: 13, marginBottom: 12 },
   devHint: { color: '#2563EB', fontSize: 12, marginBottom: 12 },

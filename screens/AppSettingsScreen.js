@@ -150,7 +150,7 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 14 },
   rowBorder: { borderTopWidth: 1, borderTopColor: '#F0F1F3' },
   rowLabel: { color: '#17191D', fontSize: 15, fontWeight: '600' },
-  rowSublabel: { color: '#6B7280', fontSize: 12, marginTop: 2 },
+  rowSublabel: { color: '#5E646D', fontSize: 12, marginTop: 2 },
   selectRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  selectValue: { color: '#6B7280', fontSize: 14, fontWeight: '500' },
+  selectValue: { color: '#5E646D', fontSize: 14, fontWeight: '500' },
 });

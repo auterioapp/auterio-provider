@@ -94,6 +94,7 @@ export default function EarningsScreen({ refreshControl, scrollSignal, isDemo = 
   const [period, setPeriod] = useState('This Week');
   const [showPeriodDrop, setShowPeriodDrop] = useState(false);
 
+  const lifetimeEarned = completedOrders.reduce((acc, o) => acc + Number(o.payment?.total || o.payment?.totalHeld || o.payment?.priceMax || 0), 0);
   const activeData = isDemo ? CHART_DATA : buildRealData(completedOrders);
   const chartData = activeData[period] || activeData['This Week'];
 
@@ -223,11 +224,11 @@ export default function EarningsScreen({ refreshControl, scrollSignal, isDemo = 
       <View style={styles.balanceCard}>
         <View style={styles.balanceTextBlock}>
           <View style={styles.balanceTitleRow}>
-            <Text style={styles.balanceLabel}>Available Balance</Text>
-            <Ionicons name="information-circle-outline" size={14} color="#8B9098" />
+            <Text style={styles.balanceLabel}>Total Earned</Text>
+            <Ionicons name="information-circle-outline" size={14} color="#5E646D" />
           </View>
-          <Text style={styles.balanceAmount}>{isDemo ? '$2,180.00' : '$0.00'}</Text>
-          <Text style={styles.balanceMeta}>{isDemo ? 'Will be paid out on Jun 25' : 'No payouts scheduled'}</Text>
+          <Text style={styles.balanceAmount}>{isDemo ? '$2,180.00' : formatCurrency(lifetimeEarned)}</Text>
+          <Text style={styles.balanceMeta}>{isDemo ? 'Will be paid out on Jun 25' : (lifetimeEarned > 0 ? 'From all completed jobs' : 'No completed jobs yet')}</Text>
         </View>
         <View style={styles.balanceActionBlock}>
           <TouchableOpacity style={styles.withdrawBtn} activeOpacity={0.86} onPress={() => setPayoutsOpen(true)}>
@@ -252,7 +253,7 @@ export default function EarningsScreen({ refreshControl, scrollSignal, isDemo = 
       </EarningsListSection>
 
     </ScrollView>
-      <EarningsPayoutScreen visible={payoutsOpen} onClose={() => setPayoutsOpen(false)} isDemo={isDemo} />
+      <EarningsPayoutScreen visible={payoutsOpen} onClose={() => setPayoutsOpen(false)} isDemo={isDemo} completedOrders={completedOrders} />
       <RevenueBreakdownScreen visible={revenueOpen} onClose={() => setRevenueOpen(false)} isDemo={isDemo} />
     </View>
   );
@@ -298,7 +299,7 @@ function EarningsTransaction({ icon, title, meta, amount }) {
         <Text style={styles.earningsTransactionMeta}>{meta}</Text>
       </View>
       <Text style={styles.earningsTransactionAmount}>{amount}</Text>
-      <Ionicons name="chevron-forward" size={16} color="#8B9098" />
+      <Ionicons name="chevron-forward" size={16} color="#5E646D" />
     </TouchableOpacity>
   );
 }
@@ -314,7 +315,7 @@ function PayoutRow({ date, meta, amount }) {
         <Text style={styles.earningsTransactionMeta}>{meta}</Text>
       </View>
       <Text style={styles.earningsTransactionAmount}>{amount}</Text>
-      <Ionicons name="chevron-forward" size={16} color="#8B9098" />
+      <Ionicons name="chevron-forward" size={16} color="#5E646D" />
     </TouchableOpacity>
   );
 }
@@ -324,7 +325,7 @@ const styles = StyleSheet.create({
   flex1: { flex: 1 },
   earningsContent: { paddingHorizontal: 15, paddingTop: 18, paddingBottom: 112, backgroundColor: '#FFFFFF' },
   emptyTransactions: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 16, paddingHorizontal: 4 },
-  emptyTransactionsText: { color: '#8B9098', fontSize: 13, fontWeight: '500' },
+  emptyTransactionsText: { color: '#5E646D', fontSize: 13, fontWeight: '500' },
   earningsHeader: { minHeight: 42, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, marginBottom: 14 },
   earningsTitle: { color: '#17191D', fontSize: 27, lineHeight: 32, fontWeight: '700' },
   earningsChartWrapper: { position: 'relative', zIndex: 20, marginBottom: 8 },
@@ -333,7 +334,7 @@ const styles = StyleSheet.create({
   chartPeriodOption: { paddingHorizontal: 16, paddingVertical: 12 },
   chartPeriodOptionActive: { backgroundColor: '#FFF3E8' },
   chartPeriodOptionText: { color: '#374151', fontSize: 14, fontWeight: '500' },
-  chartPeriodOptionTextActive: { color: '#F97316', fontWeight: '700' },
+  chartPeriodOptionTextActive: { color: '#F04416', fontWeight: '700' },
   earningsChartTop: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, marginBottom: 3 },
   earningsChartLabel: { color: '#5E646D', fontSize: 12, lineHeight: 15, fontWeight: '700' },
   earningsChartValue: { color: '#17191D', fontSize: 21, lineHeight: 25, fontWeight: '800', marginTop: 0 },
