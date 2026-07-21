@@ -49,6 +49,7 @@ export function ProviderContextProvider({ children }) {
         name,
         initials: (company || name || 'P').slice(0, 2).toUpperCase(),
         phone: user.phone || prev.phone,
+        commissionRate: user.commissionRate ?? prev.commissionRate,
       };
     });
   }, []);

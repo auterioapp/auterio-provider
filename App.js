@@ -30,7 +30,7 @@ import { getJobProgressIndex } from './utils/jobUtils';
 import { API_URL, ACCEPT_BLUE, TAB_BAR_PADDING, TAB_INDICATOR_EXTRA_WIDTH, TAB_INDICATOR_DROP_SCALE, TABS, JOB_STEPS, ACTIVE_SHOP_STATUSES } from './constants';
 
 import { formatMoney, getServiceMeta, getServiceTitle, getOrderServiceType, getServiceFlowSchema, getDiagnosisSchema, getProviderIntakeItems, isTowingService, getDropoffAddress, getRequestLocation, getRequestDistance, getVehicleVin, normalizeComplaintItem, getCustomerComplaintItems, getAcceptedAtLabel, getVehicleDisplayParts, hasKnownVin, getBackendStatusFromWorkflowStage, stripCountryFromAddress, getArrivedAtLabel } from './utils/serviceUtils';
-import { getRecommendedServicesFromDiagnosis, getDemoEstimate, getEstimateCatalog, getEstimatePriceCheck, sumAmounts, formatCurrency } from './utils/estimateUtils';
+import { getRecommendedServicesFromDiagnosis, getDemoEstimate, getEstimateCatalog, getEstimatePriceCheck, sumAmounts, formatCurrency, getInvoiceData } from './utils/estimateUtils';
 import { loadPricing, savePricing, DEFAULT_PRICING } from './utils/pricingStore';
 import { setAuthFailureHandler as setApiAuthFailureHandler } from './apiClient';
 import { ProviderContextProvider, useProvider } from './ProviderContext';
@@ -112,7 +112,7 @@ function normalizeOrderToJob(order) {
   // orderContext on the backend but are read as top-level job fields in the provider
   // UI — same fallback pattern as shopStatus, otherwise they vanish on every poll.
   const approvedTotal = order.approvedTotal ?? order.orderContext?.approvedTotal ?? null;
-  const approveOptional = order.approveOptional ?? order.orderContext?.approveOptional ?? false;
+  const approveOptional = order.approveOptional ?? order.orderContext?.approveOptional ?? null;
   const estimateApprovedAt = order.estimateApprovedAt || order.orderContext?.estimateApprovedAt || null;
   const additionalApprovals = order.additionalApprovals || order.orderContext?.additionalApprovals || [];
 
@@ -1510,6 +1510,7 @@ function pulseTabChange() {
 }
 
 function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel, refreshControl, providerLiveCoord }) {
+  const serviceMeta = getServiceMeta(job);
   const [noteOpen, setNoteOpen] = useState(false);
   const [routeOpen, setRouteOpen] = useState(workflow.stage === 'route');
 
@@ -2587,7 +2588,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
     const pendingRequiredChanges = additionalApprovals.filter(item => item.status === 'pending');
     const canSubmitCompletion = pendingRequiredChanges.length === 0;
     const {
-      invoiceEstimate, invoiceNumber, paymentMethod, invoiceTax, invoiceSubtotal, finalTotal, approvedRequiredChanges,
+      invoiceEstimate, invoiceNumber, paymentMethod, invoiceTax, invoiceSubtotal, finalTotal, approvedRequiredChanges, approveOptional: invoiceApproveOptional,
     } = getInvoiceData(job, workflow, additionalApprovals, estimate);
 
     const submitCompletion = async () => {
@@ -2727,6 +2728,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
           finalTotal={finalTotal}
           paymentMethod={paymentMethod}
           approvedRequiredChanges={approvedRequiredChanges}
+          approveOptional={invoiceApproveOptional}
         />
       </View>
     );
@@ -2957,7 +2959,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
             <View style={styles.vehicleMetaBox}>
               <View style={styles.requestSpecRow}>
                 <Text style={styles.requestSpecLabel}>Service Type</Text>
-                <Text style={styles.requestSpecValue} numberOfLines={1}>{job.service?.type || 'Service'}</Text>
+                <Text style={styles.requestSpecValue} numberOfLines={1}>{serviceMeta.title}</Text>
               </View>
             </View>
           </View>
@@ -3203,7 +3205,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
   const {
     invoiceEstimate: completedInvoiceEstimate, invoiceNumber: completedInvoiceNumber, paymentMethod: completedPaymentMethod,
     invoiceTax: completedInvoiceTax, invoiceSubtotal: completedInvoiceSubtotal, finalTotal: completedFinalTotal,
-    approvedRequiredChanges: completedApprovedRequiredChanges,
+    approvedRequiredChanges: completedApprovedRequiredChanges, approveOptional: completedApproveOptional,
   } = getInvoiceData(job, workflow, additionalApprovals);
 
   if (isCompleted) {
@@ -3292,8 +3294,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
             <Text style={styles.detailPriceValue}>{formatCurrency(completedFinalTotal)}</Text>
             <View style={styles.detailPaymentRow}>
               <View style={styles.detailPaymentLeft}>
-                <View style={styles.detailVisaBadge}><Text style={styles.detailVisaText}>VISA</Text></View>
-                <Text style={styles.detailPaymentMethod}>•••• 4821</Text>
+                <Text style={styles.detailPaymentMethod}>{completedPaymentMethod}</Text>
               </View>
               <TouchableOpacity style={styles.detailInvoiceLink} onPress={() => setCompletedInvoicePreviewOpen(true)}>
                 <Ionicons name="document-text-outline" size={14} color="#F04416" />
@@ -3448,120 +3449,20 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
         </Modal>
 
         {/* Invoice overlay */}
-        <Modal visible={completedInvoicePreviewOpen} animationType="slide" onRequestClose={() => setCompletedInvoicePreviewOpen(false)}>
-          <View style={styles.detailScreen}>
-            <View style={styles.detailNavBar}>
-              <TouchableOpacity style={styles.detailBackBtn} onPress={() => setCompletedInvoicePreviewOpen(false)} activeOpacity={0.8}>
-                <Ionicons name="chevron-back" size={22} color="#17191D" />
-              </TouchableOpacity>
-              <Text style={styles.detailNavTitle}>Invoice</Text>
-              <View style={{ width: 40 }} />
-            </View>
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 16, paddingBottom: 40 }}>
-
-              {/* Invoice header */}
-              <View style={styles.invHeaderCard}>
-                <View style={styles.invHeaderTop}>
-                  <View style={styles.invIconWrap}>
-                    <Ionicons name="document-text-outline" size={18} color="#7C3AED" />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.invTitle}>Invoice</Text>
-                    <Text style={styles.invMeta}>{completedInvoiceNumber}  ·  {completedDate ? dateLabel(completedDate) : ''}</Text>
-                  </View>
-                  <View style={styles.invPaidBadge}>
-                    <Ionicons name="checkmark-circle" size={12} color="#16A34A" />
-                    <Text style={styles.invPaidText}>PAID</Text>
-                  </View>
-                </View>
-              </View>
-
-              {/* Parties */}
-              <View style={styles.invPartyCard}>
-                <View style={styles.invPartyRow}>
-                  <Text style={styles.invPartyLabel}>FROM</Text>
-                  <Text style={styles.invPartyName}>Auterio Provider</Text>
-                  <Text style={styles.invPartySub}>+1 (555) 123-4567</Text>
-                </View>
-                <View style={styles.invDivider} />
-                <View style={styles.invPartyRow}>
-                  <Text style={styles.invPartyLabel}>SERVICE</Text>
-                  <Text style={styles.invPartyName}>{job.service?.issueName || job.service?.type || 'Service'}</Text>
-                  <Text style={styles.invPartySub}>{address}</Text>
-                </View>
-              </View>
-
-              {/* Labor */}
-              {completedInvoiceEstimate.labor.length > 0 && (
-                <View style={styles.invSection}>
-                  <Text style={styles.invSectionLabel}>LABOR</Text>
-                  {completedInvoiceEstimate.labor.map((item, i) => (
-                    <View key={item.id || i} style={[styles.invLineRow, i > 0 && styles.invLineBorder]}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.invLineName}>{item.label}</Text>
-                        {!!item.hours && <Text style={styles.invLineSub}>{item.hours}</Text>}
-                      </View>
-                      <Text style={styles.invLineAmt}>{formatCurrency(item.amount)}</Text>
-                    </View>
-                  ))}
-                </View>
-              )}
-
-              {/* Parts */}
-              {completedInvoiceEstimate.parts.length > 0 && (
-                <View style={styles.invSection}>
-                  <Text style={styles.invSectionLabel}>PARTS & MATERIALS</Text>
-                  {completedInvoiceEstimate.parts.map((item, i) => (
-                    <View key={item.id || i} style={[styles.invLineRow, i > 0 && styles.invLineBorder]}>
-                      <Text style={[styles.invLineName, { flex: 1 }]}>{item.label}</Text>
-                      <Text style={styles.invLineAmt}>{formatCurrency(item.amount)}</Text>
-                    </View>
-                  ))}
-                </View>
-              )}
-
-              {/* Fees */}
-              {completedInvoiceEstimate.fees.length > 0 && (
-                <View style={styles.invSection}>
-                  <Text style={styles.invSectionLabel}>FEES</Text>
-                  {completedInvoiceEstimate.fees.map((item, i) => (
-                    <View key={i} style={[styles.invLineRow, i > 0 && styles.invLineBorder]}>
-                      <Text style={[styles.invLineName, { flex: 1 }]}>{item.label}</Text>
-                      <Text style={styles.invLineAmt}>{formatCurrency(item.amount)}</Text>
-                    </View>
-                  ))}
-                </View>
-              )}
-
-              {/* Totals */}
-              <View style={styles.invTotalsCard}>
-                <View style={styles.invTotalRow}>
-                  <Text style={styles.invTotalLabel}>Subtotal</Text>
-                  <Text style={styles.invTotalValue}>{formatCurrency(completedInvoiceSubtotal)}</Text>
-                </View>
-                <View style={[styles.invTotalRow, styles.invLineBorder]}>
-                  <Text style={styles.invTotalLabel}>Tax (6.75%)</Text>
-                  <Text style={styles.invTotalValue}>{formatCurrency(completedInvoiceTax)}</Text>
-                </View>
-                <View style={[styles.invTotalRow, styles.invLineBorder]}>
-                  <Text style={styles.invTotalBold}>Total</Text>
-                  <Text style={styles.invTotalBoldValue}>{formatCurrency(completedFinalTotal)}</Text>
-                </View>
-              </View>
-
-              {/* Payment + Warranty */}
-              <View style={styles.invFooterRow}>
-                <Ionicons name="card-outline" size={14} color="#5E646D" />
-                <Text style={styles.invFooterText}>Payment method: <Text style={{ color: '#17191D', fontWeight: '700' }}>Visa •••• 4821</Text></Text>
-              </View>
-              <View style={styles.invWarrantyRow}>
-                <Ionicons name="shield-checkmark-outline" size={14} color="#16A34A" />
-                <Text style={styles.invWarrantyText}>90-day / 4,000-mile warranty on parts and labor</Text>
-              </View>
-
-            </ScrollView>
-          </View>
-        </Modal>
+        <InvoicePreviewModal
+          visible={completedInvoicePreviewOpen}
+          onClose={() => setCompletedInvoicePreviewOpen(false)}
+          job={job}
+          vin={vin}
+          invoiceEstimate={completedInvoiceEstimate}
+          invoiceNumber={completedInvoiceNumber}
+          invoiceSubtotal={completedInvoiceSubtotal}
+          invoiceTax={completedInvoiceTax}
+          finalTotal={completedFinalTotal}
+          paymentMethod={completedPaymentMethod}
+          approvedRequiredChanges={completedApprovedRequiredChanges}
+          approveOptional={completedApproveOptional}
+        />
 
         {/* Customer Profile overlay */}
         <Modal visible={customerProfileOpen} transparent animationType="none" onRequestClose={closeCustomerProfile} onShow={() => {
@@ -3753,7 +3654,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
           <View style={styles.vehicleMetaBox}>
             <View style={styles.requestSpecRow}>
               <Text style={styles.requestSpecLabel}>Service Type</Text>
-              <Text style={styles.requestSpecValue} numberOfLines={1}>{job.service?.type || 'Service'}</Text>
+              <Text style={styles.requestSpecValue} numberOfLines={1}>{serviceMeta.title}</Text>
             </View>
           </View>
         </View>
@@ -3916,6 +3817,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
         finalTotal={completedFinalTotal}
         paymentMethod={completedPaymentMethod}
         approvedRequiredChanges={completedApprovedRequiredChanges}
+        approveOptional={completedApproveOptional}
       />
     </View>
   );
@@ -4098,28 +4000,16 @@ function CustomerPreviewLine({ label, hours, amount, strong, total }) {
   );
 }
 
-// Shared by the Complete Job screen's preview and the already-completed job's
-// summary card, so both invoice views compute totals the same way.
-function getInvoiceData(job, workflow, additionalApprovals, fallbackEstimate) {
-  const persistedEstimate = job.orderContext?.estimate || null;
-  const invoiceEstimate = persistedEstimate ? {
-    ...persistedEstimate,
-    labor: persistedEstimate.laborItems || [],
-    parts: persistedEstimate.partsItems || [],
-    fees: persistedEstimate.fees || [],
-  } : (fallbackEstimate || { labor: [], parts: [], fees: [], subtotal: 0, tax: 0, total: 0 });
-  const originalTotal = job.approvedTotal ?? workflow?.approvedTotal ?? invoiceEstimate.total ?? 0;
-  const approvedRequiredChanges = (additionalApprovals || []).filter(item => item.status === 'approved');
-  const approvedAdditionalTotal = sumAmounts(approvedRequiredChanges);
-  const finalTotal = originalTotal + approvedAdditionalTotal;
-  const invoiceNumber = `INV-${job.number || '00000'}`;
-  const paymentMethod = job.payment?.method ? `${job.payment.method} ••••${job.payment.last4 || '****'}` : 'Card on file';
-  const invoiceTax = Math.round(((invoiceEstimate.tax || 0) + approvedAdditionalTotal * 0.0675) * 100) / 100;
-  const invoiceSubtotal = (invoiceEstimate.subtotal || 0) + approvedAdditionalTotal - (invoiceEstimate.tax || 0);
-  return { invoiceEstimate, invoiceNumber, paymentMethod, invoiceTax, invoiceSubtotal, finalTotal, approvedRequiredChanges };
+
+function formatPhone(raw) {
+  const digits = String(raw || '').replace(/\D/g, '');
+  const d = digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits;
+  if (d.length !== 10) return raw || '';
+  return `+1 (${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}`;
 }
 
-function InvoicePreviewModal({ visible, onClose, job, vin, invoiceEstimate, invoiceNumber, invoiceSubtotal, invoiceTax, finalTotal, paymentMethod, approvedRequiredChanges }) {
+function InvoicePreviewModal({ visible, onClose, job, vin, invoiceEstimate, invoiceNumber, invoiceSubtotal, invoiceTax, finalTotal, paymentMethod, approvedRequiredChanges, approveOptional }) {
+  const { provider } = useProvider();
   const vehicleDisplayParts = getVehicleDisplayParts(job);
   const hasVin = hasKnownVin(job);
   return (
@@ -4140,11 +4030,26 @@ function InvoicePreviewModal({ visible, onClose, job, vin, invoiceEstimate, invo
             </TouchableOpacity>
           </View>
           <ScrollView style={styles.customerEstimateScroll} contentContainerStyle={styles.customerEstimateContent} showsVerticalScrollIndicator={false}>
+            <View style={styles.invHeaderCard}>
+              <View style={styles.invHeaderTop}>
+                <View style={styles.invIconWrap}>
+                  <Ionicons name="document-text-outline" size={18} color="#7C3AED" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.invTitle}>Invoice</Text>
+                  <Text style={styles.invMeta}>{invoiceNumber}{job.completedAt && !isNaN(new Date(job.completedAt).getTime()) ? `  ·  ${new Date(job.completedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}` : ''}</Text>
+                </View>
+                <View style={styles.invPaidBadge}>
+                  <Ionicons name="checkmark-circle" size={12} color="#16A34A" />
+                  <Text style={styles.invPaidText}>PAID</Text>
+                </View>
+              </View>
+            </View>
             <View style={styles.invoicePartyCard}>
               <View style={styles.invoicePartyRow}>
                 <Text style={styles.invoicePartyLabel}>FROM</Text>
-                <Text style={styles.invoicePartyName}>Auterio Provider</Text>
-                <Text style={styles.invoicePartySub}>+1 (555) 123-4567</Text>
+                <Text style={styles.invoicePartyName}>{provider?.company || 'Provider'}</Text>
+                <Text style={styles.invoicePartySub}>{formatPhone(provider?.phone)}</Text>
               </View>
               <View style={styles.invoiceDivider} />
               <View style={styles.invoicePartyRow}>
@@ -4152,6 +4057,12 @@ function InvoicePreviewModal({ visible, onClose, job, vin, invoiceEstimate, invo
                 <Text style={styles.invoicePartyName}>{job.customer?.name || 'Customer'}</Text>
                 <Text style={styles.invoicePartySub}>{vehicleDisplayParts.main}{!!vehicleDisplayParts.suffix && <Text style={styles.serviceTypeSuffix}>{vehicleDisplayParts.suffix}</Text>}</Text>
                 {hasVin && <Text style={styles.invoicePartySub}>VIN: {vin}</Text>}
+              </View>
+              <View style={styles.invoiceDivider} />
+              <View style={styles.invoicePartyRow}>
+                <Text style={styles.invoicePartyLabel}>SERVICE</Text>
+                <Text style={styles.invoicePartyName}>{job.service?.issueName || job.service?.type || 'Service'}</Text>
+                <Text style={styles.invoicePartySub}>{job.pickup?.address || 'Service location'}</Text>
               </View>
             </View>
 
@@ -4187,6 +4098,33 @@ function InvoicePreviewModal({ visible, onClose, job, vin, invoiceEstimate, invo
                 <Text style={styles.invoiceSectionLabel}>FEES</Text>
                 {invoiceEstimate.fees.map((item, i) => (
                   <View key={i} style={[styles.invoiceLineRow, i > 0 && styles.invoiceLineRowBorder]}>
+                    <Text style={[styles.invoiceLineName, { flex: 1 }]}>{item.label}</Text>
+                    <Text style={styles.invoiceLineAmount}>{formatCurrency(item.amount)}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {approveOptional && invoiceEstimate.optionalLabor?.length > 0 && (
+              <View style={styles.invoiceSection}>
+                <Text style={styles.invoiceSectionLabel}>RECOMMENDED LABOR</Text>
+                {invoiceEstimate.optionalLabor.map((item, i) => (
+                  <View key={item.id || i} style={[styles.invoiceLineRow, i > 0 && styles.invoiceLineRowBorder]}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.invoiceLineName}>{item.label}</Text>
+                      {!!item.hours && <Text style={styles.invoiceLineSub}>{item.hours}</Text>}
+                    </View>
+                    <Text style={styles.invoiceLineAmount}>{formatCurrency(item.amount)}</Text>
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {approveOptional && invoiceEstimate.optionalParts?.length > 0 && (
+              <View style={styles.invoiceSection}>
+                <Text style={styles.invoiceSectionLabel}>RECOMMENDED PARTS</Text>
+                {invoiceEstimate.optionalParts.map((item, i) => (
+                  <View key={item.id || i} style={[styles.invoiceLineRow, i > 0 && styles.invoiceLineRowBorder]}>
                     <Text style={[styles.invoiceLineName, { flex: 1 }]}>{item.label}</Text>
                     <Text style={styles.invoiceLineAmount}>{formatCurrency(item.amount)}</Text>
                   </View>

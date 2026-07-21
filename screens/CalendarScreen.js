@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, Dimensions, Modal, RefreshControl, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Animated, Dimensions, Modal, RefreshControl, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { authorizedFetch } from '../apiClient';
 import { API_URL } from '../constants';
 import { useProvider } from '../ProviderContext';
+import { loadPricing, savePricing } from '../utils/pricingStore';
 
 const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const DAY_FULL  = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -53,7 +54,7 @@ function getApptMeta(job) {
   return { label: 'Pending', color: '#F59E0B', bg: '#FFFBEB' };
 }
 
-export default function CalendarScreen({ visible, onClose, onOpenJob }) {
+export default function CalendarScreen({ visible, onClose, onOpenJob, providerType }) {
   const { provider } = useProvider();
   const [weekStart, setWeekStart] = useState(() => getMonday(new Date()));
   const [appointments, setAppointments] = useState([]);
@@ -61,11 +62,21 @@ export default function CalendarScreen({ visible, onClose, onOpenJob }) {
   const [loadError, setLoadError] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [modalVisible, setModalVisible] = useState(visible);
+  const [allowScheduling, setAllowScheduling] = useState(false);
   const slideAnim = useRef(new Animated.Value(Dimensions.get('window').width)).current;
 
   useEffect(() => {
-    if (visible) loadAppointments();
+    if (visible) {
+      loadAppointments();
+      loadPricing().then(p => setAllowScheduling(p.allowScheduling ?? false));
+    }
   }, [visible]);
+
+  const changeAllowScheduling = async (val) => {
+    setAllowScheduling(val);
+    const current = await loadPricing();
+    await savePricing({ ...current, allowScheduling: val });
+  };
 
   useEffect(() => {
     if (visible) {
@@ -127,6 +138,14 @@ export default function CalendarScreen({ visible, onClose, onOpenJob }) {
           </TouchableOpacity>
         </View>
 
+        {providerType === 'mobile' ? (
+          <View style={styles.unavailableBox}>
+            <Ionicons name="calendar-outline" size={32} color="#C8CDD4" />
+            <Text style={styles.unavailableTitle}>Scheduling isn't available for Mobile providers</Text>
+            <Text style={styles.unavailableText}>Mobile jobs are handled on-demand. Switch to Shop or Mobile + Shop in Business Type to start accepting scheduled appointments.</Text>
+          </View>
+        ) : (
+        <>
         {/* Week navigator */}
         <View style={styles.weekNav}>
           <TouchableOpacity style={styles.weekArrow} onPress={() => changeWeek(-1)} activeOpacity={0.7}>
@@ -140,6 +159,21 @@ export default function CalendarScreen({ visible, onClose, onOpenJob }) {
             <Ionicons name="chevron-forward" size={20} color="#17191D" />
           </TouchableOpacity>
         </View>
+
+        {providerType === 'both' && (
+          <View style={styles.schedulingRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.schedulingLabel}>Allow Scheduling</Text>
+              <Text style={styles.schedulingSublabel}>Offer customers a scheduled appointment option</Text>
+            </View>
+            <Switch
+              value={allowScheduling}
+              onValueChange={changeAllowScheduling}
+              trackColor={{ false: '#E6E8EB', true: '#7C3AED' }}
+              thumbColor="#FFFFFF"
+            />
+          </View>
+        )}
 
         {/* Day strip */}
         <View style={styles.dayStrip}>
@@ -226,6 +260,8 @@ export default function CalendarScreen({ visible, onClose, onOpenJob }) {
             })}
           </ScrollView>
         )}
+        </>
+        )}
       </Animated.View>
     </Modal>
   );
@@ -243,6 +279,14 @@ const styles = StyleSheet.create({
   weekLabelWrap: { flex: 1, alignItems: 'center' },
   weekLabel: { color: '#17191D', fontSize: 15, fontWeight: '700' },
   weekCount: { color: '#5E646D', fontSize: 12, marginTop: 2 },
+
+  schedulingRow: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: '#FFFFFF', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#ECEEF0' },
+  schedulingLabel: { color: '#17191D', fontSize: 14, fontWeight: '700' },
+  schedulingSublabel: { color: '#5E646D', fontSize: 12, marginTop: 2 },
+
+  unavailableBox: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 40, paddingTop: 60, gap: 10 },
+  unavailableTitle: { color: '#17191D', fontSize: 15, fontWeight: '700', textAlign: 'center', marginTop: 4 },
+  unavailableText: { color: '#5E646D', fontSize: 13, lineHeight: 19, textAlign: 'center' },
 
   dayStrip: { flexDirection: 'row', backgroundColor: '#FFFFFF', paddingVertical: 10, paddingHorizontal: 8, borderBottomWidth: 1, borderBottomColor: '#ECEEF0' },
   dayStripCell: { flex: 1, alignItems: 'center', gap: 4 },

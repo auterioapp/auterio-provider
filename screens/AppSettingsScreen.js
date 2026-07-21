@@ -1,24 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Animated, Dimensions, Modal, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { loadPricing, savePricing } from '../utils/pricingStore';
-import { API_URL } from '../constants';
 
 export default function AppSettingsScreen({ visible, onClose }) {
   const [pushEnabled, setPushEnabled] = useState(true);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [vibrationEnabled, setVibrationEnabled] = useState(true);
-  const [providerType, setProviderTypeState] = useState('mobile');
-  const [allowScheduling, setAllowSchedulingState] = useState(false);
   const [modalVisible, setModalVisible] = useState(visible);
   const slideAnim = useRef(new Animated.Value(Dimensions.get('window').width)).current;
-
-  useEffect(() => {
-    loadPricing().then(p => {
-      setProviderTypeState(p.providerType || 'mobile');
-      setAllowSchedulingState(p.allowScheduling ?? false);
-    });
-  }, []);
 
   useEffect(() => {
     if (visible) {
@@ -30,12 +19,6 @@ export default function AppSettingsScreen({ visible, onClose }) {
       });
     }
   }, [visible]);
-
-  const changeAllowScheduling = async (val) => {
-    setAllowSchedulingState(val);
-    const current = await loadPricing();
-    await savePricing({ ...current, allowScheduling: val });
-  };
 
   return (
     <Modal visible={modalVisible} animationType="none" transparent onRequestClose={onClose}>
@@ -49,21 +32,6 @@ export default function AppSettingsScreen({ visible, onClose }) {
         </View>
 
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-
-          {/* Request Handling — only for hybrid */}
-          {providerType === 'both' && (
-            <>
-              <Text style={styles.sectionLabel}>Request Handling</Text>
-              <View style={styles.card}>
-                <ToggleRow
-                  label="Allow Scheduling"
-                  sublabel="Offer customers a scheduled appointment option"
-                  value={allowScheduling}
-                  onChange={changeAllowScheduling}
-                />
-              </View>
-            </>
-          )}
 
           {/* Notifications */}
           <Text style={styles.sectionLabel}>Notifications</Text>

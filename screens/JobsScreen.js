@@ -5,9 +5,10 @@ import useScrollToTop from '../hooks/useScrollToTop';
 import SwipePager from '../components/SwipePager';
 import { getJobStatusMeta, getJobProgressIndex, getWorkflowJobStatus } from '../utils/jobUtils';
 import { getServiceMode, getVehicleTypeLabel } from '../utils/serviceUtils';
-import { formatCurrency } from '../utils/estimateUtils';
+import { formatCurrency, getProviderEarnings } from '../utils/estimateUtils';
 import { JOB_STEPS, ACTIVE_SHOP_STATUSES } from '../constants';
 import CalendarScreen from './CalendarScreen';
+import { useProvider } from '../ProviderContext';
 
 export default function JobsScreen({ jobs, jobWorkflows = {}, onOpen, refreshControl, scrollSignal, providerType = 'mobile', isDemo = false, initialTabSignal }) {
   const hasAppointments = providerType === 'shop' || providerType === 'both';
@@ -57,7 +58,7 @@ export default function JobsScreen({ jobs, jobWorkflows = {}, onOpen, refreshCon
           {pageJobs.length ? pageJobs.map(job => (
             tabKey === 'scheduled'
               ? <ScheduledJobCard key={job.id} job={job} onOpen={onOpen} />
-              : <ActiveJobCard key={job.id} job={job} onOpen={onOpen} completed={tabKey === 'completed'} />
+              : <ActiveJobCard key={job.id} job={job} workflow={jobWorkflows[job.id]} onOpen={onOpen} completed={tabKey === 'completed'} />
           )) : (
             <View style={styles.emptyJobsCard}>
               <Ionicons name="refresh" size={22} color="#2563EB" />
@@ -144,6 +145,7 @@ export default function JobsScreen({ jobs, jobWorkflows = {}, onOpen, refreshCon
       visible={calendarOpen}
       onClose={() => setCalendarOpen(false)}
       onOpenJob={(job) => { setCalendarOpen(false); onOpen(job); }}
+      providerType={providerType}
     />
     </Fragment>
   );
@@ -169,7 +171,8 @@ const SHOP_STATUS_BADGE = {
   completed:        { label: 'COMPLETED',        color: '#22C55E' },
 };
 
-function ActiveJobCard({ job, onOpen, completed }) {
+function ActiveJobCard({ job, workflow, onOpen, completed }) {
+  const { provider } = useProvider();
   const status = job.displayStatus || job.status;
   const meta = getJobStatusMeta(status);
 
@@ -189,7 +192,9 @@ function ActiveJobCard({ job, onOpen, completed }) {
   const vehicle = getVehicleTypeLabel(job);
   const serviceType = getRequestedService(job);
   const customerName = job.customer?.name || 'Customer';
-  const payout = job.payment?.total ?? job.payment?.totalHeld ?? job.payment?.priceMin ?? 0;
+  const payout = completed
+    ? getProviderEarnings(job, workflow, job.additionalApprovals, null, provider?.commissionRate).netEarnings
+    : (job.payment?.total ?? job.payment?.totalHeld ?? job.payment?.priceMin ?? 0);
   const priceLabel = payout ? formatCurrency(payout) : 'TBD';
   const avatarBg = completed ? '#EAF7EE' : (isShopJob ? '#EFF6FF' : '#FFF1E6');
   const avatarColor = completed ? '#22C55E' : cardAccent;

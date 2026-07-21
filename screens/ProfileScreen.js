@@ -524,7 +524,7 @@ export default function ProfileScreen({ online, setOnline, refreshControl, scrol
           loadProfileData();
         }}
       />
-      <CalendarScreen visible={calendarOpen} onClose={() => setCalendarOpen(false)} />
+      <CalendarScreen visible={calendarOpen} onClose={() => setCalendarOpen(false)} providerType={providerType} />
       <ReviewsScreen visible={reviewsOpen} onClose={() => setReviewsOpen(false)} isDemo={isDemoAccount} />
       <PayoutsScreen visible={payoutsOpen} onClose={() => setPayoutsOpen(false)} isDemo={isDemoAccount} />
       <ServicesScreen visible={servicesOpen} onClose={() => { setServicesOpen(false); loadProfileData(); }} isDemoAccount={isDemoAccount} />

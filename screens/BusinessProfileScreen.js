@@ -84,6 +84,8 @@ export default function BusinessProfileScreen({ visible, providerType, onClose, 
               );
             })}
           </View>
+
+          <Text style={styles.subtitle}>Choose how customers find and book you. Mobile providers get dispatched to the customer, Shop providers get walk-ins and scheduled visits, and Mobile + Shop covers both. Changes apply immediately.</Text>
         </ScrollView>
       </KeyboardAvoidingView>
       </Animated.View>
@@ -100,6 +102,7 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 16, fontWeight: '800', color: '#17191D' },
 
   content: { padding: 20, paddingBottom: 32 },
+  subtitle: { fontSize: 13, color: '#5E646D', lineHeight: 18, marginTop: 16 },
 
   typeList: { borderRadius: 14, borderWidth: 1, borderColor: '#E5E7EB', overflow: 'hidden', backgroundColor: '#fff' },
   typeCard: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14, paddingHorizontal: 14 },

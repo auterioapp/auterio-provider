@@ -3,6 +3,7 @@ import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'rea
 import { Ionicons } from '@expo/vector-icons';
 import { getServiceMeta, getDropoffAddress, isTowingService, getProviderIntakeItems, getServiceMode, getVehicleDisplayLabel, hasKnownVin } from '../utils/serviceUtils';
 import { formatCurrency } from '../utils/estimateUtils';
+import { useProvider } from '../ProviderContext';
 
 const TIMER_SECONDS = 60;
 
@@ -11,6 +12,7 @@ function formatTimer(s) {
 }
 
 export default function RequestDetailScreen({ order, accepting, providerType = 'mobile', onBack, onAccept, onSchedule, onDecline, refreshControl }) {
+  const { provider } = useProvider();
   const [noteOpen, setNoteOpen] = useState(false);
   const [bottomPanelHeight, setBottomPanelHeight] = useState(0);
   const [timeLeft, setTimeLeft] = useState(TIMER_SECONDS);
@@ -34,7 +36,8 @@ export default function RequestDetailScreen({ order, accepting, providerType = '
   const address = order.pickup?.address || 'Location pending';
   const dropoffAddress = getDropoffAddress(order);
   const payout = Number(order.payment?.totalHeld || order.payment?.total || 0);
-  const platformFee = payout > 0 ? Math.max(8, Math.round(payout * 0.1)) : 0;
+  const commissionRate = provider?.commissionRate ?? 0.15;
+  const platformFee = payout > 0 ? Math.round(payout * commissionRate * 100) / 100 : 0;
   const net = Math.max(0, payout - platformFee);
   const driveTime = order.eta || order.tracking?.eta || '—';
   const distance = order.distance || '—';

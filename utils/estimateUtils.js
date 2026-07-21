@@ -5,6 +5,50 @@ export function sumAmounts(items) {
   return items.reduce((sum, item) => sum + Number(item.amount || 0), 0);
 }
 
+// Single source of truth for what a job's invoice adds up to — shared by the
+// Complete Job preview, the completed-job summary card, and the Jobs list,
+// so none of them can drift into showing a different total for the same job.
+export function getInvoiceData(job, workflow, additionalApprovals, fallbackEstimate) {
+  const persistedEstimate = job.orderContext?.estimate || null;
+  const invoiceEstimate = persistedEstimate ? {
+    ...persistedEstimate,
+    labor: persistedEstimate.laborItems || [],
+    parts: persistedEstimate.partsItems || [],
+    fees: persistedEstimate.fees || [],
+  } : (fallbackEstimate || { labor: [], parts: [], fees: [], subtotal: 0, tax: 0, total: 0 });
+  const originalTotal = job.approvedTotal ?? workflow?.approvedTotal ?? invoiceEstimate.total ?? 0;
+  const approvedRequiredChanges = (additionalApprovals || []).filter(item => item.status === 'approved');
+  const approvedAdditionalTotal = sumAmounts(approvedRequiredChanges);
+  const finalTotal = originalTotal + approvedAdditionalTotal;
+  const invoiceNumber = `INV-${job.number || '00000'}`;
+  const PAYMENT_METHOD_LABELS = { apple: 'Apple Pay', google: 'Google Pay', paypal: 'PayPal', efs: 'EFS', comcheck: 'Comcheck', fleet: 'Fleet One', tchek: 'T-Chek' };
+  const paymentMethod = (job.payment?.brand && job.payment?.last4)
+    ? `${job.payment.brand.charAt(0).toUpperCase()}${job.payment.brand.slice(1)} ••••${job.payment.last4}`
+    : PAYMENT_METHOD_LABELS[job.payment?.method] || 'Card on file';
+  const approveOptional = job.approveOptional ?? workflow?.approveOptional ?? false;
+  const invoiceTax = Math.round(((invoiceEstimate.tax || 0) + (approveOptional ? (invoiceEstimate.optionalTax || 0) : 0) + approvedAdditionalTotal * 0.0675) * 100) / 100;
+  const invoiceSubtotal = (invoiceEstimate.subtotal || 0) + (approveOptional ? (invoiceEstimate.optionalSubtotal || 0) : 0) + approvedAdditionalTotal;
+  return { invoiceEstimate, invoiceNumber, paymentMethod, invoiceTax, invoiceSubtotal, finalTotal, approvedRequiredChanges, approveOptional };
+}
+
+// What the provider actually keeps: the invoice total minus platform
+// commission — and parts are excluded from the commission base, since the
+// provider is just passing that cost through, not marking it up as labor.
+// `commissionRate` comes from the provider's own account (falls back to the
+// app-wide default here) so a future per-provider or global override on the
+// backend takes effect without any app code changing.
+export function getProviderEarnings(job, workflow, additionalApprovals, fallbackEstimate, commissionRate) {
+  const data = getInvoiceData(job, workflow, additionalApprovals, fallbackEstimate);
+  const { invoiceEstimate, finalTotal, approveOptional } = data;
+  const partsTotal = sumAmounts(invoiceEstimate.parts || [])
+    + (approveOptional ? sumAmounts(invoiceEstimate.optionalParts || []) : 0);
+  const commissionBase = Math.max(0, finalTotal - partsTotal);
+  const rate = commissionRate ?? 0.15;
+  const commission = Math.round(commissionBase * rate * 100) / 100;
+  const netEarnings = Math.round((finalTotal - commission) * 100) / 100;
+  return { ...data, partsTotal, commissionBase, commissionRate: rate, commission, netEarnings };
+}
+
 export function formatCurrency(value) {
   const num = Number(value || 0);
   return `$${num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;

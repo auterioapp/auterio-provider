@@ -55,7 +55,12 @@
       "Bash(taskkill //PID 20156 //F //T)",
       "Bash(rm -f /tmp/expo_bp14.log)",
       "WebFetch(domain:docs.expo.dev)",
-      "Bash(node -c routes/orders.js)"
+      "Bash(node -c routes/orders.js)",
+      "Bash(curl -s -o /tmp/bundle_svctypes.js -w \"HTTP_STATUS:%{http_code}\\\\n\" \"http://localhost:8115/index.bundle?platform=ios&dev=true\")",
+      "Bash(taskkill //PID 7656 //F //T)",
+      "Bash(awk 'NR<=2944 && /^function /{line=NR; name=$0} END{print line\": \"name}' App.js)",
+      "Bash(awk 'NR==1512,NR==1560' App.js)",
+      "Bash(curl -s -o /tmp/bundle_arrfix.js -w \"HTTP_STATUS:%{http_code}\\\\n\" \"http://localhost:8125/index.bundle?platform=ios&dev=true\")"
     ],
     "additionalDirectories": [
       "C:\\Users\\PCUSER\\AppData\\Local\\Temp\\claude\\c--Users-PCUSER-auterio-provider\\64bebc74-8dab-4c76-bee5-745a688192dd\\scratchpad"
