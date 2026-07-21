@@ -49,6 +49,14 @@ export function getProviderEarnings(job, workflow, additionalApprovals, fallback
   return { ...data, partsTotal, commissionBase, commissionRate: rate, commission, netEarnings };
 }
 
+export function getTodayCompletedStats(completedOrders = [], commissionRate) {
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const todayOrders = completedOrders.filter(o => new Date(o.completedAt || o.updatedAt || o.createdAt) >= startOfToday);
+  const total = todayOrders.reduce((acc, o) => acc + getProviderEarnings(o, null, o.additionalApprovals, null, commissionRate).netEarnings, 0);
+  return { count: todayOrders.length, total };
+}
+
 export function formatCurrency(value) {
   const num = Number(value || 0);
   return `$${num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;

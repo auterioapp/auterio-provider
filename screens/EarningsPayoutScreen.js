@@ -3,7 +3,8 @@ import { Alert, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } fr
 import { Ionicons } from '@expo/vector-icons';
 import PayoutsScreen from './PayoutsScreen';
 import PayoutHistoryScreen from './PayoutHistoryScreen';
-import { formatCurrency } from '../utils/estimateUtils';
+import { formatCurrency, getProviderEarnings } from '../utils/estimateUtils';
+import { useProvider } from '../ProviderContext';
 
 const DEMO_HISTORY = [
   { date: 'Jun 18, 2025', label: 'Weekly Payout', amount: '$1,750.00', status: 'Completed' },
@@ -13,10 +14,11 @@ const DEMO_HISTORY = [
 const STATUS_COLOR = { Completed: '#16A34A', Processing: '#D97706', Failed: '#DC2626' };
 
 export default function EarningsPayoutScreen({ visible, onClose, isDemo, completedOrders = [] }) {
+  const { provider } = useProvider();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const history = isDemo ? DEMO_HISTORY : [];
-  const lifetimeEarned = completedOrders.reduce((acc, o) => acc + Number(o.payment?.total || o.payment?.totalHeld || o.payment?.priceMax || 0), 0);
+  const lifetimeEarned = completedOrders.reduce((acc, o) => acc + getProviderEarnings(o, null, o.additionalApprovals, null, provider?.commissionRate).netEarnings, 0);
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>

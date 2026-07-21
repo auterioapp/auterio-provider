@@ -6,6 +6,13 @@ import { authorizedFetch } from '../apiClient';
 import { API_URL } from '../constants';
 import { useProvider } from '../ProviderContext';
 
+function formatPhone(raw) {
+  const digits = String(raw || '').replace(/\D/g, '');
+  const d = digits.length === 11 && digits.startsWith('1') ? digits.slice(1) : digits;
+  if (d.length !== 10) return raw || '';
+  return `+1 (${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}`;
+}
+
 export default function AccountInfoScreen({ visible, onClose, isDemoAccount }) {
   const { provider } = useProvider();
   const [name, setName] = useState('');
@@ -138,7 +145,7 @@ export default function AccountInfoScreen({ visible, onClose, isDemoAccount }) {
             <View style={styles.sep} />
             <FieldRow icon="mail-outline" label="Email" value={email} right={<Ionicons name="lock-closed-outline" size={16} color="#C4C9D1" />} />
             <View style={styles.sep} />
-            <FieldRow icon="call-outline" label="Phone" value={phone || provider.phone} right={<Ionicons name="lock-closed-outline" size={16} color="#C4C9D1" />} />
+            <FieldRow icon="call-outline" label="Phone" value={formatPhone(phone || provider.phone)} right={<Ionicons name="lock-closed-outline" size={16} color="#C4C9D1" />} />
           </View>
           <Text style={styles.fieldHint}>Name, email and phone can only be changed through Support for security reasons.</Text>
 
@@ -197,14 +204,15 @@ export default function AccountInfoScreen({ visible, onClose, isDemoAccount }) {
                 {!isDemoAccount && <Ionicons name="chevron-forward" size={16} color="#C4C9D1" />}
               </TouchableOpacity>
             )}
+            <View style={styles.sep} />
+            <FieldRow
+              icon="finger-print-outline"
+              label="Provider ID"
+              value={isDemoAccount ? provider.id : shortId}
+              hint="Use this ID when contacting support."
+              mono
+            />
           </View>
-          <Text style={styles.fieldHint}>Shown to customers alongside your business name.</Text>
-
-          <Text style={[styles.sectionLabel, { marginTop: 24 }]}>Provider ID</Text>
-          <View style={styles.fieldGroup}>
-            <Text style={styles.providerIdValue}>{isDemoAccount ? provider.id : shortId}</Text>
-          </View>
-          <Text style={styles.fieldHint}>Use this ID when contacting support.</Text>
 
           <Text style={[styles.sectionLabel, { marginTop: 24 }]}>Security</Text>
           <View style={styles.fieldGroup}>
@@ -299,10 +307,6 @@ const styles = StyleSheet.create({
   fieldLabel: { fontSize: 12, lineHeight: 16, fontWeight: '500', color: '#5E646D', marginBottom: 2 },
   fieldValue: { fontSize: 14, lineHeight: 18, fontWeight: '700', color: '#17191D' },
   fieldValueMono: { fontSize: 14, fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace', letterSpacing: 0.5 },
-  providerIdValue: {
-    fontSize: 15, fontWeight: '700', color: '#17191D', textAlign: 'center', paddingVertical: 16, paddingHorizontal: 16,
-    fontFamily: Platform.OS === 'ios' ? 'Courier' : 'monospace', letterSpacing: 0.5,
-  },
   fieldRowHintFull: { fontSize: 11, color: '#9CA3AF', lineHeight: 14, paddingHorizontal: 16, paddingBottom: 14 },
   navRowLabel: { flex: 1, fontSize: 14, lineHeight: 18, fontWeight: '700', color: '#17191D' },
 

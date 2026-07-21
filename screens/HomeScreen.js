@@ -2,8 +2,8 @@ import { useState } from 'react';
 import { Alert, Modal, ScrollView, StyleSheet, Switch, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import useScrollToTop from '../hooks/useScrollToTop';
-import { getServiceMeta, formatMoney, getServiceMode, getRequestDistance, getCityState, getTodayCompletedStats, getVehicleTypeLabel } from '../utils/serviceUtils';
-import { formatCurrency } from '../utils/estimateUtils';
+import { getServiceMeta, formatMoney, getServiceMode, getRequestDistance, getCityState, getVehicleTypeLabel } from '../utils/serviceUtils';
+import { formatCurrency, getProviderEarnings, getTodayCompletedStats } from '../utils/estimateUtils';
 import { useProvider } from '../ProviderContext';
 
 const DEMO_INCOMING_REQUEST = {
@@ -85,19 +85,19 @@ function ProfileSetupBanner({ onGoToProfile }) {
 export default function HomeScreen({ online, setOnline, requests = [], requestAnim, acceptingId, pendingCount, activeJobs, completedOrders = [], scheduledJobs = [], onOpenRequest, onViewAll, allowScheduling, onAccept, onDecline, refreshControl, scrollSignal, verificationStatus, isDemo, profileComplete, onGoToProfile, onGoToEarnings, onGoToJobs }) {
   const { provider } = useProvider();
   const scrollRef = useScrollToTop(scrollSignal);
-  const todayStats = getTodayCompletedStats(completedOrders);
+  const todayStats = getTodayCompletedStats(completedOrders, provider?.commissionRate);
   const recentActivity = isDemo ? [] : [...completedOrders]
     .sort((a, b) => new Date(b.completedAt || b.updatedAt || 0) - new Date(a.completedAt || a.updatedAt || 0))
     .slice(0, 5)
     .map(order => {
       const meta = getServiceMeta(order);
-      const amount = Number(order.payment?.total || order.payment?.totalHeld || order.payment?.priceMax || 0);
+      const amount = getProviderEarnings(order, null, order.additionalApprovals, null, provider?.commissionRate).netEarnings;
       return {
         key: order.id || order._id,
         icon: 'checkmark-circle',
         color: '#16A34A',
         title: 'Job completed',
-        meta: `${meta.title} Â· ${formatActivityDate(order.completedAt || order.updatedAt)}`,
+        meta: `${meta.title} · ${formatActivityDate(order.completedAt || order.updatedAt)}`,
         value: formatCurrency(amount),
       };
     });
@@ -277,8 +277,8 @@ export default function HomeScreen({ online, setOnline, requests = [], requestAn
 
       <View style={styles.sectionCard}>
         <Text style={[styles.sectionTitle, { marginBottom: 12 }]}>Recent Activity</Text>
-        {isDemo ? DEMO_ACTIVITY.map(item => (
-          <View key={item.title} style={styles.activityRow}>
+        {isDemo ? DEMO_ACTIVITY.map((item, index) => (
+          <View key={item.title} style={[styles.activityRow, index > 0 && styles.activityRowDivider]}>
             <View style={[styles.activityIcon, { backgroundColor: item.color + '20' }]}>
               <Ionicons name={item.icon} size={18} color={item.color} />
             </View>
@@ -288,8 +288,8 @@ export default function HomeScreen({ online, setOnline, requests = [], requestAn
             </View>
             <Text style={[styles.activityValue, item.valueColor && { color: item.valueColor }]}>{item.value}</Text>
           </View>
-        )) : recentActivity.length ? recentActivity.map(item => (
-          <View key={item.key} style={styles.activityRow}>
+        )) : recentActivity.length ? recentActivity.map((item, index) => (
+          <View key={item.key} style={[styles.activityRow, index > 0 && styles.activityRowDivider]}>
             <View style={[styles.activityIcon, { backgroundColor: item.color + '20' }]}>
               <Ionicons name={item.icon} size={18} color={item.color} />
             </View>
@@ -537,6 +537,7 @@ const styles = StyleSheet.create({
   scheduleVehicle: { color: '#5E646D', fontSize: 12, fontWeight: '600' },
   etaText: { color: '#F04416', fontSize: 13, fontWeight: '800' },
   activityRow: { minHeight: 48, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  activityRowDivider: { borderTopWidth: 1, borderTopColor: '#F0F1F3', marginTop: 4, paddingTop: 12 },
   activityIcon: { width: 34, height: 34, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   activityInfo: { flex: 1, minWidth: 0 },
   activityTitle: { color: '#17191D', fontSize: 13, fontWeight: '600' },

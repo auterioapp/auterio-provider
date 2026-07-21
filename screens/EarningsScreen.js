@@ -4,7 +4,9 @@ import { Ionicons } from '@expo/vector-icons';
 import useScrollToTop from '../hooks/useScrollToTop';
 import EarningsPayoutScreen from './EarningsPayoutScreen';
 import RevenueBreakdownScreen, { DATA_BY_PERIOD } from './RevenueBreakdownScreen';
-import { formatCurrency } from '../utils/estimateUtils';
+import { formatCurrency, getProviderEarnings } from '../utils/estimateUtils';
+import { getServiceMeta } from '../utils/serviceUtils';
+import { useProvider } from '../ProviderContext';
 
 const EARN_PERIODS = ['Today', 'This Week', 'This Month'];
 
@@ -56,7 +58,7 @@ const CHART_DATA = {
   },
 };
 
-function buildRealData(completedOrders) {
+function buildRealData(completedOrders, commissionRate) {
   const now = new Date();
   const startOfToday = new Date(now); startOfToday.setHours(0, 0, 0, 0);
   const startOfWeek = new Date(now); startOfWeek.setDate(now.getDate() - now.getDay()); startOfWeek.setHours(0, 0, 0, 0);
@@ -66,7 +68,7 @@ function buildRealData(completedOrders) {
     orders.filter(o => new Date(o.completedAt || o.updatedAt || o.createdAt) >= start);
 
   const sumTotal = (orders) =>
-    orders.reduce((acc, o) => acc + Number(o.payment?.total || o.payment?.totalHeld || o.payment?.priceMax || 0), 0);
+    orders.reduce((acc, o) => acc + getProviderEarnings(o, null, o.additionalApprovals, null, commissionRate).netEarnings, 0);
 
   const todayOrders = filterByPeriod(completedOrders, startOfToday);
   const weekOrders = filterByPeriod(completedOrders, startOfWeek);
@@ -88,14 +90,15 @@ function buildRealData(completedOrders) {
 }
 
 export default function EarningsScreen({ refreshControl, scrollSignal, isDemo = true, completedOrders = [] }) {
+  const { provider } = useProvider();
   const scrollRef = useScrollToTop(scrollSignal);
   const [payoutsOpen, setPayoutsOpen] = useState(false);
   const [revenueOpen, setRevenueOpen] = useState(false);
   const [period, setPeriod] = useState('This Week');
   const [showPeriodDrop, setShowPeriodDrop] = useState(false);
 
-  const lifetimeEarned = completedOrders.reduce((acc, o) => acc + Number(o.payment?.total || o.payment?.totalHeld || o.payment?.priceMax || 0), 0);
-  const activeData = isDemo ? CHART_DATA : buildRealData(completedOrders);
+  const lifetimeEarned = completedOrders.reduce((acc, o) => acc + getProviderEarnings(o, null, o.additionalApprovals, null, provider?.commissionRate).netEarnings, 0);
+  const activeData = isDemo ? CHART_DATA : buildRealData(completedOrders, provider?.commissionRate);
   const chartData = activeData[period] || activeData['This Week'];
 
   const periodRevData = DATA_BY_PERIOD[period] || DATA_BY_PERIOD['This Week'];
@@ -119,9 +122,9 @@ export default function EarningsScreen({ refreshControl, scrollSignal, isDemo = 
     { icon: 'car-sport-outline', title: 'Ford F-150 - Towing', meta: 'Yesterday, 4:45 PM', amount: '+$310.00' },
   ] : completedOrders.slice(0, 10).map(o => ({
     icon: 'briefcase-outline',
-    title: `${o.vehicle?.make || ''} ${o.vehicle?.model || ''} - ${o.service?.type || 'Service'}`.trim(),
+    title: `${o.vehicle?.make || ''} ${o.vehicle?.model || ''} - ${getServiceMeta(o).title}`.trim(),
     meta: new Date(o.completedAt || o.updatedAt || o.createdAt).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }),
-    amount: `+${formatCurrency(o.payment?.total || o.payment?.totalHeld || o.payment?.priceMax || 0)}`,
+    amount: `+${formatCurrency(getProviderEarnings(o, null, o.additionalApprovals, null, provider?.commissionRate).netEarnings)}`,
   }));
 
   const payouts = [

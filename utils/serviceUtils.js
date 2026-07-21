@@ -523,14 +523,6 @@ export function hasKnownVin(order) {
   return !!order.vehicle?.vin && order.vehicle.vin !== 'Not added';
 }
 
-export function getTodayCompletedStats(completedOrders = []) {
-  const startOfToday = new Date();
-  startOfToday.setHours(0, 0, 0, 0);
-  const todayOrders = completedOrders.filter(o => new Date(o.completedAt || o.updatedAt || o.createdAt) >= startOfToday);
-  const total = todayOrders.reduce((acc, o) => acc + Number(o.payment?.total || o.payment?.totalHeld || o.payment?.priceMax || 0), 0);
-  return { count: todayOrders.length, total };
-}
-
 export async function fetchJson(url, options) {
   const response = await fetch(url, options);
   const text = await response.text();
