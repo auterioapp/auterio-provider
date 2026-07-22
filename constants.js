@@ -1,5 +1,5 @@
 export const API_URL = 'https://auterio-backend-production.up.railway.app/api';
-export const GOOGLE_API_KEY = 'AIzaSyCHEGxUEXPk3622i3rttyVZEcT3XS9ssuI';
+export const GOOGLE_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_API_KEY;
 
 export const ACCEPT_BLUE = '#276EF1';
 export const TAB_BAR_PADDING = 8;
