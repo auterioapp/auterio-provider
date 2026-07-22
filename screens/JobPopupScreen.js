@@ -3,6 +3,7 @@ import { Alert, Animated, Dimensions, KeyboardAvoidingView, Linking, Modal, Plat
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GestureHandlerRootView, PanGestureHandler, State as GestureState } from 'react-native-gesture-handler';
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 import { RequestInfoRow } from './RequestDetailScreen';
@@ -12,6 +13,7 @@ import styles from '../appStyles';
 import { fetchJson } from '../jobApiClient';
 import { pulseTabChange } from '../utils/haptics';
 import { API_URL, JOB_STEPS } from '../constants';
+import { getJobProgressIndex } from '../utils/jobUtils';
 import { formatMoney, getServiceMeta, getServiceFlowSchema, getDiagnosisSchema, getProviderIntakeItems, isTowingService, getDropoffAddress, getVehicleVin, getCustomerComplaintItems, getAcceptedAtLabel, getVehicleDisplayParts, hasKnownVin, stripCountryFromAddress, getArrivedAtLabel } from '../utils/serviceUtils';
 import { getRecommendedServicesFromDiagnosis, getDemoEstimate, getEstimateCatalog, getEstimatePriceCheck, sumAmounts, formatCurrency, getInvoiceData } from '../utils/estimateUtils';
 import { loadPricing } from '../utils/pricingStore';
