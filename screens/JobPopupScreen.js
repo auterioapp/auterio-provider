@@ -96,7 +96,6 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
       useNativeDriver: true,
     }).start(() => {
       setCustomerProfileOpen(false);
-      cpPanX.setValue(0);
     });
   };
   const onCpGestureEvent = Animated.event(
