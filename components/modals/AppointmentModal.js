@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Dimensions, Modal, ScrollView, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Dimensions, Modal, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import CalendarPickerModal from './CalendarPickerModal';
 
