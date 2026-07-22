@@ -1983,7 +1983,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
         />
 
         {/* Customer Profile overlay */}
-        <Modal visible={customerProfileOpen} transparent animationType="none" onRequestClose={closeCustomerProfile} onShow={() => {
+        <Modal visible={customerProfileOpen} transparent animationType="none" onRequestClose={() => closeCustomerProfile()} onShow={() => {
           Animated.timing(cpPanX, { toValue: 0, duration: 260, useNativeDriver: true }).start();
         }}>
           <GestureHandlerRootView style={{ flex: 1 }}>
@@ -1995,7 +1995,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
             >
               <Animated.View style={[styles.detailScreen, { transform: [{ translateX: cpPanX }] }]}>
                 <View style={styles.detailNavBar}>
-                  <TouchableOpacity style={styles.detailBackBtn} onPress={closeCustomerProfile} activeOpacity={0.8}>
+                  <TouchableOpacity style={styles.detailBackBtn} onPress={() => closeCustomerProfile()} activeOpacity={0.8}>
                     <Ionicons name="chevron-back" size={22} color="#17191D" />
                   </TouchableOpacity>
                   <Text style={styles.detailNavTitle}>Customer Profile</Text>
