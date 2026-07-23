@@ -20,7 +20,21 @@ export const colors = {
   surface: '#F3F4F5',
   surfaceRaised: '#FFFFFF',
   border: '#ECEEF0',
+
+  // Not in the brief — added after the auterio3/TrackingScreen.js pilot found
+  // both were real, recurring roles (not one-off mistakes) that
+  // colors.border/warning don't cover without a visible color change.
+  borderStrong: '#E1E4E8', // second, slightly darker border/divider gray — distinct role from `border`, not a typo of it
+  attention: '#EAB308',    // "needs your input" (e.g. estimate ready) — visibly different from `warning`, don't conflate
 };
+
+// Solid hex + 2-digit alpha suffix (React Native accepts #RRGGBBAA), e.g.
+// withAlpha(colors.primary, '20') === '#F0441620'. Covers the many
+// rgba(...)-tinted backgrounds/borders in the audit instead of naming a
+// fixed set of opacity steps that won't match every screen's needs.
+export function withAlpha(hex, alphaHex) {
+  return `${hex}${alphaHex}`;
+}
 
 // Semantic text presets — kept from the previous version of this file (already
 // audited against real screen usage, not invented). Prefer these over raw
