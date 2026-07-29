@@ -9,6 +9,7 @@ import { formatCurrency, getProviderEarnings } from '../utils/estimateUtils';
 import { JOB_STEPS, ACTIVE_SHOP_STATUSES } from '../constants';
 import CalendarScreen from './CalendarScreen';
 import { useProvider } from '../ProviderContext';
+import { statusTitle } from '../statusMap';
 
 export default function JobsScreen({ jobs, jobWorkflows = {}, onOpen, refreshControl, scrollSignal, providerType = 'mobile', isDemo = false, initialTabSignal }) {
   const hasAppointments = providerType === 'shop' || providerType === 'both';
@@ -180,7 +181,7 @@ function ActiveJobCard({ job, workflow, onOpen, completed }) {
   const cardAccent = isShopJob ? '#2563EB' : '#F04416';
 
   const rawBadgeLabel = isShopJob && job.shopStatus
-    ? (SHOP_STATUS_BADGE[job.shopStatus]?.label || status.toUpperCase().replace(/_/g, ' '))
+    ? (SHOP_STATUS_BADGE[job.shopStatus]?.label || statusTitle(status))
     : (completed ? 'COMPLETED' : meta.label);
   const badgeLabel = rawBadgeLabel.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
   const badgeColor = completed

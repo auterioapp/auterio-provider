@@ -5,6 +5,7 @@ import { authorizedFetch } from '../apiClient';
 import { API_URL } from '../constants';
 import { useProvider } from '../ProviderContext';
 import { loadPricing, savePricing } from '../utils/pricingStore';
+import { statusTitle } from '../statusMap';
 
 const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const DAY_FULL  = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -49,7 +50,7 @@ function fmtWeekRange(monday) {
 }
 
 function getApptMeta(job) {
-  if (job.status === 'cancelled' || job.status === 'declined') return { label: 'Cancelled', color: '#DC2626', bg: '#FEF2F2' };
+  if (job.status === 'cancelled' || job.status === 'declined') return { label: statusTitle(job.status), color: '#DC2626', bg: '#FEF2F2' };
   if (job.confirmedByProvider) return { label: 'Confirmed', color: '#16A34A', bg: '#F0FDF4' };
   return { label: 'Pending', color: '#F59E0B', bg: '#FFFBEB' };
 }
