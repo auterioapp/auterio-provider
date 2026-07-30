@@ -4,13 +4,15 @@ import { colors, radius, spacing, touchTarget, typography, withAlpha } from '../
 
 const VARIANTS = {
   primary: { bg: colors.primary, text: colors.surfaceRaised, border: null },
+  success: { bg: colors.success, text: colors.surfaceRaised, border: null },
+  info: { bg: colors.info, text: colors.surfaceRaised, border: null },
   danger: { bg: colors.danger, text: colors.surfaceRaised, border: null },
   secondary: { bg: colors.surface, text: colors.text, border: colors.border },
   outline: { bg: 'transparent', text: colors.text, border: colors.borderStrong },
   ghost: { bg: 'transparent', text: colors.mutedText, border: null },
 };
 
-// variant: 'primary' | 'danger' | 'secondary' | 'outline' | 'ghost'
+// variant: 'primary' | 'success' | 'info' | 'danger' | 'secondary' | 'outline' | 'ghost'
 // size: 'md' | 'lg' — both meet touchTarget.min, 'lg' is the full-width CTA height
 export default function Button({
   label,
