@@ -5,8 +5,11 @@
 // didn't settle it (spacing scale, semantic color names, touch target).
 // Same values as auterio3/theme.js on purpose — one brand palette, same key names.
 //
-// Not yet imported anywhere — screens still use inline values. Migration is tracked
-// separately per screen; this file is the target, not yet the source of truth in the app.
+// Adopted by all 15 components/ui/* plus screens/SetupSuccessScreen.js so far
+// (2026-07). Most other screens still use inline values -- migration continues
+// screen by screen; only swap a value onto a token when it's an exact match
+// (see SetupSuccessScreen.js/HomeScreen.js's commits for the reasoning on
+// near-miss colors that were deliberately left alone).
 
 export const colors = {
   // semantic, not random — one token per role, not per screen
