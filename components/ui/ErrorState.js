@@ -15,7 +15,7 @@ export default function ErrorState({
   onPressCta,
 }) {
   return (
-    <View style={styles.wrap}>
+    <View style={styles.wrap} accessibilityRole="alert">
       <View style={styles.iconWrap}>
         <Ionicons name={icon} size={32} color={colors.danger} />
       </View>

@@ -13,7 +13,7 @@ export default function OrderCard({ icon = 'construct-outline', title, subtitle,
   return (
     <Card raised onPress={onPress} style={styles.card}>
       <View style={styles.row}>
-        <View style={styles.iconWrap}>
+        <View importantForAccessibility="no-hide-descendants" style={styles.iconWrap}>
           <Ionicons name={icon} size={20} color={colors.primary} />
         </View>
         <View style={styles.textCol}>

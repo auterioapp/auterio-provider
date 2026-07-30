@@ -31,8 +31,8 @@ export default function ProviderCard({ provider, onCall, onMessage, onPress }) {
         </View>
         {(!!onCall || !!onMessage) && (
           <View style={styles.actions}>
-            {!!onCall && <IconButton icon="call-outline" iconColor={colors.info} onPress={onCall} style={styles.actionBtn} />}
-            {!!onMessage && <IconButton icon="chatbubble-outline" iconColor={colors.info} onPress={onMessage} style={styles.actionBtn} />}
+            {!!onCall && <IconButton icon="call-outline" iconColor={colors.info} onPress={onCall} style={styles.actionBtn} accessibilityLabel="Call provider" />}
+            {!!onMessage && <IconButton icon="chatbubble-outline" iconColor={colors.info} onPress={onMessage} style={styles.actionBtn} accessibilityLabel="Message provider" />}
           </View>
         )}
       </View>

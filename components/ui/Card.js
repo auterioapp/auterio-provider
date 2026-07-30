@@ -6,7 +6,7 @@ import { colors, radius, spacing } from '../../theme';
 // Pass onPress to make the card tappable (renders as TouchableOpacity).
 export default function Card({ children, raised = false, onPress, style, ...rest }) {
   const Wrapper = onPress ? TouchableOpacity : View;
-  const wrapperProps = onPress ? { onPress, activeOpacity: 0.84, ...rest } : rest;
+  const wrapperProps = onPress ? { onPress, activeOpacity: 0.84, accessibilityRole: 'button', ...rest } : rest;
 
   return (
     <Wrapper

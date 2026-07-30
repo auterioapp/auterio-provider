@@ -9,8 +9,8 @@ import IconButton from './IconButton';
 export default function ScreenHeader({ title, onBack, right }) {
   return (
     <View style={styles.header}>
-      {onBack ? <IconButton icon="chevron-back" onPress={onBack} /> : <View style={styles.spacer} />}
-      <Text style={styles.title} numberOfLines={1}>{title}</Text>
+      {onBack ? <IconButton icon="chevron-back" onPress={onBack} accessibilityLabel="Go back" /> : <View style={styles.spacer} />}
+      <Text style={styles.title} accessibilityRole="header" numberOfLines={1}>{title}</Text>
       {right || <View style={styles.spacer} />}
     </View>
   );

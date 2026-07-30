@@ -22,6 +22,9 @@ export default function Skeleton({ width = '100%', height = 16, borderRadius = r
 
   return (
     <Animated.View
+      accessible
+      accessibilityRole="progressbar"
+      accessibilityLabel="Loading"
       style={[styles.base, { width, height, borderRadius, opacity }, style]}
     />
   );

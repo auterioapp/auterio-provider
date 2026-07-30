@@ -12,7 +12,11 @@ const VARIANTS = {
 // actions on ProviderCard, map controls. Always meets touchTarget.min, even
 // when `size` is set smaller than that (matches TrackingScreen.js's existing
 // 40x40 circles without shrinking the hit area below 44).
-export default function IconButton({ icon, onPress, variant = 'surface', size = 40, iconColor, disabled = false, style }) {
+// accessibilityLabel has no default -- there's no sensible generic text for an
+// arbitrary icon, so callers must say what the button does (e.g. "Go back",
+// "Call provider"). Without it, a screen reader announces this as an unlabeled
+// button, which is the exact gap this prop exists to close.
+export default function IconButton({ icon, onPress, variant = 'surface', size = 40, iconColor, disabled = false, style, accessibilityLabel }) {
   const v = VARIANTS[variant] || VARIANTS.surface;
   const hitSlop = Math.max(0, Math.ceil((touchTarget.min - size) / 2));
 
@@ -21,6 +25,9 @@ export default function IconButton({ icon, onPress, variant = 'surface', size = 
       onPress={onPress}
       disabled={disabled}
       activeOpacity={0.8}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      accessibilityState={{ disabled }}
       hitSlop={{ top: hitSlop, bottom: hitSlop, left: hitSlop, right: hitSlop }}
       style={[
         styles.base,

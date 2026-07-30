@@ -33,6 +33,8 @@ export default function Button({
       onPress={onPress}
       disabled={isDisabled}
       activeOpacity={0.84}
+      accessibilityRole="button"
+      accessibilityState={{ disabled: isDisabled, busy: loading }}
       style={[
         styles.base,
         size === 'md' ? styles.md : styles.lg,

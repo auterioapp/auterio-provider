@@ -7,12 +7,12 @@ import { colors, spacing, touchTarget, typography, withAlpha } from '../../theme
 // `onPress` is optional — omit it for a non-interactive row (renders as View).
 export default function ListRow({ icon, iconColor, leftElement, title, subtitle, trailing, chevron = false, onPress, style }) {
   const Wrapper = onPress ? TouchableOpacity : View;
-  const wrapperProps = onPress ? { onPress, activeOpacity: 0.7 } : {};
+  const wrapperProps = onPress ? { onPress, activeOpacity: 0.7, accessibilityRole: 'button' } : {};
 
   return (
     <Wrapper style={[styles.row, style]} {...wrapperProps}>
       {leftElement ? leftElement : icon ? (
-        <View style={[styles.iconWrap, { backgroundColor: withAlpha(iconColor || colors.mutedText, '14') }]}>
+        <View importantForAccessibility="no-hide-descendants" style={[styles.iconWrap, { backgroundColor: withAlpha(iconColor || colors.mutedText, '14') }]}>
           <Ionicons name={icon} size={18} color={iconColor || colors.mutedText} />
         </View>
       ) : null}

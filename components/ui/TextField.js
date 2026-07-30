@@ -37,6 +37,8 @@ export default function TextField({
           keyboardType={keyboardType}
           multiline={multiline}
           editable={editable}
+          accessibilityLabel={label || placeholder}
+          accessibilityHint={error || undefined}
           style={[styles.input, multiline && styles.inputMultiline]}
         />
       </View>

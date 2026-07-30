@@ -13,7 +13,7 @@ export default function VehicleCard({ vehicle, isDefault = false, onPress }) {
   return (
     <Card raised onPress={onPress} style={styles.card}>
       <View style={styles.row}>
-        <View style={styles.iconWrap}>
+        <View importantForAccessibility="no-hide-descendants" style={styles.iconWrap}>
           <Ionicons name="car-sport-outline" size={22} color={colors.primary} />
         </View>
         <View style={styles.textCol}>
