@@ -1044,6 +1044,7 @@ const styles = StyleSheet.create({
   mapChoiceTitle: { color: '#fff', fontSize: 15, fontWeight: '700' },
   mapChoiceRow: { height: 48, borderRadius: 11, backgroundColor: '#0A1D32', flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, marginTop: 8 },
   mapChoiceText: { color: '#fff', fontSize: 14, fontWeight: '700' },
+  authLoadingScreen: { flex: 1, backgroundColor: '#020C1A', alignItems: 'center', justifyContent: 'center' },
 });
 
 export default styles;

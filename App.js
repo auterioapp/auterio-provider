@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Animated, AppState, Easing, Linking, Modal, PanResponder, Platform, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, AppState, Easing, Linking, Modal, PanResponder, Platform, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import * as Notifications from 'expo-notifications';
@@ -720,9 +720,15 @@ function AppInner() {
             status: 'estimate_sent',
             estimate: extra.estimate,
           }),
-        }).catch(e => console.log('Estimate sync error:', e.message));
+        }).then(() => {
+          showToast('Estimate sent to customer');
+        }).catch(e => {
+          console.log('Estimate sync error:', e.message);
+          showToast('Could not send estimate — check your connection and try again');
+        });
+      } else {
+        showToast('Estimate sent to customer');
       }
-      showToast('Estimate sent to customer');
     } else if (newShopStatus === 'completed') {
       showToast('Job completed!');
     }
@@ -981,6 +987,7 @@ function AppInner() {
       body: JSON.stringify(body),
     }).catch((error) => {
       console.log('Job status sync error:', error.message);
+      showToast('Could not save — check your connection and try again');
     });
   };
 
@@ -1182,7 +1189,13 @@ function AppInner() {
     onShouldBlockNativeResponder: () => true,
   }), [activeTab, tabWidth]);
 
-  if (authState === 'loading') return null;
+  if (authState === 'loading') {
+    return (
+      <View style={styles.authLoadingScreen}>
+        <ActivityIndicator size="large" color="#F04416" />
+      </View>
+    );
+  }
 
   if (authState === 'welcome') {
     return (

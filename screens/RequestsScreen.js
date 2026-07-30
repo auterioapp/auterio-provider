@@ -40,7 +40,7 @@ export default function RequestsScreen({ requests, acceptingId, filter, onFilter
           pageStyle={styles.requestsSwipePage}
         >
           <View style={styles.requestList}>
-            {requests.map(order => (
+            {requests.length ? requests.map(order => (
               <RequestCard
                 key={order.id}
                 order={order}
@@ -55,7 +55,12 @@ export default function RequestsScreen({ requests, acceptingId, filter, onFilter
                 allowScheduling={allowScheduling}
                 verificationStatus={verificationStatus}
               />
-            ))}
+            )) : (
+              <View style={styles.requestEmptyState}>
+                <Ionicons name="mail-open-outline" size={28} color="#7A8BA8" />
+                <Text style={styles.requestEmptyText}>No new requests right now</Text>
+              </View>
+            )}
           </View>
           <View style={styles.requestEmptyState}>
             <Ionicons name="checkmark-circle-outline" size={28} color="#7A8BA8" />
