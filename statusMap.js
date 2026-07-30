@@ -5,9 +5,13 @@
 // The brief also calls for a description, primary/secondary CTA, and allowed-next-state
 // per status ("Each UI status must define..."). Those aren't in the brief's table itself
 // (only the empty/error examples are) and aren't invented here — title mapping only, for
-// now. Not yet imported anywhere; screens still branch on raw order.status /
-// job.shopStatus directly (see SHOP_STATUS_FROM_ORDER_STATUS / MOBILE_STAGE_FROM_STATUS
-// in App.js, which are a different, workflow-stage mapping — this is the display-copy one).
+// now. Used in screens/JobsScreen.js (shop-status badge fallback) and
+// screens/CalendarScreen.js (appointment cancelled/declined label) so far
+// (2026-07) — both were real raw-status leaks, not a blanket screen-by-screen
+// migration. Most status displays are a different concept (short badges,
+// progress-steppers — see SHOP_STATUS_FROM_ORDER_STATUS / MOBILE_STAGE_FROM_STATUS
+// in App.js, or utils/jobUtils.js's getJobStatusMeta) and intentionally don't use
+// this file; it's for sentence-length status copy specifically, not a universal swap-in.
 
 export const STATUS_TITLE = {
   pending: 'Finding a provider',
