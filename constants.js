@@ -1,4 +1,4 @@
-export const API_URL = 'https://auterio-backend-production.up.railway.app/api';
+export const API_URL = process.env.EXPO_PUBLIC_API_URL || 'https://auterio-backend-production.up.railway.app/api';
 export const GOOGLE_API_KEY = process.env.EXPO_PUBLIC_GOOGLE_API_KEY;
 
 export const ACCEPT_BLUE = '#276EF1';

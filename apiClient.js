@@ -1,4 +1,5 @@
 import * as SecureStore from 'expo-secure-store';
+import { API_URL } from './constants';
 
 let refreshPromise = null;
 let authFailureHandler = null;
@@ -10,7 +11,7 @@ async function refreshAccessToken() {
   refreshPromise = (async () => {
     const refreshToken = await SecureStore.getItemAsync('providerRefreshToken');
     if (!refreshToken) throw new Error('No refresh token');
-    const response = await fetch('https://auterio-backend-production.up.railway.app/api/auth/refresh', {
+    const response = await fetch(`${API_URL}/auth/refresh`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refreshToken }),

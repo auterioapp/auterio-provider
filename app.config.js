@@ -29,7 +29,9 @@ module.exports = {
       favicon: "./assets/favicon.png",
     },
     plugins: [
+      "expo-status-bar",
       "expo-secure-store",
+      "expo-font",
       [
         "expo-location",
         {
