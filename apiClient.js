@@ -6,6 +6,10 @@ let authFailureHandler = null;
 
 export const setAuthFailureHandler = handler => { authFailureHandler = handler; };
 
+// The server rejected the refresh token — as opposed to a network problem, which
+// must never sign the provider out.
+const isAuthRejection = (error) => [400, 401, 403].includes(error?.status) || error?.message === 'No refresh token';
+
 async function refreshAccessToken() {
   if (refreshPromise) return refreshPromise;
   refreshPromise = (async () => {
@@ -16,8 +20,12 @@ async function refreshAccessToken() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ refreshToken }),
     });
-    const data = await response.json();
-    if (!response.ok || !data.token) throw new Error(data.error || 'Session expired');
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.token) {
+      const error = new Error(data.error || 'Session expired');
+      error.status = response.ok ? 401 : response.status;
+      throw error;
+    }
     await Promise.all([
       SecureStore.setItemAsync('providerToken', data.token),
       SecureStore.setItemAsync('providerRefreshToken', data.refreshToken),
@@ -44,12 +52,14 @@ export async function authorizedFetch(url, options = {}) {
     try {
       token = await refreshAccessToken();
       response = await request(url, options, token);
-    } catch (_) {
-      await Promise.all([
-        SecureStore.deleteItemAsync('providerToken'),
-        SecureStore.deleteItemAsync('providerRefreshToken'),
-      ]);
-      authFailureHandler?.();
+    } catch (error) {
+      if (isAuthRejection(error)) {
+        await Promise.all([
+          SecureStore.deleteItemAsync('providerToken'),
+          SecureStore.deleteItemAsync('providerRefreshToken'),
+        ]);
+        authFailureHandler?.();
+      }
     }
   }
   return response;

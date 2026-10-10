@@ -425,6 +425,14 @@ function AppInner() {
   };
 
   const handleLogout = async () => {
+    // End this device's session on the server first (best-effort, capped so an
+    // offline logout isn't held up), with the failure handler off so a rejected
+    // token here doesn't re-enter logout.
+    setOnAuthFailure(null);
+    await Promise.race([
+      fetchJson(`${API_URL}/auth/logout`, { method: 'POST' }).catch(() => {}),
+      new Promise(resolve => setTimeout(resolve, 3000)),
+    ]);
     setAuthToken(null);
     setRefreshToken(null);
     setOnAuthFailure(null);

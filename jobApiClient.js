@@ -15,15 +15,20 @@ async function tryRefreshToken() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ refreshToken: _refreshToken }),
       });
-      if (!res.ok) throw new Error('Refresh failed');
+      if (!res.ok) {
+        const error = new Error('Refresh failed');
+        error.status = res.status;
+        throw error;
+      }
       const data = await res.json();
       _authToken = data.token;
       _refreshToken = data.refreshToken;
       await SecureStore.setItemAsync('providerToken', data.token);
       await SecureStore.setItemAsync('providerRefreshToken', data.refreshToken);
       return true;
-    } catch {
-      _onAuthFailure?.();
+    } catch (error) {
+      // Only a rejected refresh token signs the provider out; a network error doesn't.
+      if ([400, 401, 403].includes(error?.status)) _onAuthFailure?.();
       return false;
     } finally {
       _refreshPromise = null;
