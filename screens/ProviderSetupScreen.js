@@ -9,6 +9,7 @@ import { authorizedFetch } from '../apiClient';
 import { API_URL } from '../constants';
 import { useProvider } from '../ProviderContext';
 import { savePricing, DEFAULT_PRICING } from '../utils/pricingStore';
+import { deviceTimeZone } from '../utils/timeZone';
 
 // ── Services data (labels must match ServicesScreen exactly) ──────────────────
 
@@ -349,7 +350,7 @@ export default function ProviderSetupScreen({ onComplete, onSkip }) {
         const res = await authorizedFetch(`${API_URL}/schedules/${provider.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(buildSchedule()),
+          body: JSON.stringify({ ...buildSchedule(), timezone: deviceTimeZone() }),
         });
         if (!res.ok) throw new Error('Could not save schedule');
         setStep(4);

@@ -5,6 +5,7 @@ import { authorizedFetch } from '../apiClient';
 import { API_URL } from '../constants';
 import { useProvider } from '../ProviderContext';
 import { loadPricing } from '../utils/pricingStore';
+import { deviceTimeZone } from '../utils/timeZone';
 
 const INITIAL_DAYS = [
   { id: 'mon', label: 'Monday',    enabled: true,  startH: 8,  startM: 0,  startP: 'AM', endH: 6,  endM: 0,  endP: 'PM' },
@@ -183,13 +184,18 @@ export default function WorkingHoursScreen({ visible, onClose, onSave }) {
           close: uiTimeToApi(day.endH, day.endM, day.endP),
         };
       });
-      const body = { days: apiDays };
+      const body = { days: apiDays, timezone: deviceTimeZone() };
       if (hasAppointments) body.slotDuration = slotDuration;
-      await authorizedFetch(`${API_URL}/schedules/${provider.id}`, {
+      const res = await authorizedFetch(`${API_URL}/schedules/${provider.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        Alert.alert('Couldn\'t save hours', data.error || 'Check your connection and try again.');
+        return;
+      }
       onSave?.(days);
       Alert.alert('Saved', 'Schedule updated.');
       onClose();
