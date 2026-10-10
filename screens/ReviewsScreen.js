@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { Animated, Dimensions, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { authorizedFetch } from '../apiClient';
+import { API_URL } from '../constants';
+import { useProvider } from '../ProviderContext';
 
 const RATING_DATA = {
   average: 4.9,
@@ -45,8 +48,53 @@ const RECENT_REVIEWS = [
   },
 ];
 
+const AVATAR_COLORS = ['#5E646D', '#374151', '#4B5563'];
+
+const ratingLabel = (average) => {
+  if (average >= 4.5) return 'Excellent';
+  if (average >= 4) return 'Very good';
+  if (average >= 3) return 'Good';
+  if (average >= 2) return 'Fair';
+  return 'Poor';
+};
+
+// Shapes GET /profiles/:id/reviews into what the demo data already looks like.
+function toScreenData(payload) {
+  const distribution = [5, 4, 3, 2, 1].map(stars => ({ stars, count: payload.distribution?.[stars] || 0 }));
+  return {
+    rating: { average: payload.average ?? 0, total: payload.count || 0, label: ratingLabel(payload.average || 0), distribution },
+    reviews: (payload.reviews || []).map((review, index) => ({
+      id: review.id,
+      name: review.name,
+      date: new Date(review.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+      rating: review.rating,
+      text: review.comment || review.tags.join(' · '),
+      initials: review.name.split(' ').map(part => part[0]).join('').slice(0, 2).toUpperCase(),
+      avatarColor: AVATAR_COLORS[index % AVATAR_COLORS.length],
+    })),
+  };
+}
+
 export default function ReviewsScreen({ visible, onClose, isDemo }) {
+  const { provider } = useProvider();
   const [modalVisible, setModalVisible] = useState(visible);
+  const [realData, setRealData] = useState(null);
+  const [loadState, setLoadState] = useState('idle'); // idle | loading | error
+
+  useEffect(() => {
+    if (!visible || isDemo || !provider?.id) return;
+    let cancelled = false;
+    setLoadState('loading');
+    authorizedFetch(`${API_URL}/profiles/${provider.id}/reviews`)
+      .then(res => (res.ok ? res.json() : Promise.reject(new Error(`Request failed: ${res.status}`))))
+      .then(payload => { if (!cancelled) { setRealData(toScreenData(payload)); setLoadState('idle'); } })
+      .catch(() => { if (!cancelled) setLoadState('error'); });
+    return () => { cancelled = true; };
+  }, [visible, isDemo, provider?.id]);
+
+  const ratingData = isDemo ? RATING_DATA : realData?.rating;
+  const recentReviews = isDemo ? RECENT_REVIEWS : (realData?.reviews || []);
+  const hasReviews = isDemo || (ratingData?.total || 0) > 0;
   const slideAnim = useRef(new Animated.Value(Dimensions.get('window').width)).current;
 
   useEffect(() => {
@@ -71,31 +119,37 @@ export default function ReviewsScreen({ visible, onClose, isDemo }) {
           <View style={styles.headerRight} />
         </View>
 
-        {!isDemo ? (
+        {!hasReviews ? (
           <View style={styles.emptyState}>
-            <Ionicons name="star-outline" size={48} color="#C8CDD4" />
-            <Text style={styles.emptyTitle}>No reviews yet</Text>
-            <Text style={styles.emptySub}>Reviews from your customers will appear here once you complete your first job.</Text>
+            <Ionicons name={loadState === 'error' ? 'cloud-offline-outline' : 'star-outline'} size={48} color="#C8CDD4" />
+            <Text style={styles.emptyTitle}>
+              {loadState === 'loading' ? 'Loading reviews…' : loadState === 'error' ? 'Couldn\'t load reviews' : 'No reviews yet'}
+            </Text>
+            <Text style={styles.emptySub}>
+              {loadState === 'error'
+                ? 'Check your connection, then close and reopen this screen.'
+                : 'Reviews from your customers will appear here once you complete your first job.'}
+            </Text>
           </View>
         ) : (
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           <View style={styles.summaryCard}>
             <View style={styles.summaryTop}>
-              <Text style={styles.ratingBig}>{RATING_DATA.average}</Text>
+              <Text style={styles.ratingBig}>{ratingData.average}</Text>
               <Ionicons name="star" size={30} color="#F5B301" style={styles.ratingBigStar} />
             </View>
             <View style={styles.summaryMeta}>
-              <Text style={styles.ratingLabel}>{RATING_DATA.label}</Text>
-              <Text style={styles.ratingTotal}>{RATING_DATA.total} reviews</Text>
+              <Text style={styles.ratingLabel}>{ratingData.label}</Text>
+              <Text style={styles.ratingTotal}>{ratingData.total} reviews</Text>
             </View>
             <View style={styles.barsSection}>
-              {RATING_DATA.distribution.map(({ stars, count }) => (
+              {ratingData.distribution.map(({ stars, count }) => (
                 <View key={stars} style={styles.barRow}>
                   <Text style={styles.barStar}>{stars}</Text>
                   <Ionicons name="star" size={12} color="#F5B301" />
                   <View style={styles.barTrack}>
                     <View style={[styles.barFill, { flex: count || 0.01 }]} />
-                    <View style={{ flex: RATING_DATA.total - count }} />
+                    <View style={{ flex: ratingData.total - count }} />
                   </View>
                   <Text style={styles.barCount}>{count}</Text>
                 </View>
@@ -105,13 +159,15 @@ export default function ReviewsScreen({ visible, onClose, isDemo }) {
 
           <View style={styles.recentHeader}>
             <Text style={styles.recentTitle}>Recent Reviews</Text>
-            <TouchableOpacity activeOpacity={0.7}>
-              <Text style={styles.seeAll}>See all</Text>
-            </TouchableOpacity>
+            {isDemo && (
+              <TouchableOpacity activeOpacity={0.7}>
+                <Text style={styles.seeAll}>See all</Text>
+              </TouchableOpacity>
+            )}
           </View>
 
           <View style={styles.reviewsCard}>
-            {RECENT_REVIEWS.map((review, index) => (
+            {recentReviews.map((review, index) => (
               <View key={review.id} style={[styles.reviewItem, index > 0 && styles.reviewItemBorder]}>
                 <View style={styles.reviewTop}>
                   <View style={[styles.avatar, { backgroundColor: review.avatarColor }]}>
@@ -127,7 +183,7 @@ export default function ReviewsScreen({ visible, onClose, isDemo }) {
                     ))}
                   </View>
                 </View>
-                <Text style={styles.reviewText}>{review.text}</Text>
+                {review.text ? <Text style={styles.reviewText}>{review.text}</Text> : null}
               </View>
             ))}
           </View>
