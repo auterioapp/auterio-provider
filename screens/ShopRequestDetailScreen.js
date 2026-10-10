@@ -283,6 +283,7 @@ export default function ShopRequestDetailScreen({ order, accepting, onBack, onAc
       evidence: changeRequestEvidence.trim(),
       amount: Math.round(changeRequestParsedAmount * 100) / 100,
     };
+    const previousItems = additionalApprovals;
     const nextItems = [...additionalApprovals, nextItem];
     setAdditionalApprovals(nextItems);
     advanceStep('in_progress', { additionalApprovals: nextItems });
@@ -292,7 +293,18 @@ export default function ShopRequestDetailScreen({ order, accepting, onBack, onAc
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'add', changeRequest: nextItem }),
-      }).catch(() => {});
+      })
+        .then(async (res) => {
+          if (res.ok) return;
+          const data = await res.json().catch(() => ({}));
+          throw new Error(data.error || 'Check your connection and send it again.');
+        })
+        .catch((e) => {
+          // The customer never received it, so it must not look sent.
+          setAdditionalApprovals(previousItems);
+          advanceStep('in_progress', { additionalApprovals: previousItems });
+          Alert.alert('Extra work not sent', e?.message && !/network/i.test(e.message) ? e.message : 'Check your connection and send it again.');
+        });
     }
     setChangeRequestOpen(false);
   };

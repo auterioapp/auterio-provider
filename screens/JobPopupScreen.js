@@ -704,8 +704,10 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ cancelledBy: 'provider', reason: 'Customer declined estimate' }),
-              }).catch(() => {});
-              onBack?.();
+              })
+                .then(() => onBack?.())
+                // Still open on the server: stay here so the provider can retry.
+                .catch((e) => Alert.alert('Job not closed', [400, 403, 409].includes(e?.status) ? e.message : 'Check your connection and try again.'));
             }}
           >
             <Ionicons name="checkmark-done-outline" size={20} color="#5E646D" />
@@ -847,12 +849,17 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
         evidence: changeRequestEvidence.trim(),
         amount: Math.round(changeRequestParsedAmount * 100) / 100,
       };
+      const previousApprovals = additionalApprovals;
       saveAdditionalApprovals([...additionalApprovals, nextItem]);
       fetchJson(`${API_URL}/orders/${job.id}/change-request`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'add', changeRequest: nextItem }),
-      }).catch(e => console.log('Change request sync error:', e.message));
+      }).catch((e) => {
+        // The customer never received it, so it must not look sent.
+        saveAdditionalApprovals(previousApprovals);
+        Alert.alert('Extra work not sent', [400, 403, 409].includes(e?.status) ? e.message : 'Check your connection and send it again.');
+      });
       setChangeRequestOpen(false);
     };
     const updateAdditionalApproval = (id, status) => {

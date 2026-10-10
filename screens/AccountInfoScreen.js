@@ -65,7 +65,9 @@ export default function AccountInfoScreen({ visible, onClose, isDemoAccount }) {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ description: value.trim() }),
-    }).catch(() => {});
+    })
+      .then(res => { if (!res.ok) throw new Error(`Request failed: ${res.status}`); })
+      .catch(() => Alert.alert('Description not saved', 'Check your connection and try again.'));
   };
 
   const handleSave = () => {

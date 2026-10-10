@@ -226,7 +226,10 @@ export default function ServicesScreen({ visible, onClose, isDemoAccount }) {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ services: all }),
-    }).catch(() => {});
+    })
+      .then(res => { if (!res.ok) throw new Error(`Request failed: ${res.status}`); })
+      // Customers find providers by these services, so a failed save must be visible.
+      .catch(() => Alert.alert('Services not saved', 'Your changes are on this phone only. Check your connection and change a service again to retry.'));
   };
 
   const toggleMobile = (id) => {

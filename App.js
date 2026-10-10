@@ -830,6 +830,18 @@ function AppInner() {
     });
   };
 
+  // Server refusals (400/403/409) carry a message meant for the provider; anything
+  // else is most likely the connection.
+  const actionErrorMessage = (error, fallback) => (
+    [400, 403, 409].includes(error?.status) && error.message ? error.message : fallback
+  );
+
+  // Puts a request back in the list after the server refused an action on it.
+  const restoreRequest = (realId) => {
+    dismissedRealIdsRef.current = dismissedRealIdsRef.current.filter(id => id !== realId);
+    loadRequests();
+  };
+
   const cancelShopJob = async (order) => {
     const orderId = order.id || order._id;
     const isReal = orderId && !String(orderId).startsWith('demo');
@@ -841,7 +853,9 @@ function AppInner() {
           body: JSON.stringify({ reason: 'Cancelled by provider' }),
         });
       } catch (e) {
-        console.log('Cancel job error:', e.message);
+        // The job is still active on the server, so it stays in the list.
+        showToast(actionErrorMessage(e, 'Could not cancel this job — check your connection and try again'));
+        return;
       }
     }
     setAcceptedJobs(current => current.filter(job => String(job.id) !== String(orderId)));
@@ -933,10 +947,8 @@ function AppInner() {
       });
       addAcceptedJob(order, { status: 'scheduled', acceptedAt: new Date().toISOString() });
     } catch (error) {
-      console.log('Confirm order error:', error.message);
-      dismissedRealIdsRef.current = dismissedRealIdsRef.current.filter(id => id !== realId);
-      loadRequests();
-      showToast('Could not confirm booking. Please try again.');
+      restoreRequest(realId);
+      showToast(actionErrorMessage(error, 'Could not confirm booking. Please try again.'));
     } finally {
       setAcceptingId(null);
     }
@@ -956,22 +968,18 @@ function AppInner() {
       });
       addAcceptedJob(order, { status: 'confirmed', acceptedAt: new Date().toISOString() });
     } catch (e) {
-      console.log('Schedule accept error:', e.message);
-      dismissedRealIdsRef.current = dismissedRealIdsRef.current.filter(id => id !== realId);
-      loadRequests();
-      showToast(
-        e?.status === 409
-          ? 'This booking was already handled.'
-          : 'Could not confirm booking. Please try again.'
-      );
+      restoreRequest(realId);
+      showToast(e?.status === 409
+        ? 'This booking was already handled.'
+        : actionErrorMessage(e, 'Could not confirm booking. Please try again.'));
     } finally {
       setAcceptingId(null);
     }
   };
 
   const declineScheduledBooking = async (order, note) => {
+    const realId = String(order.id || order._id);
     try {
-      const realId = String(order.id || order._id);
       dismissedRealIdsRef.current = [...dismissedRealIdsRef.current, realId];
       setRequests(c => c.filter(item => String(item.id || item._id) !== realId));
       setSelectedRequest(null);
@@ -982,13 +990,14 @@ function AppInner() {
         body: JSON.stringify({ providerNote: note || null }),
       });
     } catch (e) {
-      console.log('Schedule decline error:', e.message);
+      restoreRequest(realId);
+      showToast(actionErrorMessage(e, 'Could not decline this booking — it\'s back in your requests.'));
     }
   };
 
   const counterScheduledBooking = async (order, counterDate, counterSlot, note) => {
+    const realId = String(order.id || order._id);
     try {
-      const realId = String(order.id || order._id);
       dismissedRealIdsRef.current = [...dismissedRealIdsRef.current, realId];
       setRequests(c => c.filter(item => String(item.id || item._id) !== realId));
       setSelectedRequest(null);
@@ -998,8 +1007,10 @@ function AppInner() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ counterDate, counterSlot, providerNote: note || null }),
       });
+      showToast('New time sent to the customer');
     } catch (e) {
-      console.log('Schedule counter error:', e.message);
+      restoreRequest(realId);
+      showToast(actionErrorMessage(e, 'Could not send the new time — the booking is back in your requests.'));
     }
   };
 
@@ -1013,7 +1024,12 @@ function AppInner() {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ providerId: provider.id }),
-      }).catch(() => {});
+      }).catch((e) => {
+        // 409: the request was already taken or closed — hiding it is right.
+        if (e?.status === 409) return;
+        restoreRequest(realId);
+        showToast(actionErrorMessage(e, 'Could not decline this request — it\'s back in your list.'));
+      });
     }
   };
 
@@ -1028,10 +1044,11 @@ function AppInner() {
 
   const scheduleOrder = async (order, appointmentTime) => {
     if (!guardProfileComplete()) return;
+    const orderId = String(order.id || order._id);
     try {
       setAcceptingId(order.id);
       const nextJob = addAcceptedJob(order, { status: 'proposed', appointmentTime, acceptedAt: new Date().toISOString() });
-      fetchJson(`${API_URL}/orders/${order.id}/accept`, {
+      await fetchJson(`${API_URL}/orders/${order.id}/accept`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -1043,10 +1060,16 @@ function AppInner() {
           },
           appointmentTime,
         }),
-      }).catch(e => console.log('Schedule order sync error:', e.message));
+      });
       return nextJob;
     } catch (error) {
-      console.log('Schedule order error:', error.message);
+      // Same rollback as acceptOrder: the order goes back to the requests list.
+      setAcceptedJobs(current => current.filter(j => String(j.id) !== orderId));
+      setAcceptedRequestIds(current => current.filter(id => id !== orderId));
+      loadRequests();
+      showToast(error?.status === 409
+        ? 'This order was already taken by another provider.'
+        : actionErrorMessage(error, 'Could not schedule this order. Please try again.'));
     } finally {
       setAcceptingId(null);
     }
