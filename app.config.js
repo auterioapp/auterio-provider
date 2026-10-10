@@ -28,7 +28,10 @@ module.exports = {
     web: {
       favicon: "./assets/favicon.png",
     },
+    // EAS project id for push tokens: set EAS_PROJECT_ID in .env (from `eas init`).
+    extra: process.env.EAS_PROJECT_ID ? { eas: { projectId: process.env.EAS_PROJECT_ID } } : {},
     plugins: [
+      "expo-notifications",
       "expo-status-bar",
       "expo-secure-store",
       "expo-font",

@@ -3,6 +3,7 @@ import { ActivityIndicator, Alert, Animated, AppState, Easing, Linking, Modal, P
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
 import * as Device from 'expo-device';
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -43,8 +44,18 @@ const DEMO_EMAIL = 'auterioapp@gmail.com';
 Text.defaultProps = Text.defaultProps || {};
 Text.defaultProps.allowFontScaling = false;
 
+// Show new requests and updates as banners even while the app is open.
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({ shouldShowBanner: true, shouldShowList: true, shouldPlaySound: true, shouldSetBadge: false }),
+});
+
 async function registerPushToken(providerId) {
   if (!Device.isDevice) return;
+  const projectId = Constants.expoConfig?.extra?.eas?.projectId ?? Constants.easConfig?.projectId;
+  if (!projectId) {
+    console.log('Push notifications disabled: no EAS projectId (set EAS_PROJECT_ID).');
+    return;
+  }
   try {
     const { status: existing } = await Notifications.getPermissionsAsync();
     let finalStatus = existing;
@@ -53,7 +64,7 @@ async function registerPushToken(providerId) {
       finalStatus = status;
     }
     if (finalStatus !== 'granted') return;
-    const tokenData = await Notifications.getExpoPushTokenAsync();
+    const tokenData = await Notifications.getExpoPushTokenAsync({ projectId });
     const pushToken = tokenData.data;
     await fetchJson(`${API_URL}/profiles/${providerId}/push-token`, {
       method: 'PATCH',
@@ -692,6 +703,37 @@ function AppInner() {
     const timer = setInterval(pingLocation, 60000);
     return () => { cancelled = true; clearInterval(timer); };
   }, [isDemo, online, providerType, provider.id]);
+
+  // Tapping a notification opens the matching part of the app. Kept in a ref so the
+  // listener (registered once) always calls the current render's handlers.
+  const openFromNotificationRef = useRef(null);
+  openFromNotificationRef.current = (data) => {
+    if (!data?.type) return;
+    if (data.type === 'new_order') {
+      selectTabAt(Math.max(0, TABS.findIndex(t => t.key === 'requests')));
+      loadRequests();
+    } else if (data.type === 'estimate_approved' || data.type === 'order_status') {
+      selectTabAt(Math.max(0, TABS.findIndex(t => t.key === 'jobs')));
+      loadProviderJobsFromBackend(provider.id);
+    } else if (data.type === 'verification_update') {
+      syncProviderProfile();
+    } else if (data.type === 'new_review') {
+      selectTabAt(Math.max(0, TABS.findIndex(t => t.key === 'profile')));
+    }
+  };
+
+  useEffect(() => {
+    if (isDemo || authState !== 'app') return undefined;
+    const lastResponse = Notifications.getLastNotificationResponse();
+    if (lastResponse) {
+      Notifications.clearLastNotificationResponse();
+      openFromNotificationRef.current?.(lastResponse.notification.request.content.data);
+    }
+    const subscription = Notifications.addNotificationResponseReceivedListener(response => {
+      openFromNotificationRef.current?.(response.notification.request.content.data);
+    });
+    return () => subscription.remove();
+  }, [isDemo, authState]);
 
   useEffect(() => {
     if (isDemo) return;
