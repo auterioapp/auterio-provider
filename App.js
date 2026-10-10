@@ -713,47 +713,71 @@ function AppInner() {
     return () => subscription.remove();
   }, [isDemo]);
 
+  // Every shop step that changes the order is sent to the backend. The step is
+  // shown right away and rolled back if the server refuses it, so the provider
+  // never sees a step the customer (and billing) doesn't. 'estimate' is a local
+  // drafting step and has no server status.
+  const SHOP_STEP_TO_ORDER_STATUS = {
+    checked_in: 'arrived',
+    inspection: 'inspection',
+    waiting_approval: 'estimate_sent',
+    in_progress: 'in_progress',
+    completed: 'completed',
+  };
+
   const updateShopStep = (order, newShopStatus, extra = {}) => {
-    setAcceptedJobs(current => current.map(job =>
-      String(job.id) === String(order.id)
-        ? { ...job, shopStatus: newShopStatus, ...extra }
-        : job
-    ));
-    const orderId = order.id || order._id;
-    const isReal = orderId && !String(orderId).startsWith('demo');
-    if (newShopStatus === 'checked_in' && isReal) {
-      fetchJson(`${API_URL}/orders/${orderId}/status`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'arrived' }),
-      }).catch(e => console.log('Check-in sync error:', e.message));
-    } else if (newShopStatus === 'inspection' && isReal) {
-      fetchJson(`${API_URL}/orders/${orderId}/status`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'inspection' }),
-      }).catch(e => console.log('Inspection sync error:', e.message));
-    } else if (newShopStatus === 'waiting_approval' && extra?.estimate) {
-      if (isReal) {
-        fetchJson(`${API_URL}/orders/${orderId}/status`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            status: 'estimate_sent',
-            estimate: extra.estimate,
-          }),
-        }).then(() => {
-          showToast('Estimate sent to customer');
-        }).catch(e => {
-          console.log('Estimate sync error:', e.message);
-          showToast('Could not send estimate — check your connection and try again');
-        });
-      } else {
-        showToast('Estimate sent to customer');
-      }
-    } else if (newShopStatus === 'completed') {
-      showToast('Job completed!');
+    const jobId = String(order.id || order._id);
+    let previousShopStatus = order.shopStatus;
+    setAcceptedJobs(current => current.map(job => {
+      if (String(job.id) !== jobId) return job;
+      previousShopStatus = job.shopStatus;
+      return { ...job, shopStatus: newShopStatus, ...extra };
+    }));
+
+    const isReal = jobId && !jobId.startsWith('demo');
+    const status = SHOP_STEP_TO_ORDER_STATUS[newShopStatus];
+    // Adding photos, notes or extra work while the server already has the job in
+    // progress doesn't change the order status. Checked against the server status,
+    // not the local step: the estimate_approved push moves the local step without
+    // telling the server.
+    const unchanged = status === 'in_progress' && order.status === 'in_progress';
+    if (!isReal || !status || unchanged) {
+      if (newShopStatus === 'waiting_approval' && extra?.estimate) showToast('Estimate sent to customer');
+      if (newShopStatus === 'completed') showToast('Job completed!');
+      return;
     }
+
+    const body = { status };
+    if (status === 'estimate_sent') body.estimate = extra.estimate;
+    if (status === 'completed') {
+      body.serviceDetails = {
+        providerNotes: extra.workSummary || order.workSummary || '',
+        photos: extra.workPhotos || order.workPhotos || [],
+      };
+    }
+
+    fetchJson(`${API_URL}/orders/${jobId}/status`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then((updated) => {
+      if (updated?.status) {
+        setAcceptedJobs(current => current.map(job => (String(job.id) === jobId ? { ...job, status: updated.status } : job)));
+        setSelectedJob(prev => (prev && String(prev.id) === jobId ? { ...prev, status: updated.status } : prev));
+      }
+      if (status === 'estimate_sent') showToast('Estimate sent to customer');
+      if (status === 'completed') {
+        showToast('Job completed!');
+        loadProviderJobsFromBackend(provider.id);
+      }
+    }).catch((error) => {
+      console.log('Shop step sync error:', error.message);
+      setAcceptedJobs(current => current.map(job => (String(job.id) === jobId ? { ...job, shopStatus: previousShopStatus } : job)));
+      setSelectedJob(prev => (prev && String(prev.id) === jobId ? { ...prev, shopStatus: previousShopStatus } : prev));
+      showToast(error?.status === 409 || error?.status === 400 || error?.status === 403
+        ? error.message
+        : 'Could not save this step — check your connection and try again');
+    });
   };
 
   const cancelShopJob = async (order) => {
