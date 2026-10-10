@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Alert, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import PayoutsScreen from './PayoutsScreen';
 import PayoutHistoryScreen from './PayoutHistoryScreen';
 import { formatCurrency, getProviderEarnings } from '../utils/estimateUtils';
 import { useProvider } from '../ProviderContext';
+import { authorizedFetch } from '../apiClient';
+import { API_URL } from '../constants';
 
 const DEMO_HISTORY = [
   { date: 'Jun 18, 2025', label: 'Weekly Payout', amount: '$1,750.00', status: 'Completed' },
@@ -13,12 +15,61 @@ const DEMO_HISTORY = [
 
 const STATUS_COLOR = { Completed: '#16A34A', Processing: '#D97706', Failed: '#DC2626' };
 
+// Stripe payout statuses → the labels these screens already use.
+const PAYOUT_STATUS_LABEL = { paid: 'Completed', pending: 'Processing', in_transit: 'Processing', failed: 'Failed', canceled: 'Failed' };
+const TWO_WEEKS_MS = 14 * 24 * 60 * 60 * 1000;
+
+export function toPayoutRow(payout) {
+  const arrival = new Date(payout.arrivalDate);
+  return {
+    id: payout.id,
+    label: 'Payout to bank',
+    date: arrival.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+    month: arrival.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
+    arrivalDate: payout.arrivalDate,
+    amount: formatCurrency(payout.amount),
+    status: PAYOUT_STATUS_LABEL[payout.status] || 'Processing',
+  };
+}
+
 export default function EarningsPayoutScreen({ visible, onClose, isDemo, completedOrders = [] }) {
   const { provider } = useProvider();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const history = isDemo ? DEMO_HISTORY : [];
-  const lifetimeEarned = completedOrders.reduce((acc, o) => acc + getProviderEarnings(o, null, o.additionalApprovals, null, provider?.commissionRate).netEarnings, 0);
+  const [stripeData, setStripeData] = useState(null); // { balance, payouts, bankAccount, lifetime }
+  const [loadError, setLoadError] = useState(null);
+
+  const loadStripeData = useCallback(async () => {
+    if (isDemo || !provider?.id) return;
+    try {
+      setLoadError(null);
+      const [payoutsRes, accountRes, earningsRes] = await Promise.all([
+        authorizedFetch(`${API_URL}/stripe/connect/payouts`),
+        authorizedFetch(`${API_URL}/stripe/connect/account/${provider.id}`),
+        authorizedFetch(`${API_URL}/stripe/connect/earnings`),
+      ]);
+      if (!payoutsRes.ok || !accountRes.ok || !earningsRes.ok) throw new Error('Request failed');
+      const [payoutsData, account, earnings] = await Promise.all([payoutsRes.json(), accountRes.json(), earningsRes.json()]);
+      setStripeData({
+        connected: !!account.connected,
+        bankAccount: account.bankAccount || null,
+        balance: payoutsData.balance,
+        payouts: (payoutsData.payouts || []).map(toPayoutRow),
+        lifetime: earnings.totals?.lifetime ?? null,
+      });
+    } catch {
+      setLoadError('Could not load payouts. Close and reopen this screen to try again.');
+    }
+  }, [isDemo, provider?.id]);
+
+  useEffect(() => { if (visible) loadStripeData(); }, [visible, loadStripeData]);
+
+  const recentPayouts = (stripeData?.payouts || []).filter(p => Date.now() - new Date(p.arrivalDate).getTime() <= TWO_WEEKS_MS);
+  const history = isDemo ? DEMO_HISTORY : recentPayouts;
+  const localLifetime = completedOrders.reduce((acc, o) => acc + getProviderEarnings(o, null, o.additionalApprovals, null, provider?.commissionRate).netEarnings, 0);
+  const lifetimeEarned = stripeData?.lifetime ?? localLifetime;
+  const balance = stripeData?.balance;
+  const bank = stripeData?.bankAccount;
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
@@ -39,7 +90,14 @@ export default function EarningsPayoutScreen({ visible, onClose, isDemo, complet
               <View>
                 <Text style={styles.balanceLabel}>Total Earned</Text>
                 <Text style={styles.balanceAmount}>{isDemo ? '$2,180.00' : formatCurrency(lifetimeEarned)}</Text>
-                <Text style={styles.balanceSub}>{isDemo ? 'Next payout: Jun 25' : (lifetimeEarned > 0 ? 'From all completed jobs' : 'No completed jobs yet')}</Text>
+                <Text style={styles.balanceSub}>
+                  {isDemo
+                    ? 'Next payout: Jun 25'
+                    : balance
+                      ? `On the way to your bank: ${formatCurrency(balance.pending + balance.available)}`
+                      : (lifetimeEarned > 0 ? 'From all completed jobs' : 'No completed jobs yet')}
+                </Text>
+                {loadError ? <Text style={styles.loadError}>{loadError}</Text> : null}
               </View>
               <View style={styles.walletIcon}>
                 <Ionicons name="wallet-outline" size={22} color="#16A34A" />
@@ -47,7 +105,7 @@ export default function EarningsPayoutScreen({ visible, onClose, isDemo, complet
             </View>
             <View style={[styles.transferBtn, styles.transferBtnDisabled]}>
               <Ionicons name="arrow-up-outline" size={16} color="#9CA3AF" />
-              <Text style={[styles.transferBtnText, styles.transferBtnTextDisabled]}>Transfer Funds — Coming Soon</Text>
+              <Text style={[styles.transferBtnText, styles.transferBtnTextDisabled]}>Paid out to your bank automatically</Text>
             </View>
           </View>
 
@@ -56,7 +114,7 @@ export default function EarningsPayoutScreen({ visible, onClose, isDemo, complet
             <Text style={styles.sectionTitle}>Payout History</Text>
             <View style={styles.card}>
               {history.length > 0 ? history.map((item, index) => (
-                <View key={item.date} style={[styles.historyRow, index > 0 && styles.historyRowBorder]}>
+                <View key={item.id || item.date} style={[styles.historyRow, index > 0 && styles.historyRowBorder]}>
                   <View style={styles.historyIcon}>
                     <Ionicons name="cash-outline" size={18} color="#16A34A" />
                   </View>
@@ -94,8 +152,12 @@ export default function EarningsPayoutScreen({ visible, onClose, isDemo, complet
                   <Ionicons name="calendar-outline" size={18} color="#2563EB" />
                 </View>
                 <View style={styles.methodInfo}>
-                  <Text style={styles.methodTitle}>Weekly</Text>
-                  <Text style={styles.methodSub}>Chase Checking (•••• 4821)</Text>
+                  <Text style={styles.methodTitle}>{isDemo ? 'Weekly' : bank ? 'Automatic payouts' : 'No bank account yet'}</Text>
+                  <Text style={styles.methodSub}>
+                    {isDemo
+                      ? 'Chase Checking (•••• 4821)'
+                      : bank ? `${bank.bankName || 'Bank account'} (•••• ${bank.last4})` : 'Tap to add your bank account'}
+                  </Text>
                 </View>
                 <Ionicons name="chevron-forward" size={18} color="#C8CDD4" />
               </View>
@@ -133,8 +195,8 @@ export default function EarningsPayoutScreen({ visible, onClose, isDemo, complet
 
         </ScrollView>
 
-        <PayoutsScreen visible={settingsOpen} onClose={() => setSettingsOpen(false)} isDemo={isDemo} />
-        <PayoutHistoryScreen visible={historyOpen} onClose={() => setHistoryOpen(false)} isDemo={isDemo} />
+        <PayoutsScreen visible={settingsOpen} onClose={() => { setSettingsOpen(false); loadStripeData(); }} isDemo={isDemo} />
+        <PayoutHistoryScreen visible={historyOpen} onClose={() => setHistoryOpen(false)} isDemo={isDemo} payouts={stripeData?.payouts || []} />
       </View>
     </Modal>
   );
@@ -153,6 +215,7 @@ const styles = StyleSheet.create({
   balanceLabel: { color: '#5E646D', fontSize: 13, fontWeight: '500', marginBottom: 4 },
   balanceAmount: { color: '#17191D', fontSize: 34, fontWeight: '800', lineHeight: 40 },
   balanceSub: { color: '#5E646D', fontSize: 13, fontWeight: '500', marginTop: 4 },
+  loadError: { color: '#DC2626', fontSize: 12, marginTop: 4 },
   walletIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#ECFDF5', alignItems: 'center', justifyContent: 'center' },
   transferBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7, backgroundColor: '#17191D', borderRadius: 10, paddingVertical: 13 },
   transferBtnText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },

@@ -16,17 +16,22 @@ export function getInvoiceData(job, workflow, additionalApprovals, fallbackEstim
     parts: persistedEstimate.partsItems || [],
     fees: persistedEstimate.fees || [],
   } : (fallbackEstimate || { labor: [], parts: [], fees: [], subtotal: 0, tax: 0, total: 0 });
-  const originalTotal = job.approvedTotal ?? workflow?.approvedTotal ?? invoiceEstimate.total ?? 0;
+  const originalTotal = job.orderContext?.approvedTotal ?? job.approvedTotal ?? workflow?.approvedTotal ?? invoiceEstimate.total ?? 0;
   const approvedRequiredChanges = (additionalApprovals || []).filter(item => item.status === 'approved');
   const approvedAdditionalTotal = sumAmounts(approvedRequiredChanges);
-  const finalTotal = originalTotal + approvedAdditionalTotal;
+  // Extra work is taxed like the estimate, and the tax is part of what the customer
+  // pays — same rule as the backend (routes/orderMoney.finalOrderTotal). Once the
+  // order is charged, the server's final total is what was actually collected.
+  const approvedAdditionalTax = Math.round(approvedAdditionalTotal * 0.0675 * 100) / 100;
+  const finalTotal = job.payment?.finalTotal
+    ?? Math.round((originalTotal + approvedAdditionalTotal + approvedAdditionalTax) * 100) / 100;
   const invoiceNumber = `INV-${job.number || '00000'}`;
   const PAYMENT_METHOD_LABELS = { apple: 'Apple Pay', google: 'Google Pay', paypal: 'PayPal', efs: 'EFS', comcheck: 'Comcheck', fleet: 'Fleet One', tchek: 'T-Chek' };
   const paymentMethod = (job.payment?.brand && job.payment?.last4)
     ? `${job.payment.brand.charAt(0).toUpperCase()}${job.payment.brand.slice(1)} ••••${job.payment.last4}`
     : PAYMENT_METHOD_LABELS[job.payment?.method] || 'Card on file';
   const approveOptional = job.approveOptional ?? workflow?.approveOptional ?? false;
-  const invoiceTax = Math.round(((invoiceEstimate.tax || 0) + (approveOptional ? (invoiceEstimate.optionalTax || 0) : 0) + approvedAdditionalTotal * 0.0675) * 100) / 100;
+  const invoiceTax = Math.round(((invoiceEstimate.tax || 0) + (approveOptional ? (invoiceEstimate.optionalTax || 0) : 0) + approvedAdditionalTax) * 100) / 100;
   const invoiceSubtotal = (invoiceEstimate.subtotal || 0) + (approveOptional ? (invoiceEstimate.optionalSubtotal || 0) : 0) + approvedAdditionalTotal;
   return { invoiceEstimate, invoiceNumber, paymentMethod, invoiceTax, invoiceSubtotal, finalTotal, approvedRequiredChanges, approveOptional };
 }
@@ -44,8 +49,9 @@ export function getProviderEarnings(job, workflow, additionalApprovals, fallback
     + (approveOptional ? sumAmounts(invoiceEstimate.optionalParts || []) : 0);
   const commissionBase = Math.max(0, finalTotal - partsTotal);
   const rate = commissionRate ?? 0.15;
-  const commission = Math.round(commissionBase * rate * 100) / 100;
-  const netEarnings = Math.round((finalTotal - commission) * 100) / 100;
+  // After payout the server's split is authoritative (services/payouts.computePayout).
+  const commission = job.payment?.platformFee ?? Math.round(commissionBase * rate * 100) / 100;
+  const netEarnings = job.payment?.providerPayout ?? Math.round((finalTotal - commission) * 100) / 100;
   return { ...data, partsTotal, commissionBase, commissionRate: rate, commission, netEarnings };
 }
 

@@ -257,7 +257,7 @@ export default function EarningsScreen({ refreshControl, scrollSignal, isDemo = 
 
     </ScrollView>
       <EarningsPayoutScreen visible={payoutsOpen} onClose={() => setPayoutsOpen(false)} isDemo={isDemo} completedOrders={completedOrders} />
-      <RevenueBreakdownScreen visible={revenueOpen} onClose={() => setRevenueOpen(false)} isDemo={isDemo} />
+      <RevenueBreakdownScreen visible={revenueOpen} onClose={() => setRevenueOpen(false)} isDemo={isDemo} completedOrders={completedOrders} />
     </View>
   );
 }

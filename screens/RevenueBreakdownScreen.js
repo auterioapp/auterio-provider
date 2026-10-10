@@ -96,10 +96,54 @@ function DonutChart({ segments }) {
   );
 }
 
-export default function RevenueBreakdownScreen({ visible, onClose, isDemo }) {
+const PERIOD_START = {
+  'Today': () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; },
+  'This Week': () => { const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - d.getDay()); return d; },
+  'This Month': () => { const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(1); return d; },
+  'This Year': () => { const d = new Date(); d.setHours(0, 0, 0, 0); d.setMonth(0, 1); return d; },
+};
+
+const sumItems = (items) => (items || []).reduce((acc, item) => acc + (Number(item?.amount) || 0), 0);
+
+// Splits what customers paid for completed jobs in the period into the same
+// categories the demo chart uses, from each order's approved estimate.
+function buildRealSegments(completedOrders, period) {
+  const since = PERIOD_START[period]();
+  const totals = { labor: 0, parts: 0, fees: 0, extra: 0, tax: 0 };
+  completedOrders
+    .filter(o => new Date(o.completedAt || o.updatedAt || o.createdAt) >= since)
+    .forEach(o => {
+      const ctx = o.orderContext || {};
+      const estimate = ctx.estimateApprovedAt ? ctx.estimate : null;
+      if (estimate) {
+        const optional = ctx.approveOptional;
+        totals.labor += sumItems(estimate.laborItems) + (optional ? sumItems(estimate.optionalLabor) : 0);
+        totals.parts += sumItems(estimate.partsItems) + (optional ? sumItems(estimate.optionalParts) : 0);
+        totals.fees += sumItems(estimate.fees);
+        totals.tax += (estimate.tax || 0) + (optional ? (estimate.optionalTax || 0) : 0);
+      } else {
+        totals.fees += Number(o.payment?.finalTotal ?? o.payment?.dispatchFee) || 0;
+      }
+      const extra = sumItems((ctx.additionalApprovals || o.additionalApprovals || []).filter(a => a.status === 'approved'));
+      totals.extra += extra;
+      totals.tax += extra * 0.0675;
+    });
+  const rows = [
+    { label: 'Labor', amount: totals.labor, color: '#16A34A' },
+    { label: 'Parts', amount: totals.parts, color: '#93C5FD' },
+    { label: 'Service Call Fee', amount: totals.fees, color: '#A78BFA' },
+    { label: 'Extra Work', amount: totals.extra, color: '#FBBF24' },
+    { label: 'Tax', amount: totals.tax, color: '#D1D5DB' },
+  ].map(r => ({ ...r, amount: Math.round(r.amount * 100) / 100 })).filter(r => r.amount > 0);
+  const grand = rows.reduce((acc, r) => acc + r.amount, 0);
+  return rows.map(r => ({ ...r, pct: grand ? Math.round(r.amount / grand * 1000) / 10 : 0 }));
+}
+
+export default function RevenueBreakdownScreen({ visible, onClose, isDemo, completedOrders = [] }) {
   const [period, setPeriod] = useState('This Week');
   const [showPeriods, setShowPeriods] = useState(false);
-  const segments = DATA_BY_PERIOD[period];
+  const segments = isDemo ? DATA_BY_PERIOD[period] : buildRealSegments(completedOrders, period);
+  const hasRealData = isDemo || completedOrders.length > 0;
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
@@ -112,7 +156,7 @@ export default function RevenueBreakdownScreen({ visible, onClose, isDemo }) {
           <View style={styles.headerRight} />
         </View>
 
-        {!isDemo ? (
+        {!hasRealData ? (
           <View style={styles.emptyState}>
             <Ionicons name="pie-chart-outline" size={48} color="#C8CDD4" />
             <Text style={styles.emptyTitle}>No revenue data yet</Text>
@@ -148,6 +192,12 @@ export default function RevenueBreakdownScreen({ visible, onClose, isDemo }) {
             )}
           </View>
 
+          {segments.length === 0 ? (
+            <View style={styles.periodEmpty}>
+              <Text style={styles.emptySub}>No completed jobs {period === 'Today' ? 'today' : period.toLowerCase()}.</Text>
+            </View>
+          ) : (
+          <>
           {/* Donut chart */}
           <View style={styles.chartWrapper}>
             <DonutChart segments={segments} />
@@ -164,6 +214,8 @@ export default function RevenueBreakdownScreen({ visible, onClose, isDemo }) {
               </View>
             ))}
           </View>
+          </>
+          )}
 
           {/* Disclaimer */}
           <View style={styles.infoCard}>
@@ -197,6 +249,7 @@ const styles = StyleSheet.create({
   periodOptionText: { color: '#374151', fontSize: 14, fontWeight: '500' },
   periodOptionTextActive: { color: '#7C3AED', fontWeight: '700' },
   chartWrapper: { alignItems: 'center', marginVertical: 8 },
+  periodEmpty: { alignItems: 'center', paddingVertical: 48 },
   legendCard: { backgroundColor: '#FFFFFF', borderRadius: 14, borderWidth: 1, borderColor: '#ECEEF0', paddingHorizontal: 16, marginBottom: 12 },
   legendRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, gap: 10 },
   legendRowBorder: { borderTopWidth: 1, borderTopColor: '#F0F1F3' },

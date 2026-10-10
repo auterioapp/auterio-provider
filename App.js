@@ -251,6 +251,8 @@ function AppInner() {
   const isLightVisible = !!selectedRequest || (!selectedRequest && (activeScreen === 'home' || activeScreen === 'requests' || activeScreen === 'jobs' || activeScreen === 'earnings' || activeScreen === 'profile'));
   const [verificationStatus, setVerificationStatus] = useState('unverified');
   const [profileComplete, setProfileComplete] = useState(false);
+  // Mirrors profile.payoutsEnabled; the backend withholds requests until Stripe payouts are set up.
+  const [payoutsEnabled, setPayoutsEnabled] = useState(true);
   const profileCompleteRef = useRef(false);
   const reminderIndexRef = useRef(0);
 
@@ -517,6 +519,24 @@ function AppInner() {
   // the app never polls this on its own, so without an explicit call the UI can sit
   // on a stale verificationStatus indefinitely (e.g. after an admin approves the
   // account elsewhere) until the app is fully restarted.
+  // The service-call fee customers are charged (and held at booking) is profile.dispatch
+  // on the server. Older installs kept it only in local pricing, so a local fee with no
+  // server value is uploaded once; after that the server value wins.
+  const reconcileServiceCallFee = async (profile) => {
+    const pricing = await loadPricing();
+    const localFee = Number.parseFloat(pricing.serviceCallFee) || 0;
+    const serverFee = Number(profile?.dispatch) || 0;
+    if (serverFee > 0 && Math.abs(serverFee - localFee) >= 0.01) {
+      await savePricing({ ...pricing, serviceCallFee: serverFee.toFixed(2) });
+    } else if (serverFee === 0 && localFee > 0) {
+      await fetchJson(`${API_URL}/profiles/${provider.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dispatch: localFee }),
+      }).catch(e => console.log('Service call fee sync error:', e.message));
+    }
+  };
+
   const syncProviderProfile = useCallback(async () => {
     const pricing = await loadPricing();
     let pt = pricing.providerType || 'mobile';
@@ -530,6 +550,8 @@ function AppInner() {
           setVerificationStatus(data.verificationStatus);
           AsyncStorage.setItem('@provider_verification_status', data.verificationStatus);
         }
+        if (typeof data?.payoutsEnabled === 'boolean') setPayoutsEnabled(data.payoutsEnabled);
+        await reconcileServiceCallFee(data);
         // Server is the source of truth for business type — local cache drifts after logout/login.
         if (data?.type && data.type !== pt) {
           pt = data.type;
@@ -803,10 +825,13 @@ function AppInner() {
         current.some(r => String(r.id || r._id) === orderId) ? current : [order, ...current]
       );
       loadRequests();
+      if (error?.status === 403 && /payouts/i.test(error.message || '')) setPayoutsEnabled(false);
       showToast(
         error?.status === 409
           ? 'This order was already taken by another provider.'
-          : 'Could not accept order. Please try again.'
+          : error?.status === 403
+            ? error.message
+            : 'Could not accept order. Please try again.'
       );
     } finally {
       setAcceptingId(null);
@@ -1292,6 +1317,7 @@ function AppInner() {
               verificationStatus={verificationStatus}
               isDemo={isDemo}
               profileComplete={profileComplete}
+              payoutsEnabled={payoutsEnabled}
               onGoToProfile={() => { setActiveScreen('profile'); setActiveTab('profile'); }}
               onGoToEarnings={() => selectTabAt(TABS.findIndex(t => t.key === 'earnings'))}
               onGoToJobs={(tab) => { setJobsInitialTab({ tab, nonce: Date.now() }); selectTabAt(TABS.findIndex(t => t.key === 'jobs')); }}

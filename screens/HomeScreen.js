@@ -82,7 +82,26 @@ function ProfileSetupBanner({ onGoToProfile }) {
   );
 }
 
-export default function HomeScreen({ online, setOnline, requests = [], requestAnim, acceptingId, pendingCount, activeJobs, completedOrders = [], scheduledJobs = [], onOpenRequest, onViewAll, allowScheduling, onAccept, onDecline, refreshControl, scrollSignal, verificationStatus, isDemo, profileComplete, onGoToProfile, onGoToEarnings, onGoToJobs }) {
+// The backend only offers requests to providers whose Stripe payouts are set up.
+function PayoutsSetupBanner({ onGoToProfile }) {
+  return (
+    <TouchableOpacity style={styles.setupBanner} activeOpacity={0.88} onPress={onGoToProfile}>
+      <View style={styles.setupBannerIcon}>
+        <Ionicons name="card-outline" size={20} color="#2563EB" />
+      </View>
+      <View style={styles.setupBannerBody}>
+        <Text style={styles.setupBannerTitle}>Set up payouts to get requests</Text>
+        <Text style={styles.setupBannerSub}>Add your bank account in Profile → Payouts</Text>
+      </View>
+      <View style={styles.setupBannerBtn}>
+        <Text style={styles.setupBannerBtnText}>Set up</Text>
+        <Ionicons name="chevron-forward" size={14} color="#2563EB" />
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+export default function HomeScreen({ online, setOnline, requests = [], requestAnim, acceptingId, pendingCount, activeJobs, completedOrders = [], scheduledJobs = [], onOpenRequest, onViewAll, allowScheduling, onAccept, onDecline, refreshControl, scrollSignal, verificationStatus, isDemo, profileComplete, payoutsEnabled = true, onGoToProfile, onGoToEarnings, onGoToJobs }) {
   const { provider } = useProvider();
   const scrollRef = useScrollToTop(scrollSignal);
   const todayStats = getTodayCompletedStats(completedOrders, provider?.commissionRate);
@@ -158,6 +177,7 @@ export default function HomeScreen({ online, setOnline, requests = [], requestAn
       </View>
 
       {!profileComplete && !isDemo && <ProfileSetupBanner onGoToProfile={onGoToProfile} />}
+      {profileComplete && !isDemo && verificationStatus === 'verified' && !payoutsEnabled && <PayoutsSetupBanner onGoToProfile={onGoToProfile} />}
 
       {!!featuredRequest && (
         <>

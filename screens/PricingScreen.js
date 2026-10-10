@@ -134,12 +134,23 @@ export default function PricingScreen({ visible, onClose, isDemoAccount }) {
   const handleSave = async () => {
     await savePricing(v);
     const rate = parseFloat(v.laborRate);
-    if (!isNaN(rate) && !isDemoAccount) {
-      authorizedFetch(`${API_URL}/profiles/${provider.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ laborRate: rate }),
-      }).catch(() => {});
+    const serviceCallFee = parseFloat(v.serviceCallFee);
+    if (!isDemoAccount) {
+      // dispatch is the service-call fee customers see and are held for at booking.
+      const body = {};
+      if (!isNaN(rate)) body.laborRate = rate;
+      if (!isNaN(serviceCallFee) && serviceCallFee >= 0) body.dispatch = Math.round(serviceCallFee * 100) / 100;
+      try {
+        const res = await authorizedFetch(`${API_URL}/profiles/${provider.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) throw new Error(`Request failed: ${res.status}`);
+      } catch {
+        Alert.alert('Saved on this device only', 'We couldn\'t update your prices on the server. Check your connection and save again.');
+        return;
+      }
     }
     Alert.alert('Saved', 'Your pricing has been updated.');
     onClose();

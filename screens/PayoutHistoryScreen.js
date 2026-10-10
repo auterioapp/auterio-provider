@@ -32,10 +32,11 @@ function groupByMonth(list) {
   return Object.entries(map);
 }
 
-export default function PayoutHistoryScreen({ visible, onClose, isDemo }) {
+// payouts: real Stripe payouts from EarningsPayoutScreen (toPayoutRow); PAYOUTS is demo-only.
+export default function PayoutHistoryScreen({ visible, onClose, isDemo, payouts = [] }) {
   const [tab, setTab] = useState('All');
 
-  const source = isDemo ? PAYOUTS : [];
+  const source = isDemo ? PAYOUTS : payouts;
   const filtered = tab === 'All' ? source : source.filter(p => p.status === tab);
   const groups = groupByMonth(filtered);
 
