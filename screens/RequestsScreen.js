@@ -132,7 +132,7 @@ function RequestCard({ order, accepting, onAccept, onDecline, onConfirm, onCount
             {!isScheduled && (
               <View style={[styles.modeBadge, { backgroundColor: mode.bg }]}>
                 <Ionicons name={mode.icon} size={9} color={mode.color} />
-                <Text style={[styles.modeBadgeText, { color: mode.color }]}>{mode.label} · {mode.sub}</Text>
+                <Text style={[styles.modeBadgeText, { color: mode.color }]} numberOfLines={1}>{mode.label} · {mode.sub}</Text>
               </View>
             )}
           </View>
@@ -257,8 +257,8 @@ const styles = StyleSheet.create({
   apptTimeBadgeText: { color: '#2563EB', fontSize: 10, fontWeight: '700' },
   modeStripe: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 3 },
   requestCardTopStripe: { paddingLeft: 13 },
-  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 1 },
-  modeBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, borderRadius: 5, paddingHorizontal: 5, paddingVertical: 2 },
+  statusRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 1, flexShrink: 1 },
+  modeBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, borderRadius: 5, paddingHorizontal: 5, paddingVertical: 2, flexShrink: 1, minWidth: 0 },
   modeBadgeText: { fontSize: 9, fontWeight: '700' },
   activeListIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E6E8EB', alignItems: 'center', justifyContent: 'center' },
   activeListInfo: { flex: 1, minWidth: 0 },

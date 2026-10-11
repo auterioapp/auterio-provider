@@ -12,7 +12,16 @@ function formatTimer(s) {
   return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 }
 
-export default function RequestDetailScreen({ order, accepting, providerType = 'mobile', onBack, onAccept, onSchedule, onDecline, refreshControl }) {
+function haversineMiles(lat1, lng1, lat2, lng2) {
+  const R = 3958.8;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+export default function RequestDetailScreen({ order, accepting, providerType = 'mobile', providerLiveCoord, onBack, onAccept, onSchedule, onDecline, refreshControl }) {
   const { provider } = useProvider();
   const [noteOpen, setNoteOpen] = useState(false);
   const [bottomPanelHeight, setBottomPanelHeight] = useState(0);
@@ -41,7 +50,13 @@ export default function RequestDetailScreen({ order, accepting, providerType = '
   const platformFee = payout > 0 ? Math.round(payout * commissionRate * 100) / 100 : 0;
   const net = Math.max(0, payout - platformFee);
   const driveTime = order.eta || order.tracking?.eta || '—';
-  const distance = order.distance || '—';
+  const customerCoord = (order.pickup?.latitude != null && order.pickup?.longitude != null)
+    ? { latitude: Number(order.pickup.latitude), longitude: Number(order.pickup.longitude) }
+    : null;
+  const liveDistanceMi = (customerCoord && providerLiveCoord)
+    ? haversineMiles(providerLiveCoord.latitude, providerLiveCoord.longitude, customerCoord.latitude, customerCoord.longitude)
+    : null;
+  const distance = liveDistanceMi != null ? `${liveDistanceMi.toFixed(1)} mi` : (order.distance || '—');
   const customerNote = order.orderContext?.customerNote || order.customerNote || null;
   const rawCustomerFiles = order.orderContext?.files || order.files || order.photos || [];
   const customerFiles = Array.isArray(rawCustomerFiles) ? rawCustomerFiles.filter(Boolean) : [];

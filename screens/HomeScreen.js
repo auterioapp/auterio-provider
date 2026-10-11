@@ -432,7 +432,14 @@ function IncomingRequest({ order, accepting, onOpen, onAccept, onDecline, allowS
           )}
         </View>
         <View style={styles.incomingPriceBox}>
-          <Text style={[styles.incomingPrice, { color: mode.color }]}>{formatMoney(order)}</Text>
+          <Text
+            style={[styles.incomingPrice, { color: mode.color }]}
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.6}
+          >
+            {formatMoney(order)}
+          </Text>
           <Text style={styles.incomingEta}>{order.eta || 'Est. 25 min'}</Text>
         </View>
       </View>
@@ -507,7 +514,7 @@ const styles = StyleSheet.create({
   incomingVehicle: { color: '#5E646D', fontSize: 13, fontWeight: '600', marginBottom: 3 },
   incomingMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
   incomingMeta: { color: '#5E646D', fontSize: 10, lineHeight: 14, fontWeight: '600', flex: 1 },
-  incomingPriceBox: { width: 58, alignItems: 'flex-end' },
+  incomingPriceBox: { width: 70, alignItems: 'flex-end' },
   incomingPrice: { color: '#F04416', fontSize: 22, lineHeight: 26, fontWeight: '800' },
   incomingEta: { color: '#5E646D', fontSize: 10, lineHeight: 14, fontWeight: '700', textAlign: 'right' },
   incomingActions: { flexDirection: 'row', gap: 8 },

@@ -1334,6 +1334,7 @@ function AppInner() {
   if (authState === 'welcome') {
     return (
       <SafeAreaProvider>
+        <StatusBar style="dark" />
         <WelcomeScreen onSignIn={() => setAuthState('login')} onSignUp={() => setAuthState('register')} />
       </SafeAreaProvider>
     );
@@ -1529,6 +1530,7 @@ function AppInner() {
                   order={selectedRequest}
                   accepting={acceptingId === selectedRequest.id}
                   providerType={providerType}
+                  providerLiveCoord={providerLiveCoord}
                   onBack={() => setSelectedRequest(null)}
                   onAccept={async (o) => {
                     if (o.status === 'scheduled_pending') {

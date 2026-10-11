@@ -52,7 +52,7 @@ export default function WelcomeScreen({ onSignIn, onSignUp }) {
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.signInBtn} onPress={onSignIn}>
-            <Ionicons name="log-in-outline" size={20} color="#fff" />
+            <Ionicons name="log-in-outline" size={20} color="#17191D" />
             <Text style={styles.signInText}>I already have an account</Text>
           </TouchableOpacity>
 
@@ -70,29 +70,29 @@ export default function WelcomeScreen({ onSignIn, onSignUp }) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#001427' },
+  container: { flex: 1, backgroundColor: '#FFFFFF' },
   scroll: { flexGrow: 1, minHeight: '100%' },
   topBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: 54 },
   logoWrap: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   logo: { width: 36, height: 36, borderRadius: 8 },
-  logoText: { color: '#fff', fontSize: 20, fontWeight: '800' },
+  logoText: { color: '#17191D', fontSize: 20, fontWeight: '800' },
   heroContent: { padding: 20, paddingTop: 48, paddingBottom: 40 },
   heroLabel: { color: '#F04416', fontSize: 11, fontWeight: '800', letterSpacing: 1.5, marginBottom: 12 },
-  heroTitle: { color: '#fff', fontSize: 36, fontWeight: '800', lineHeight: 42, marginBottom: 2 },
+  heroTitle: { color: '#17191D', fontSize: 36, fontWeight: '800', lineHeight: 42, marginBottom: 2 },
   heroTitleOrange: { color: '#F04416', fontSize: 36, fontWeight: '800', marginBottom: 16 },
-  heroSub: { color: 'rgba(255,255,255,0.55)', fontSize: 15, lineHeight: 22 },
+  heroSub: { color: '#5E646D', fontSize: 15, lineHeight: 22 },
   spacer: { flex: 1, minHeight: 40 },
   bottom: { padding: 20, paddingBottom: 48 },
-  trustRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.06)', borderRadius: 16, padding: 16, marginBottom: 20 },
+  trustRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F3F4F5', borderRadius: 16, padding: 16, marginBottom: 20, borderWidth: 1, borderColor: '#ECEEF0' },
   trustItem: { flex: 1, alignItems: 'center', gap: 6 },
-  trustDivider: { width: 1, height: 56, backgroundColor: 'rgba(255,255,255,0.1)' },
-  trustTitle: { color: '#fff', fontSize: 11, fontWeight: '700', textAlign: 'center' },
-  trustSub: { color: 'rgba(255,255,255,0.45)', fontSize: 10, textAlign: 'center', lineHeight: 14 },
+  trustDivider: { width: 1, height: 56, backgroundColor: '#ECEEF0' },
+  trustTitle: { color: '#17191D', fontSize: 11, fontWeight: '700', textAlign: 'center' },
+  trustSub: { color: '#5E646D', fontSize: 10, textAlign: 'center', lineHeight: 14 },
   createBtn: { backgroundColor: '#F04416', borderRadius: 14, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 12 },
   createBtnText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  signInBtn: { borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.25)', borderRadius: 14, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 20 },
-  signInText: { color: '#fff', fontSize: 15, fontWeight: '600' },
+  signInBtn: { borderWidth: 1.5, borderColor: '#ECEEF0', backgroundColor: '#F9FAFB', borderRadius: 14, paddingVertical: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, marginBottom: 20 },
+  signInText: { color: '#17191D', fontSize: 15, fontWeight: '600' },
   securityRow: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: 'rgba(76,175,80,0.08)', borderRadius: 12, padding: 12, borderWidth: 1, borderColor: 'rgba(76,175,80,0.15)' },
-  securityTitle: { color: '#fff', fontSize: 13, fontWeight: '700' },
-  securitySub: { color: 'rgba(255,255,255,0.45)', fontSize: 11, marginTop: 2 },
+  securityTitle: { color: '#17191D', fontSize: 13, fontWeight: '700' },
+  securitySub: { color: '#5E646D', fontSize: 11, marginTop: 2 },
 });
