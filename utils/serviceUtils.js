@@ -301,19 +301,35 @@ export function getProviderIntakeItems(order) {
   const explicitServiceType = diagnosticInfo.serviceType || order.orderContext?.diagnosticServiceType;
   const answers = order.service?.intakeAnswers || diagnosticInfo.intakeAnswers || diagnosticInfo.answers || order.orderContext?.intakeAnswers || {};
 
-  if (Array.isArray(explicitQuestions) && explicitQuestions.length && (!explicitServiceType || explicitServiceType === serviceType)) {
-    return explicitQuestions.map((item, index) => ({
+  const items = Array.isArray(explicitQuestions) && explicitQuestions.length && (!explicitServiceType || explicitServiceType === serviceType)
+    ? explicitQuestions.map((item, index) => ({
       key: item.key || item.id || `intake-${index}`,
       label: item.label || item.question || item.title || `Question ${index + 1}`,
       value: item.answer ?? answers[item.key] ?? answers[item.id] ?? '',
-    })).filter(item => item.label);
-  }
+    })).filter(item => item.label)
+    : schema.intakeQuestions.map((item, index) => ({
+      ...item,
+      key: item.key || `intake-${index}`,
+      value: answers[item.key] ?? answers[index + 1] ?? answers[String(index + 1)] ?? '',
+    }));
 
-  return schema.intakeQuestions.map((item, index) => ({
-    ...item,
-    key: item.key || `intake-${index}`,
-    value: answers[item.key] ?? answers[index + 1] ?? answers[String(index + 1)] ?? '',
-  }));
+  return [...items, ...getTireDetailItems(answers, diagnosticInfo, items)];
+}
+
+// Which tires and what size, from the customer's flat tire answers. They are
+// stored next to the questions (tire_positions / tire_size, or flatTires), not
+// as questions of their own, so they're added here unless already listed.
+function getTireDetailItems(answers, diagnosticInfo, listed) {
+  const listedKeys = new Set(listed.map(item => item.key));
+  const flatTires = Array.isArray(diagnosticInfo.flatTires) ? diagnosticInfo.flatTires : [];
+  const positions = answers.tire_positions
+    || flatTires.map(tire => tire?.position || tire?.axle).filter(Boolean).join(', ');
+  const size = answers.tire_size
+    || [...new Set(flatTires.map(tire => tire?.size).filter(Boolean))].join(', ');
+  const extra = [];
+  if (positions && !listedKeys.has('tire_positions')) extra.push({ key: 'tire_positions', label: 'Which tires', value: positions });
+  if (size && !listedKeys.has('tire_size')) extra.push({ key: 'tire_size', label: 'Tire size', value: size });
+  return extra;
 }
 
 export function isTowingService(order) {
