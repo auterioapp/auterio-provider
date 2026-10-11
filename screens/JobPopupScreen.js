@@ -17,6 +17,7 @@ import { getJobProgressIndex } from '../utils/jobUtils';
 import { formatMoney, getServiceMeta, getServiceFlowSchema, getDiagnosisSchema, getProviderIntakeItems, isTowingService, getDropoffAddress, getVehicleVin, getCustomerComplaintItems, getAcceptedAtLabel, getVehicleDisplayParts, hasKnownVin, stripCountryFromAddress, getArrivedAtLabel } from '../utils/serviceUtils';
 import { getRecommendedServicesFromDiagnosis, getDemoEstimate, getEstimateCatalog, getEstimatePriceCheck, sumAmounts, formatCurrency, getInvoiceData } from '../utils/estimateUtils';
 import { loadPricing } from '../utils/pricingStore';
+import OrderPhotos from '../components/OrderPhotos';
 
 function haversineMiles(lat1, lng1, lat2, lng2) {
   const R = 3958.8;
@@ -1490,6 +1491,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
 
           <View style={styles.requestBriefCard}>
             <RequestInfoRow icon="chatbox-outline" color="#2F80FF" label="Customer Note" value={customerNote} />
+            <OrderPhotos orderId={job.id} />
           </View>
 
           <View style={styles.jobProgressCard}>
@@ -2256,6 +2258,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
           <Text style={styles.jobDetailHeading}>Job Details</Text>
 
           <RequestInfoRow icon="chatbox-outline" color="#2F80FF" label="Customer Note" value={customerNote} chevron onPress={() => setNoteOpen(true)} />
+          <OrderPhotos orderId={job.id} />
 
           {intakeRows.length > 0 && (
             <>

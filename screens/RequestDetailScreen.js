@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { getServiceMeta, getDropoffAddress, isTowingService, getProviderIntakeItems, getServiceMode, getVehicleDisplayLabel, hasKnownVin } from '../utils/serviceUtils';
 import { formatCurrency } from '../utils/estimateUtils';
 import { useProvider } from '../ProviderContext';
+import OrderPhotos from '../components/OrderPhotos';
 
 const TIMER_SECONDS = 60;
 
@@ -139,6 +140,7 @@ export default function RequestDetailScreen({ order, accepting, providerType = '
           <Text style={styles.jobDetailHeading}>Job Details</Text>
 
           <RequestInfoRow key={noteRow.key} icon={noteRow.icon} color={noteRow.color} label={noteRow.label} value={noteRow.value} chevron={noteRow.chevron} onPress={noteRow.onPress} />
+          <OrderPhotos orderId={order.id} />
 
           {intakeRows.length > 0 && (
             <>
