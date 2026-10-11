@@ -1862,7 +1862,7 @@ const s = StyleSheet.create({
 
   /* Note modal */
   noteModalOverlay: { flex: 1, justifyContent: 'flex-end', padding: 15 },
-  noteModalBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(23,25,29,0.32)' },
+  noteModalBackdrop: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(23,25,29,0.32)' },
   noteModalCard: { borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', padding: 14, marginBottom: 96, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 12 },
   noteModalHeader: { minHeight: 34, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
   noteModalTitle: { color: '#17191D', fontSize: 17, lineHeight: 21, fontWeight: '700' },
@@ -2134,7 +2134,7 @@ const s = StyleSheet.create({
 
   /* Customer estimate preview modal */
   customerEstimateOverlay: { flex: 1, justifyContent: 'flex-end', padding: 12 },
-  navChoiceBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(23,25,29,0.32)' },
+  navChoiceBackdrop: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(23,25,29,0.32)' },
   customerEstimateCard: { height: '92%', borderRadius: 14, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', overflow: 'hidden', marginBottom: 8, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 12 },
   customerEstimateHeader: { height: 58, borderBottomWidth: 1, borderBottomColor: '#ECEEF0', flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 12 },
   customerEstimateTitleWrap: { flex: 1, minWidth: 0, alignItems: 'center' },

@@ -203,7 +203,7 @@ function AppointmentModal({ order, onClose, onConfirm }) {
 
 const apptStyles = StyleSheet.create({
   overlay: { flex: 1, justifyContent: 'flex-end' },
-  backdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(23,25,29,0.55)' },
+  backdrop: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(23,25,29,0.55)' },
   sheet: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '92%' },
   handle: { width: 36, height: 4, borderRadius: 2, backgroundColor: '#E1E4E8', alignSelf: 'center', marginTop: 10 },
   header: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingHorizontal: 16, paddingTop: 14, paddingBottom: 14, borderBottomWidth: 1, borderBottomColor: '#F0F1F3' },

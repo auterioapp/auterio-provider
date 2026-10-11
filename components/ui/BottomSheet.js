@@ -10,7 +10,7 @@ export default function BottomSheet({ visible, onClose, children }) {
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.overlay}>
         <TouchableOpacity
-          style={StyleSheet.absoluteFillObject}
+          style={StyleSheet.absoluteFill}
           activeOpacity={1}
           onPress={onClose}
           accessibilityRole="button"

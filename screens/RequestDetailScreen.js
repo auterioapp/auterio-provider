@@ -327,7 +327,7 @@ const styles = StyleSheet.create({
   acceptTimerText: { color: '#5E646D', fontSize: 14, lineHeight: 18, fontWeight: '700', textAlign: 'center' },
   acceptTimerTime: { color: '#F04416', fontWeight: '800' },
   noteModalOverlay: { flex: 1, justifyContent: 'flex-end', padding: 15 },
-  noteModalBackdrop: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(23,25,29,0.32)' },
+  noteModalBackdrop: { ...StyleSheet.absoluteFill, backgroundColor: 'rgba(23,25,29,0.32)' },
   noteModalCard: { borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', backgroundColor: '#FFFFFF', padding: 14, marginBottom: 96, shadowColor: '#000', shadowOpacity: 0.18, shadowRadius: 18, shadowOffset: { width: 0, height: 8 }, elevation: 12 },
   noteModalHeader: { minHeight: 34, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
   noteModalTitle: { color: '#17191D', fontSize: 17, lineHeight: 21, fontWeight: '700' },
