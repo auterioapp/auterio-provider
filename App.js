@@ -720,7 +720,7 @@ function AppInner() {
     if (data.type === 'new_order') {
       selectTabAt(Math.max(0, TABS.findIndex(t => t.key === 'requests')));
       loadRequests();
-    } else if (data.type === 'estimate_approved' || data.type === 'order_status') {
+    } else if (data.type === 'estimate_approved' || data.type === 'order_status' || data.type === 'order_cancelled') {
       selectTabAt(Math.max(0, TABS.findIndex(t => t.key === 'jobs')));
       loadProviderJobsFromBackend(provider.id);
     } else if (data.type === 'verification_update') {
@@ -728,6 +728,13 @@ function AppInner() {
     } else if (data.type === 'new_review') {
       selectTabAt(Math.max(0, TABS.findIndex(t => t.key === 'profile')));
     }
+  };
+
+  // Same ref trick for the foreground listener below: reload with current state.
+  const refreshAfterCancelRef = useRef(null);
+  refreshAfterCancelRef.current = () => {
+    loadRequests();
+    if (provider.id) loadProviderJobsFromBackend(provider.id);
   };
 
   useEffect(() => {
@@ -758,6 +765,11 @@ function AppInner() {
           String(job.id) === String(data.orderId) ? { ...job, shopStatus: 'in_progress' } : job
         ));
         showToast('Customer approved the estimate!');
+      }
+      // The customer cancelled: refresh so the job leaves the list right away.
+      if (data?.type === 'order_cancelled') {
+        refreshAfterCancelRef.current?.();
+        showToast('The customer cancelled an order.');
       }
     });
     return () => subscription.remove();
