@@ -35,6 +35,11 @@ export default function JobDetailScreen({ job, onBack, onStatusChange, refreshCo
     { key: 'payout', icon: 'cash-outline', color: '#EAB308', label: 'Est. Payout', value: total ? formatCurrency(total) : 'TBD' },
   ];
 
+  // A repair: the provider accepted, the customer still has to accept their
+  // price (up to 2 minutes). No heading out until then.
+  const waitingForCustomer = job.status === 'awaiting_customer';
+  const callFee = job.payment?.providerPrice?.callFee;
+
   const arrivedIndex = Math.max(0, JOB_STEPS.findIndex(s => s.key === 'arrived'));
   const isArrived = currentStepIndex >= arrivedIndex;
   const markArrived = () => {
@@ -169,6 +174,16 @@ export default function JobDetailScreen({ job, onBack, onStatusChange, refreshCo
           ))}
         </View>
 
+        {waitingForCustomer ? (
+          <View style={styles.customerNotifiedBanner}>
+            <Ionicons name="time-outline" size={16} color="#EAB308" />
+            <Text style={styles.customerNotifiedText}>
+              Waiting for the customer to confirm your price{callFee ? ` (service call ${formatCurrency(callFee)})` : ''}.
+              Don't head out yet — we'll let you know within 2 minutes.
+            </Text>
+          </View>
+        ) : (
+        <>
         <TouchableOpacity style={styles.openNavBtn} onPress={() => setMapOpen(true)} activeOpacity={0.84}>
           <Ionicons name="navigate" size={22} color="#2F80FF" />
           <View>
@@ -198,6 +213,8 @@ export default function JobDetailScreen({ job, onBack, onStatusChange, refreshCo
             </Text>
           </View>
         </TouchableOpacity>
+        </>
+        )}
       </ScrollView>
 
       <Modal visible={noteOpen} transparent animationType="slide" onRequestClose={() => setNoteOpen(false)}>

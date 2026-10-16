@@ -290,7 +290,7 @@ function AppInner() {
       const data = await fetchJson(`${API_URL}/orders/provider/${providerId}`);
       if (!Array.isArray(data)) return;
       const active = data.filter(o =>
-        ['accepted', 'confirmed', 'scheduled', 'en_route', 'arrived', 'inspection', 'estimate_sent', 'estimate_approved', 'in_progress'].includes(o.status)
+        ['awaiting_customer', 'accepted', 'confirmed', 'scheduled', 'en_route', 'arrived', 'inspection', 'estimate_sent', 'estimate_approved', 'in_progress'].includes(o.status)
       );
       const done = data.filter(o => o.status === 'completed');
       setAcceptedJobs(active.map(o => normalizeOrderToJob(o)));
@@ -720,7 +720,7 @@ function AppInner() {
     if (data.type === 'new_order') {
       selectTabAt(Math.max(0, TABS.findIndex(t => t.key === 'requests')));
       loadRequests();
-    } else if (data.type === 'estimate_approved' || data.type === 'order_status' || data.type === 'order_cancelled') {
+    } else if (data.type === 'estimate_approved' || data.type === 'order_status' || data.type === 'order_cancelled' || data.type === 'order_confirmed' || data.type === 'order_released') {
       selectTabAt(Math.max(0, TABS.findIndex(t => t.key === 'jobs')));
       loadProviderJobsFromBackend(provider.id);
     } else if (data.type === 'verification_update') {
@@ -765,6 +765,17 @@ function AppInner() {
           String(job.id) === String(data.orderId) ? { ...job, shopStatus: 'in_progress' } : job
         ));
         showToast('Customer approved the estimate!');
+      }
+      // The customer answered a repair price: head out, or the job is gone.
+      if (data?.type === 'order_confirmed' && data?.orderId) {
+        setAcceptedJobs(current => current.map(job =>
+          String(job.id) === String(data.orderId) ? { ...job, status: 'accepted' } : job
+        ));
+        showToast('The customer confirmed your price. You can head out.');
+      }
+      if (data?.type === 'order_released') {
+        refreshAfterCancelRef.current?.();
+        showToast(notification.request.content.title || 'The customer chose another provider.');
       }
       // The customer cancelled: refresh so the job leaves the list right away.
       if (data?.type === 'order_cancelled') {
@@ -914,7 +925,9 @@ function AppInner() {
           },
         }),
       });
-      if (acceptedOrder) addAcceptedJob(acceptedOrder, { status: 'accepted' });
+      // A repair waits for the customer to accept this provider's price first.
+      if (acceptedOrder) addAcceptedJob(acceptedOrder, { status: acceptedOrder.status === 'awaiting_customer' ? 'awaiting_customer' : 'accepted' });
+      if (acceptedOrder?.status === 'awaiting_customer') showToast('Price sent. Waiting for the customer to confirm.');
       loadRequests();
       return nextJob;
     } catch (error) {
