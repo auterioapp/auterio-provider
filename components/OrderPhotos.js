@@ -85,7 +85,7 @@ const styles = StyleSheet.create({
   title: { flex: 1, color: '#17191D', fontSize: 13, fontWeight: '700' },
   count: { color: '#5E646D', fontSize: 13, fontWeight: '700' },
   row: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  thumb: { width: 88, height: 88, borderRadius: 12, backgroundColor: '#F3F4F5' },
+  thumb: { width: 76, height: 76, borderRadius: 12, backgroundColor: '#F3F4F5' }, // same as the customer's (IssueDetailsScreen photoThumb)
   viewer: { flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', justifyContent: 'center' },
   full: { height: '80%' },
   close: { position: 'absolute', top: 56, right: 20, width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center' },

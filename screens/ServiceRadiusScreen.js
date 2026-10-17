@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Animated, Dimensions, Modal, PanResponder, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import MapView, { Circle, Marker, PROVIDER_GOOGLE } from 'react-native-maps';
+import MapView, { Circle, Marker } from 'react-native-maps';
+import { MAP_PROVIDER } from '../components/mapProvider';
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { authorizedFetch } from '../apiClient';
@@ -238,7 +239,7 @@ export default function ServiceRadiusScreen({ visible, onClose, onSave, isDemoAc
             </View>
           ) : (
             <MapView
-              provider={PROVIDER_GOOGLE}
+              provider={MAP_PROVIDER}
               style={styles.map}
               region={{
                 latitude: center.latitude,

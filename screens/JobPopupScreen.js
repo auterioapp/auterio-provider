@@ -5,7 +5,8 @@ import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GestureHandlerRootView, PanGestureHandler, State as GestureState } from 'react-native-gesture-handler';
-import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
+import MapView, { Marker } from 'react-native-maps';
+import { MAP_PROVIDER } from '../components/mapProvider';
 import { RequestInfoRow } from './RequestDetailScreen';
 import { JobStepper } from './JobDetailScreen';
 import { useProvider } from '../ProviderContext';
@@ -1615,7 +1616,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
           <View style={styles.jobRouteMap}>
             {jobMapRegion ? (
               <MapView
-                provider={PROVIDER_GOOGLE}
+                provider={MAP_PROVIDER}
                 style={styles.mapView}
                 region={jobMapRegion}
                 scrollEnabled={false}
@@ -2216,7 +2217,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
           <View style={styles.mapPreview}>
             {jobMapRegion ? (
               <MapView
-                provider={PROVIDER_GOOGLE}
+                provider={MAP_PROVIDER}
                 style={styles.mapView}
                 region={jobMapRegion}
                 scrollEnabled={false}
