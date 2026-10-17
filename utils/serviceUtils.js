@@ -293,6 +293,18 @@ export function getDiagnosisSchema(order) {
   };
 }
 
+// Electric and hybrid vehicles: what the provider has to know before going out.
+const POWERTRAIN_NOTES = {
+  electric: 'Electric — high voltage. Tow on a flatbed only',
+  plugin: 'Plug-in hybrid — high voltage. Flatbed recommended',
+  hybrid: 'Hybrid — high voltage. Jump only from the 12V jump points',
+};
+
+function powertrainItem(order) {
+  const powertrain = order.vehicle?.powertrain || order.service?.diagnosticInfo?.powertrain;
+  return POWERTRAIN_NOTES[powertrain] ? [{ key: 'powertrain', label: 'Powertrain', value: POWERTRAIN_NOTES[powertrain] }] : [];
+}
+
 export function getProviderIntakeItems(order) {
   const schema = getServiceFlowSchema(order);
   const serviceType = getOrderServiceType(order);
@@ -313,7 +325,7 @@ export function getProviderIntakeItems(order) {
       value: answers[item.key] ?? answers[index + 1] ?? answers[String(index + 1)] ?? '',
     }));
 
-  return [...items, ...getTireDetailItems(answers, diagnosticInfo, items)];
+  return [...powertrainItem(order), ...items, ...getTireDetailItems(answers, diagnosticInfo, items)];
 }
 
 // Which tires and what size, from the customer's flat tire answers. They are
