@@ -80,8 +80,7 @@ export default function RequestDetailScreen({ order, accepting, providerType = '
   const locationRows = [
     { key: 'pickup', icon: 'location-outline', color: '#7C3AED', label: isTowing ? 'Pickup Location' : 'Service Location', value: address },
     ...(isTowing ? [{ key: 'dropoff', icon: 'flag-outline', color: '#EF4444', label: 'Drop-off Location', value: dropoffAddress }] : []),
-    { key: 'distance', icon: 'trail-sign-outline', color: '#42D463', label: 'Distance', value: distance !== '—' ? `${distance}` : 'Calculating…' },
-    { key: 'payout', icon: 'cash-outline', color: '#EAB308', label: 'Est. Payout', value: payout > 0 ? formatCurrency(payout) : 'See estimate' },
+    // Distance and payout are in the summary card at the top.
   ];
 
   return (
