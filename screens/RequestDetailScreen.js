@@ -26,8 +26,11 @@ export default function RequestDetailScreen({ order, accepting, providerType = '
   const [noteOpen, setNoteOpen] = useState(false);
   const [bottomPanelHeight, setBottomPanelHeight] = useState(0);
   const [timeLeft, setTimeLeft] = useState(TIMER_SECONDS);
+  // Demo orders can come without the auto-decline (server: order.noAutoDecline).
+  const autoDecline = !order?.noAutoDecline;
 
   useEffect(() => {
+    if (!autoDecline) return undefined;
     if (timeLeft <= 0) {
       onDecline && onDecline(order);
       return;
@@ -187,15 +190,17 @@ export default function RequestDetailScreen({ order, accepting, providerType = '
         style={styles.requestBottomPanel}
         onLayout={(event) => setBottomPanelHeight(event.nativeEvent.layout.height)}
       >
-        <View style={styles.acceptTimerBanner}>
-          <Ionicons name="time-outline" size={16} color={timeLeft <= 10 ? '#EF4444' : '#F04416'} />
-          <Text style={styles.acceptTimerText}>
-            Auto-decline in{' '}
-            <Text style={[styles.acceptTimerTime, timeLeft <= 10 && { color: '#EF4444' }]}>
-              {formatTimer(timeLeft)}
+        {autoDecline && (
+          <View style={styles.acceptTimerBanner}>
+            <Ionicons name="time-outline" size={16} color={timeLeft <= 10 ? '#EF4444' : '#F04416'} />
+            <Text style={styles.acceptTimerText}>
+              Auto-decline in{' '}
+              <Text style={[styles.acceptTimerTime, timeLeft <= 10 && { color: '#EF4444' }]}>
+                {formatTimer(timeLeft)}
+              </Text>
             </Text>
-          </Text>
-        </View>
+          </View>
+        )}
         <View style={styles.requestBottomActions}>
           <TouchableOpacity style={styles.largeDeclineButton} onPress={() => onDecline(order)} activeOpacity={0.84}>
             <Text style={styles.largeDeclineTitle}>Decline</Text>
