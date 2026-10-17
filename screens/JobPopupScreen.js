@@ -3,6 +3,7 @@ import { Alert, Animated, Dimensions, KeyboardAvoidingView, Linking, Modal, Plat
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
+import * as ImageManipulator from 'expo-image-manipulator';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { GestureHandlerRootView, PanGestureHandler, State as GestureState } from 'react-native-gesture-handler';
 import MapView, { Marker } from 'react-native-maps';
@@ -15,7 +16,7 @@ import { fetchJson } from '../jobApiClient';
 import { pulseTabChange } from '../utils/haptics';
 import { API_URL, JOB_STEPS } from '../constants';
 import { getJobProgressIndex } from '../utils/jobUtils';
-import { formatMoney, getServiceMeta, getServiceFlowSchema, getDiagnosisSchema, getProviderIntakeItems, isTowingService, getDropoffAddress, getVehicleVin, getCustomerComplaintItems, getAcceptedAtLabel, getVehicleDisplayParts, hasKnownVin, stripCountryFromAddress, getArrivedAtLabel } from '../utils/serviceUtils';
+import { formatMoney, getServiceMeta, getServiceFlowSchema, getDiagnosisSchema, getProviderIntakeItems, isTowingService, getDropoffAddress, getVehicleVin, getCustomerComplaintItems, getAcceptedAtLabel, getVehicleDisplayParts, hasKnownVin, stripCountryFromAddress, getArrivedAtLabel, jobStatusRank } from '../utils/serviceUtils';
 import { getRecommendedServicesFromDiagnosis, getDemoEstimate, getEstimateCatalog, getEstimatePriceCheck, sumAmounts, formatCurrency, getInvoiceData } from '../utils/estimateUtils';
 import { loadPricing } from '../utils/pricingStore';
 import OrderPhotos from '../components/OrderPhotos';
@@ -29,9 +30,9 @@ function haversineMiles(lat1, lng1, lat2, lng2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel, refreshControl, providerLiveCoord }) {
+function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel, refreshControl, providerLiveCoord, reachedRank = -1, backRef }) {
+  const { provider } = useProvider();
   const serviceMeta = getServiceMeta(job);
-  const [noteOpen, setNoteOpen] = useState(false);
   const [routeOpen, setRouteOpen] = useState(workflow.stage === 'route');
 
   // While en route, periodically push the provider's live GPS position to the
@@ -65,6 +66,19 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
   const [estimateDeclinedOpen, setEstimateDeclinedOpen] = useState(workflow.stage === 'estimate_declined');
   const [workOpen, setWorkOpen] = useState(workflow.stage === 'working');
   const [completeOpen, setCompleteOpen] = useState(workflow.stage === 'complete_review' || workflow.stage === 'invoice');
+  // Back one step (the screens checked in the same order they render): only the
+  // screen changes, the order's status on the server never goes back. Waiting for
+  // the customer's answer, working and completing have no step to go back to.
+  const goBack = () => {
+    if (estimateOpen) { setEstimateOpen(false); setDiagnosisOpen(true); onWorkflowChange?.({ stage: 'diagnosis' }); return; }
+    if (estimateDeclinedOpen || approvalOpen || workOpen || completeOpen) { onBack(); return; }
+    if (diagnosisOpen) { setDiagnosisOpen(false); setArrivedOpen(true); onWorkflowChange?.({ stage: 'arrived' }); return; }
+    if (arrivedOpen) { setArrivedOpen(false); setRouteOpen(true); onWorkflowChange?.({ stage: 'route' }); return; }
+    if (routeOpen) { setRouteOpen(false); onWorkflowChange?.({ stage: 'accepted' }); return; }
+    onBack();
+  };
+  if (backRef) backRef.current = goBack;
+  useEffect(() => () => { if (backRef) backRef.current = null; }, []);
   const [estimateItems, setEstimateItems] = useState(workflow.estimateItems || []);
   const [estimateRemovedItems, setEstimateRemovedItems] = useState(workflow.estimateRemovedItems || []);
   const [estimatePickerOpen, setEstimatePickerOpen] = useState(false);
@@ -231,6 +245,28 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
     problem: null,
   });
   const [activeChecklistItem, setActiveChecklistItem] = useState(null);
+  // Arrival photos and notes live on the server (POST /orders/:id/arrival-photos,
+  // PATCH /orders/:id/arrival-notes): what was saved comes back after a restart.
+  useEffect(() => {
+    if (!job?.id) return undefined;
+    let cancelled = false;
+    fetchJson(`${API_URL}/orders/${job.id}/photos?kind=arrival`)
+      .then((list) => {
+        if (cancelled || !Array.isArray(list) || !list.length) return;
+        setRequiredPhotos(current => {
+          const next = { ...current };
+          list.forEach(photo => { if (photo.slot && !next[photo.slot]?.uri) next[photo.slot] = { uri: photo.url, saved: true }; });
+          return next;
+        });
+      })
+      .catch(() => {});
+    const notes = job.arrival?.notes;
+    if (notes) {
+      setArrivedChecklistData(current => (current.notes ? current : { ...current, notes }));
+      setArrivedChecklist(current => ({ ...current, notes: true }));
+    }
+    return () => { cancelled = true; };
+  }, [job?.id]);
   const [checklistDraft, setChecklistDraft] = useState('');
   const [navigationChoiceOpen, setNavigationChoiceOpen] = useState(false);
   const currentStepIndex = getJobProgressIndex(job.status);
@@ -247,8 +283,11 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
   const liveDistanceMi = (customerMapCoord && providerMapCoord)
     ? haversineMiles(providerMapCoord.latitude, providerMapCoord.longitude, customerMapCoord.latitude, customerMapCoord.longitude)
     : null;
-  const liveEta = liveDistanceMi != null
-    ? `${Math.round(liveDistanceMi * 4)} min`
+  // Road miles and drive time as on the request card (backend pricing.tripEstimate):
+  // the straight line × 1.25, at 40 mph.
+  const liveRoadMi = liveDistanceMi != null ? liveDistanceMi * 1.25 : null;
+  const liveEta = liveRoadMi != null
+    ? `~${Math.max(1, Math.round((liveRoadMi / 40) * 60))} min`
     : null;
   const mapPoints = [customerMapCoord, providerMapCoord].filter(Boolean);
   const jobMapRegion = mapPoints.length ? (() => {
@@ -266,6 +305,8 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
   const vin = getVehicleVin(job);
   const hasVin = hasKnownVin(job);
   const vehicleDisplayParts = getVehicleDisplayParts(job);
+  // Color and plate, shown on the way to help find the vehicle ("White · ABC123").
+  const vehicleLookFor = [job.vehicle?.color, job.vehicle?.plate].map(v => String(v || '').trim()).filter(Boolean).join(' · ');
   const phone = job.customer?.phone || '';
   const customerNote = job.customerNote || 'No note provided';
   const acceptedLabel = getAcceptedAtLabel(job);
@@ -280,8 +321,6 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
     return m > 0 ? `${h}h ${m}min` : `${h}h`;
   })();
   const customerFirstName = (job.customer?.name || 'customer').split(' ')[0] || 'customer';
-  const rawCustomerFiles = job.orderContext?.files || job.files || job.photos || [];
-  const customerFiles = Array.isArray(rawCustomerFiles) ? rawCustomerFiles : [rawCustomerFiles].filter(Boolean);
   const intakeRows = getProviderIntakeItems(job)
     .filter(item => item.value !== undefined && item.value !== null && String(item.value).trim())
     .map((item, index) => ({
@@ -291,12 +330,16 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
       label: item.label,
       value: String(item.value),
     }));
+  // What the provider keeps, as on the new request card (RequestDetailScreen):
+  // the customer's total less the platform commission.
+  const jobTotal = Number(job.payment?.total || 0);
+  const estimatedEarnings = Math.max(0, jobTotal - Math.round(jobTotal * (provider?.commissionRate ?? 0.15) * 100) / 100);
   const locationDetailRows = [
     { key: 'pickup', icon: 'location-outline', color: '#7C3AED', label: isTowing ? 'Pickup Location' : 'Service Location', value: address },
     ...(isTowing ? [{ key: 'dropoff', icon: 'flag-outline', color: '#EF4444', label: 'Drop-off Location', value: dropoffAddress }] : []),
     ...(!isCompleted ? [
-      { key: 'distance', icon: 'trail-sign-outline', color: '#42D463', label: 'Distance', value: liveDistanceMi != null ? `${liveDistanceMi.toFixed(1)} mi away` : (job.distance || '—') },
-      { key: 'payout', icon: 'cash-outline', color: '#EAB308', label: 'Est. Payout', value: formatCurrency(job.payment?.total || 0) },
+      { key: 'distance', icon: 'trail-sign-outline', color: '#42D463', label: 'Distance', value: liveRoadMi != null ? `${liveRoadMi.toFixed(1)} mi away` : (job.distance || '—') },
+      { key: 'earnings', icon: 'cash-outline', color: '#EAB308', label: 'Est. Earnings', value: estimatedEarnings > 0 ? formatCurrency(estimatedEarnings) : '—' },
     ] : []),
   ];
   const openNavigationApp = async (provider) => {
@@ -411,14 +454,16 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
     return (
       <View style={styles.requestDetailShell}>
         <View style={styles.requestDetailHeader}>
-          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={styles.requestHeaderIconBtn}>
-            <Ionicons name="close" size={24} color="#17191D" />
+          <TouchableOpacity onPress={goBack} activeOpacity={0.8} style={styles.requestHeaderIconBtn} accessibilityRole="button" accessibilityLabel="Back">
+            <Ionicons name="chevron-back" size={26} color="#17191D" />
           </TouchableOpacity>
           <View style={styles.jobPopupHeaderTextWrap}>
             <Text style={styles.jobPopupHeaderTitle}>Job #{job.number}</Text>
             <Text style={styles.jobPopupAcceptedText}>{acceptedLabel}</Text>
           </View>
-          <View style={styles.requestHeaderIconBtn} />
+          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={[styles.requestHeaderIconBtn, styles.requestHeaderCloseBtn]} accessibilityRole="button" accessibilityLabel="Close">
+            <Ionicons name="close" size={24} color="#17191D" />
+          </TouchableOpacity>
         </View>
 
         <ScrollView style={[styles.container, styles.requestDetailScroll]} contentContainerStyle={styles.estimateContent} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
@@ -647,14 +692,16 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
     return (
       <View style={styles.requestDetailShell}>
         <View style={styles.requestDetailHeader}>
-          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={styles.requestHeaderIconBtn}>
-            <Ionicons name="close" size={22} color="#17191D" />
+          <TouchableOpacity onPress={goBack} activeOpacity={0.8} style={styles.requestHeaderIconBtn} accessibilityRole="button" accessibilityLabel="Back">
+            <Ionicons name="chevron-back" size={26} color="#17191D" />
           </TouchableOpacity>
           <View style={styles.jobPopupHeaderTextWrap}>
             <Text style={styles.jobPopupHeaderTitle}>Job #{job.number}</Text>
             <Text style={styles.jobPopupAcceptedText}>{acceptedLabel}</Text>
           </View>
-          <View style={styles.requestHeaderIconBtn} />
+          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={[styles.requestHeaderIconBtn, styles.requestHeaderCloseBtn]} accessibilityRole="button" accessibilityLabel="Close">
+            <Ionicons name="close" size={24} color="#17191D" />
+          </TouchableOpacity>
         </View>
         <ScrollView style={styles.requestDetailScroll} contentContainerStyle={styles.requestDetailContent} showsVerticalScrollIndicator={false}>
           <View style={styles.declinedNoticeCard}>
@@ -728,14 +775,16 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
     return (
       <View style={styles.requestDetailShell}>
         <View style={styles.requestDetailHeader}>
-          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={styles.requestHeaderIconBtn}>
-            <Ionicons name="close" size={24} color="#17191D" />
+          <TouchableOpacity onPress={goBack} activeOpacity={0.8} style={styles.requestHeaderIconBtn} accessibilityRole="button" accessibilityLabel="Back">
+            <Ionicons name="chevron-back" size={26} color="#17191D" />
           </TouchableOpacity>
           <View style={styles.jobPopupHeaderTextWrap}>
             <Text style={styles.jobPopupHeaderTitle}>Job #{job.number}</Text>
             <Text style={styles.jobPopupAcceptedText}>{acceptedLabel}</Text>
           </View>
-          <View style={styles.requestHeaderIconBtn} />
+          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={[styles.requestHeaderIconBtn, styles.requestHeaderCloseBtn]} accessibilityRole="button" accessibilityLabel="Close">
+            <Ionicons name="close" size={24} color="#17191D" />
+          </TouchableOpacity>
         </View>
 
         <ScrollView style={[styles.container, styles.requestDetailScroll]} contentContainerStyle={styles.approvalContent} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
@@ -881,8 +930,8 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
     return (
       <View style={styles.requestDetailShell}>
         <View style={styles.requestDetailHeader}>
-          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={styles.requestHeaderIconBtn}>
-            <Ionicons name="close" size={24} color="#17191D" />
+          <TouchableOpacity onPress={goBack} activeOpacity={0.8} style={styles.requestHeaderIconBtn} accessibilityRole="button" accessibilityLabel="Back">
+            <Ionicons name="chevron-back" size={26} color="#17191D" />
           </TouchableOpacity>
           <View style={styles.jobPopupHeaderTextWrap}>
             <Text style={styles.jobPopupHeaderTitle}>Job #{job.number}</Text>
@@ -895,7 +944,9 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
               })()}
             </Text>
           </View>
-          <View style={styles.requestHeaderIconBtn} />
+          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={[styles.requestHeaderIconBtn, styles.requestHeaderCloseBtn]} accessibilityRole="button" accessibilityLabel="Close">
+            <Ionicons name="close" size={24} color="#17191D" />
+          </TouchableOpacity>
         </View>
 
         <ScrollView style={[styles.container, styles.requestDetailScroll]} contentContainerStyle={styles.workContent} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
@@ -1147,14 +1198,16 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
     return (
       <View style={styles.requestDetailShell}>
         <View style={styles.requestDetailHeader}>
-          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={styles.requestHeaderIconBtn}>
-            <Ionicons name="close" size={24} color="#17191D" />
+          <TouchableOpacity onPress={goBack} activeOpacity={0.8} style={styles.requestHeaderIconBtn} accessibilityRole="button" accessibilityLabel="Back">
+            <Ionicons name="chevron-back" size={26} color="#17191D" />
           </TouchableOpacity>
           <View style={styles.jobPopupHeaderTextWrap}>
             <Text style={styles.jobPopupHeaderTitle}>Job #{job.number}</Text>
             <Text style={styles.jobPopupAcceptedText}>Final review</Text>
           </View>
-          <View style={styles.requestHeaderIconBtn} />
+          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={[styles.requestHeaderIconBtn, styles.requestHeaderCloseBtn]} accessibilityRole="button" accessibilityLabel="Close">
+            <Ionicons name="close" size={24} color="#17191D" />
+          </TouchableOpacity>
         </View>
 
         <ScrollView style={[styles.container, styles.requestDetailScroll]} contentContainerStyle={styles.completeContent} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
@@ -1281,14 +1334,16 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
     return (
       <View style={styles.requestDetailShell}>
         <View style={styles.requestDetailHeader}>
-          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={styles.requestHeaderIconBtn}>
-            <Ionicons name="close" size={24} color="#17191D" />
+          <TouchableOpacity onPress={goBack} activeOpacity={0.8} style={styles.requestHeaderIconBtn} accessibilityRole="button" accessibilityLabel="Back">
+            <Ionicons name="chevron-back" size={26} color="#17191D" />
           </TouchableOpacity>
           <View style={styles.jobPopupHeaderTextWrap}>
             <Text style={styles.jobPopupHeaderTitle}>Job #{job.number}</Text>
             <Text style={styles.jobPopupAcceptedText}>{acceptedLabel}</Text>
           </View>
-          <View style={styles.requestHeaderIconBtn} />
+          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={[styles.requestHeaderIconBtn, styles.requestHeaderCloseBtn]} accessibilityRole="button" accessibilityLabel="Close">
+            <Ionicons name="close" size={24} color="#17191D" />
+          </TouchableOpacity>
         </View>
 
         <ScrollView style={[styles.container, styles.requestDetailScroll]} contentContainerStyle={styles.diagnosisContent} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
@@ -1382,9 +1437,10 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
       { key: 'notes', title: 'Arrival Notes', optional: true, subtitle: 'Add notes from arrival', icon: 'clipboard-outline', color: '#7C3AED' },
     ];
     const requiredPhotoItems = serviceFlow.requiredPhotos || getServiceFlowSchema({ service: { serviceType: 'mobile_mechanic' } }).requiredPhotos;
-    const canContinueDiagnosis = arrivedChecklist.photos;
+    // Every required photo saved on the server (also after a restart).
+    const canContinueDiagnosis = arrivedChecklist.photos || photosReady;
     const activeChecklistMeta = checklistItems.find(item => item.key === activeChecklistItem);
-    const photosReady = requiredPhotoItems.every(item => !!requiredPhotos[item.key]?.uri);
+    const photosReady = requiredPhotoItems.every(item => !!requiredPhotos[item.key]?.saved);
     const customerComplaintItems = getCustomerComplaintItems(job, customerNote);
     const complaintReady = customerComplaintItems.length > 0 && customerComplaintItems.every(item => !!complaintConfirmations[item.key]);
     const canSaveChecklistItem = activeChecklistItem === 'photos' ? photosReady : true;
@@ -1404,6 +1460,13 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
       setArrivedChecklistData(nextData);
       setArrivedChecklist(nextChecklist);
       onWorkflowChange?.({ stage: 'arrived', arrivedChecklistData: nextData, arrivedChecklist: nextChecklist });
+      if (activeChecklistItem === 'notes') {
+        fetchJson(`${API_URL}/orders/${job.id}/arrival-notes`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ notes: checklistDraft.trim() }),
+        }).catch(() => Alert.alert('Notes not saved', 'Check your connection and save them again.'));
+      }
       setActiveChecklistItem(null);
       setChecklistDraft('');
     };
@@ -1420,12 +1483,28 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
           Alert.alert('Camera access needed', 'Enable camera access in your device settings to add required photos.');
           return;
         }
-        const result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 0.7 });
-        if (result.canceled || !result.assets?.[0]?.uri) return;
+        const result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 1 });
+        const asset = result.assets?.[0];
+        if (result.canceled || !asset?.uri) return;
         pulseTabChange();
-        const nextPhotos = { ...requiredPhotos, [key]: { uri: result.assets[0].uri } };
-        setRequiredPhotos(nextPhotos);
-        onWorkflowChange?.({ stage: 'arrived', requiredPhotos: nextPhotos });
+        // Shrunk like the customer's photos (~100–200 KB), then saved on the
+        // server right away; the step counts it once it's saved.
+        const side = (asset.width || 0) >= (asset.height || 0) ? { width: 1200 } : { height: 1200 };
+        const small = await ImageManipulator.manipulateAsync(asset.uri, [{ resize: side }], {
+          compress: 0.6, format: ImageManipulator.SaveFormat.JPEG, base64: true,
+        });
+        setRequiredPhotos(current => ({ ...current, [key]: { uri: small.uri, saving: true } }));
+        try {
+          await fetchJson(`${API_URL}/orders/${job.id}/arrival-photos`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ slot: key, image: small.base64 }),
+          });
+          setRequiredPhotos(current => ({ ...current, [key]: { uri: small.uri, saved: true } }));
+        } catch (uploadError) {
+          setRequiredPhotos(current => ({ ...current, [key]: { uri: small.uri, failed: true } }));
+          Alert.alert('Photo not saved', 'Check your connection and take it again.');
+        }
       } catch (error) {
         console.log('Camera error:', error.message);
       }
@@ -1433,72 +1512,20 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
     return (
       <View style={styles.requestDetailShell}>
         <View style={styles.requestDetailHeader}>
-          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={styles.requestHeaderIconBtn}>
-            <Ionicons name="close" size={24} color="#17191D" />
+          <TouchableOpacity onPress={goBack} activeOpacity={0.8} style={styles.requestHeaderIconBtn} accessibilityRole="button" accessibilityLabel="Back">
+            <Ionicons name="chevron-back" size={26} color="#17191D" />
           </TouchableOpacity>
           <View style={styles.jobPopupHeaderTextWrap}>
             <Text style={styles.jobPopupHeaderTitle}>Job #{job.number}</Text>
             <Text style={styles.jobPopupAcceptedText}>{acceptedLabel}</Text>
             {!!arrivedAtLabel && <Text style={styles.jobPopupArrivedText}>{arrivedAtLabel}</Text>}
           </View>
-          <View style={styles.requestHeaderIconBtn} />
+          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={[styles.requestHeaderIconBtn, styles.requestHeaderCloseBtn]} accessibilityRole="button" accessibilityLabel="Close">
+            <Ionicons name="close" size={24} color="#17191D" />
+          </TouchableOpacity>
         </View>
 
         <ScrollView style={[styles.container, styles.requestDetailScroll]} contentContainerStyle={styles.arrivedContent} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
-          <View style={styles.jobCustomerCard}>
-            <View style={styles.customerPopupAvatar}>
-              <Text style={styles.customerPopupInitials}>{job.customer?.initials || 'CU'}</Text>
-            </View>
-            <View style={styles.customerPopupInfo}>
-              <View style={styles.customerNameRatingRow}>
-                <Text style={styles.customerPopupName} numberOfLines={1}>{job.customer?.name || 'Customer'}</Text>
-              </View>
-              <View style={styles.customerTrustedLine}>
-                <Ionicons name="shield-checkmark-outline" size={13} color="#F04416" />
-                <Text style={styles.customerTrustedText}>Verified & trusted</Text>
-              </View>
-            </View>
-            <View style={styles.customerActionsDivider} />
-            <View style={styles.customerPopupActions}>
-              <TouchableOpacity style={styles.customerPopupActionBtn} activeOpacity={0.82} onPress={() => phone && Linking.openURL(`tel:${phone}`)}>
-                <Ionicons name="call-outline" size={19} color="#F04416" />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.customerPopupActionBtn} activeOpacity={0.82} onPress={() => phone && Linking.openURL(`sms:${phone}`)}>
-                <Ionicons name="chatbox-outline" size={19} color="#F04416" />
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          <View style={styles.vehicleInfoCard}>
-            <View style={styles.requestVehicleIcon}>
-              <Ionicons name={job.service?.icon || job.icon || 'car-outline'} size={22} color="#F04416" />
-            </View>
-            <View style={styles.serviceInfo}>
-              <Text style={styles.serviceType} numberOfLines={2}>{vehicleDisplayParts.main}{!!vehicleDisplayParts.suffix && <Text style={styles.serviceTypeSuffix}>{vehicleDisplayParts.suffix}</Text>}</Text>
-              {hasVin && (
-                <View style={[styles.trustedLine, styles.vehicleTrustedLine]}>
-                  <Ionicons name="barcode-outline" size={13} color="#F04416" />
-                  <Text style={styles.verifiedTrusted} numberOfLines={1}>VIN {vin}</Text>
-                </View>
-              )}
-            </View>
-            <View style={styles.vehicleMetaBox}>
-              <View style={styles.requestSpecRow}>
-                <Text style={styles.requestSpecLabel}>Service Type</Text>
-                <Text style={styles.requestSpecValue} numberOfLines={1}>{serviceMeta.title}</Text>
-              </View>
-            </View>
-          </View>
-
-          <View style={styles.requestBriefCard}>
-            <RequestInfoRow icon="chatbox-outline" color="#2F80FF" label="Customer Note" value={customerNote} />
-            <OrderPhotos orderId={job.id} />
-          </View>
-
-          <View style={styles.jobProgressCard}>
-            <JobStepper steps={JOB_STEPS} currentIndex={arrivedIndex} />
-          </View>
-
           <View style={styles.arrivedSectionCard}>
             <Text style={styles.arrivedChecklistTitle}>Before we continue</Text>
             <Text style={styles.arrivedChecklistSubtitle}>Let's gather some basic information before diagnosis.</Text>
@@ -1524,6 +1551,27 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
                 );
               })}
             </View>
+          </View>
+
+          {/* Who and what, in one row: the customer and vehicle were on the steps before. */}
+          <View style={styles.arrivedContactRow}>
+            <View style={styles.arrivedContactAvatar}>
+              <Text style={styles.customerPopupInitials}>{job.customer?.initials || 'CU'}</Text>
+            </View>
+            <View style={styles.arrivedContactInfo}>
+              <Text style={styles.arrivedContactName} numberOfLines={1}>{job.customer?.name || 'Customer'}</Text>
+              <Text style={styles.arrivedContactVehicle} numberOfLines={1}>{[vehicleDisplayParts.main, vehicleLookFor].filter(Boolean).join(' · ')}</Text>
+            </View>
+            <TouchableOpacity style={styles.customerPopupActionBtn} activeOpacity={0.82} onPress={() => phone && Linking.openURL(`tel:${phone}`)} accessibilityLabel="Call the customer">
+              <Ionicons name="call-outline" size={22} color="#F04416" />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.customerPopupActionBtn} activeOpacity={0.82} onPress={() => phone && Linking.openURL(`sms:${phone}`)} accessibilityLabel="Text the customer">
+              <Ionicons name="chatbox-outline" size={22} color="#F04416" />
+            </TouchableOpacity>
+          </View>
+
+          <View style={styles.jobProgressCard}>
+            <JobStepper steps={JOB_STEPS} currentIndex={arrivedIndex} />
           </View>
 
           <TouchableOpacity style={[styles.startInspectionBtn, !canContinueDiagnosis && styles.startInspectionBtnDisabled]} activeOpacity={canContinueDiagnosis ? 0.86 : 1} disabled={!canContinueDiagnosis} onPress={() => { setArrivedOpen(false); setDiagnosisOpen(true); onWorkflowChange?.({ stage: 'diagnosis' }); }}>
@@ -1554,7 +1602,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
                   <View style={styles.requiredPhotosList}>
                     {requiredPhotoItems.map(item => {
                       const photo = requiredPhotos[item.key];
-                      const checked = !!photo?.uri;
+                      const checked = !!photo?.saved;
                       return (
                         <View key={item.key} style={styles.requiredPhotoRow}>
                           <View style={styles.requiredPhotoInfo}>
@@ -1564,7 +1612,9 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
                             <View style={styles.requiredPhotoTextWrap}>
                               <Text style={styles.requiredPhotoLabel}>{item.label}</Text>
                               {!!item.hint && <Text style={styles.requiredPhotoHint}>{item.hint}</Text>}
-                              {checked && <Text style={styles.requiredPhotoStateDone}>Photo added</Text>}
+                              {checked && <Text style={styles.requiredPhotoStateDone}>Photo saved</Text>}
+                              {photo?.saving && <Text style={styles.requiredPhotoHint}>Saving…</Text>}
+                              {photo?.failed && <Text style={styles.requiredPhotoStateFailed}>Not saved — take it again</Text>}
                             </View>
                           </View>
                           <View style={styles.requiredPhotoActions}>
@@ -1602,14 +1652,16 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
     return (
       <View style={styles.requestDetailShell}>
         <View style={styles.requestDetailHeader}>
-          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={styles.requestHeaderIconBtn}>
-            <Ionicons name="close" size={24} color="#17191D" />
+          <TouchableOpacity onPress={goBack} activeOpacity={0.8} style={styles.requestHeaderIconBtn} accessibilityRole="button" accessibilityLabel="Back">
+            <Ionicons name="chevron-back" size={26} color="#17191D" />
           </TouchableOpacity>
           <View style={styles.jobPopupHeaderTextWrap}>
             <Text style={styles.jobPopupHeaderTitle}>Job #{job.number}</Text>
             <Text style={styles.jobPopupAcceptedText}>{acceptedLabel}</Text>
           </View>
-          <View style={styles.requestHeaderIconBtn} />
+          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={[styles.requestHeaderIconBtn, styles.requestHeaderCloseBtn]} accessibilityRole="button" accessibilityLabel="Close">
+            <Ionicons name="close" size={24} color="#17191D" />
+          </TouchableOpacity>
         </View>
 
         <ScrollView style={[styles.container, styles.requestDetailScroll]} contentContainerStyle={styles.jobRouteContent} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
@@ -1644,7 +1696,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
                 <Text style={styles.mapPlaceholderText}>Map unavailable</Text>
               </View>
             )}
-            <View style={styles.mapBubble}><Text style={styles.mapBubbleText}>{liveEta || job.eta || '15 min'}{`\n`}To customer</Text></View>
+            <View style={styles.mapBubble}><Text style={styles.mapBubbleTime}>{liveEta || job.eta || '—'}</Text><Text style={styles.mapBubbleText}>to customer</Text></View>
           </View>
 
           <View style={styles.jobCustomerCard}>
@@ -1660,34 +1712,57 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
                 <Text style={styles.customerTrustedText}>Verified & trusted</Text>
               </View>
             </View>
-            <View style={styles.customerActionsDivider} />
             <View style={styles.customerPopupActions}>
               <TouchableOpacity style={styles.customerPopupActionBtn} activeOpacity={0.82} onPress={() => phone && Linking.openURL(`tel:${phone}`)}>
-                <Ionicons name="call-outline" size={19} color="#F04416" />
+                <Ionicons name="call-outline" size={22} color="#F04416" />
               </TouchableOpacity>
               <TouchableOpacity style={styles.customerPopupActionBtn} activeOpacity={0.82} onPress={() => phone && Linking.openURL(`sms:${phone}`)}>
-                <Ionicons name="chatbox-outline" size={19} color="#F04416" />
+                <Ionicons name="chatbox-outline" size={22} color="#F04416" />
               </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* What to look for on arrival: the vehicle, its color and plate. */}
+          <View style={styles.vehicleInfoCard}>
+            <View style={styles.requestVehicleIcon}>
+              <Ionicons name={job.service?.icon || job.icon || 'car-outline'} size={22} color="#F04416" />
+            </View>
+            <View style={styles.serviceInfo}>
+              <Text style={styles.serviceType} numberOfLines={2}>{vehicleDisplayParts.main}{!!vehicleDisplayParts.suffix && <Text style={styles.serviceTypeSuffix}>{vehicleDisplayParts.suffix}</Text>}</Text>
+              {!!vehicleLookFor && (
+                <View style={[styles.trustedLine, styles.vehicleTrustedLine]}>
+                  <Ionicons name="eye-outline" size={13} color="#F04416" />
+                  <Text style={styles.verifiedTrusted} numberOfLines={1}>{vehicleLookFor}</Text>
+                </View>
+              )}
+            </View>
+            <View style={styles.vehicleMetaBox}>
+              <View style={styles.requestSpecRow}>
+                <Text style={styles.requestSpecLabel}>Service Type</Text>
+                <Text style={styles.requestSpecValue} numberOfLines={1}>{serviceMeta.title}</Text>
+              </View>
             </View>
           </View>
 
           <View style={styles.routeAddressCard}>
             <View style={styles.routeAddressIcon}>
-              <Ionicons name="location-outline" size={20} color="#F04416" />
+              <Ionicons name="location-outline" size={22} color="#F04416" />
             </View>
             <View style={styles.routeAddressInfo}>
               <Text style={styles.routeAddressLabel}>Customer Location</Text>
               <Text style={styles.routeAddressText} numberOfLines={2}>{address}</Text>
             </View>
-            <TouchableOpacity style={styles.navigateBtn} activeOpacity={0.84} onPress={() => setNavigationChoiceOpen(true)}>
-              <Text style={styles.navigateBtnText}>Navigate</Text>
-            </TouchableOpacity>
+            <View style={styles.routeNavigateBox}>
+              <TouchableOpacity style={styles.navigateBtn} activeOpacity={0.84} onPress={() => setNavigationChoiceOpen(true)}>
+                <Text style={styles.navigateBtnText}>Navigate</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </ScrollView>
 
         <View style={styles.routeBottomPanel}>
           <TouchableOpacity style={styles.arrivedRouteBtn} activeOpacity={0.86} onPress={() => { setRouteOpen(false); setArrivedOpen(true); onWorkflowChange?.({ stage: 'arrived' }); }}>
-            <Text style={styles.arrivedRouteText}>Arrived</Text>
+            <Text style={styles.arrivedRouteText}>{reachedRank >= jobStatusRank('arrived') ? 'Continue' : 'Arrived'}</Text>
           </TouchableOpacity>
         </View>
 
@@ -2130,14 +2205,16 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
   return (
     <View style={styles.requestDetailShell}>
       <View style={styles.requestDetailHeader}>
-        <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={styles.requestHeaderIconBtn}>
-          <Ionicons name="close" size={24} color="#17191D" />
+        <TouchableOpacity onPress={goBack} activeOpacity={0.8} style={styles.requestHeaderIconBtn} accessibilityRole="button" accessibilityLabel="Back">
+          <Ionicons name="chevron-back" size={26} color="#17191D" />
         </TouchableOpacity>
         <View style={styles.jobPopupHeaderTextWrap}>
           <Text style={styles.jobPopupHeaderTitle}>Job #{job.number}</Text>
           <Text style={styles.jobPopupAcceptedText}>{acceptedLabel}</Text>
         </View>
-        <View style={styles.requestHeaderIconBtn} />
+        <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={[styles.requestHeaderIconBtn, styles.requestHeaderCloseBtn]} accessibilityRole="button" accessibilityLabel="Close">
+          <Ionicons name="close" size={24} color="#17191D" />
+        </TouchableOpacity>
       </View>
 
       <ScrollView style={[styles.container, styles.requestDetailScroll]} contentContainerStyle={styles.jobPopupContent} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
@@ -2154,13 +2231,12 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
               <Text style={styles.customerTrustedText}>Verified & trusted</Text>
             </View>
           </View>
-          <View style={styles.customerActionsDivider} />
           <View style={styles.customerPopupActions}>
             <TouchableOpacity style={styles.customerPopupActionBtn} activeOpacity={0.82} onPress={() => phone && Linking.openURL(`tel:${phone}`)}>
-              <Ionicons name="call-outline" size={19} color="#F04416" />
+              <Ionicons name="call-outline" size={22} color="#F04416" />
             </TouchableOpacity>
             <TouchableOpacity style={styles.customerPopupActionBtn} activeOpacity={0.82} onPress={() => phone && Linking.openURL(`sms:${phone}`)}>
-              <Ionicons name="chatbox-outline" size={19} color="#F04416" />
+              <Ionicons name="chatbox-outline" size={22} color="#F04416" />
             </TouchableOpacity>
           </View>
         </View>
@@ -2245,7 +2321,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
                 <Text style={styles.mapPlaceholderText}>Map unavailable</Text>
               </View>
             )}
-            <View style={styles.mapBubble}><Text style={styles.mapBubbleText}>{liveEta || job.eta || '15 min'}{`\n`}On route</Text></View>
+            <View style={styles.mapBubble}><Text style={styles.mapBubbleTime}>{liveEta || job.eta || '—'}</Text><Text style={styles.mapBubbleText}>on route</Text></View>
           </View>
         )}
 
@@ -2258,7 +2334,16 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
         <View style={styles.requestBriefCard}>
           <Text style={styles.jobDetailHeading}>Job Details</Text>
 
-          <RequestInfoRow icon="chatbox-outline" color="#2F80FF" label="Customer Note" value={customerNote} chevron onPress={() => setNoteOpen(true)} />
+          {/* The customer's note in full under its title; their photos follow. */}
+          <View style={styles.noteBlock}>
+            <View style={styles.noteBlockHeader}>
+              <View style={[styles.requestInfoIcon, { backgroundColor: '#2F80FF' + '18' }]}>
+                <Ionicons name="chatbox-outline" size={16} color="#2F80FF" />
+              </View>
+              <Text style={styles.jobDetailTitle}>Customer Note</Text>
+            </View>
+            <Text style={[styles.noteBlockText, !customerNote && styles.noteBlockEmpty]}>{customerNote || 'No additional info'}</Text>
+          </View>
           <OrderPhotos orderId={job.id} />
 
           {intakeRows.length > 0 && (
@@ -2274,7 +2359,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
                   <View key={row.key} style={styles.diagnosticRow}>
                     <View style={styles.diagnosticDot} />
                     <Text style={styles.diagnosticLabel} numberOfLines={2}>{row.label}</Text>
-                    <Text style={styles.diagnosticValue} numberOfLines={1}>{row.value}</Text>
+                    <Text style={styles.diagnosticValue} numberOfLines={2}>{row.value}</Text>
                   </View>
                 ))}
               </View>
@@ -2282,13 +2367,13 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
           )}
 
           {locationDetailRows.map(row => (
-            <RequestInfoRow key={row.key} icon={row.icon} color={row.color} label={row.label} value={row.value} />
+            <RequestInfoRow key={row.key} icon={row.icon} color={row.color} label={row.label} value={row.value} labelStyle={styles.jobDetailTitle} valueStyle={[styles.jobDetailRowValue, row.key === 'earnings' && styles.jobDetailEarnings]} singleLine />
           ))}
         </View>
 
         {!isCompleted && (
           <TouchableOpacity style={styles.onTheWayBtn} activeOpacity={0.86} onPress={() => { setRouteOpen(true); onWorkflowChange?.({ stage: 'route' }); }}>
-            <Text style={styles.onTheWayText}>On the way</Text>
+            <Text style={styles.onTheWayText}>{reachedRank >= jobStatusRank('en_route') ? 'Continue route' : 'On the way'}</Text>
             <Ionicons name="chevron-forward" size={18} color="#FFFFFF" />
           </TouchableOpacity>
         )}
@@ -2300,38 +2385,6 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
         )}
       </ScrollView>
 
-      <Modal visible={noteOpen} transparent animationType="fade" onRequestClose={() => setNoteOpen(false)}>
-        <View style={styles.noteModalOverlay}>
-          <TouchableOpacity style={styles.noteModalBackdrop} activeOpacity={1} onPress={() => setNoteOpen(false)} />
-          <View style={styles.noteModalCard}>
-            <View style={styles.noteModalHeader}>
-              <Text style={styles.noteModalTitle}>Customer Note</Text>
-              <TouchableOpacity style={styles.noteCloseBtn} activeOpacity={0.8} onPress={() => setNoteOpen(false)}>
-                <Ionicons name="close" size={20} color="#17191D" />
-              </TouchableOpacity>
-            </View>
-            <Text style={styles.noteModalText}>{customerNote}</Text>
-            {!!customerFiles.length && (
-              <View style={styles.noteFilesBlock}>
-                <Text style={styles.noteFilesTitle}>Uploaded files</Text>
-                {customerFiles.map((file, index) => {
-                  const fileName = typeof file === 'string' ? file : file.name || `Attachment ${index + 1}`;
-                  const fileType = typeof file === 'string' ? 'file' : file.type || 'file';
-                  const fileIcon = fileType === 'image' || fileType === 'photo' ? 'image-outline' : 'document-attach-outline';
-                  return (
-                    <View key={`${fileName}-${index}`} style={styles.noteFileRow}>
-                      <View style={styles.noteFileIcon}>
-                        <Ionicons name={fileIcon} size={16} color="#F04416" />
-                      </View>
-                      <Text style={styles.noteFileName} numberOfLines={1}>{fileName}</Text>
-                    </View>
-                  );
-                })}
-              </View>
-            )}
-          </View>
-        </View>
-      </Modal>
 
       <InvoicePreviewModal
         visible={completedInvoicePreviewOpen}

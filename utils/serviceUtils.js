@@ -32,8 +32,9 @@ export const SERVICE_FLOW_SCHEMAS = {
     icon: 'car-sport-outline',
     requiredPhotos: [
       { key: 'front', label: 'Front of vehicle', hint: 'License plate must be readable' },
-      { key: 'vin', label: 'VIN', hint: 'VIN label must be clear and readable' },
-      { key: 'odometer', label: 'Odometer', hint: 'Mileage reading must be visible' },
+      { key: 'rear', label: 'Rear of vehicle', hint: 'Show any existing damage' },
+      { key: 'left_side', label: 'Driver side', hint: 'Show any existing damage' },
+      { key: 'right_side', label: 'Passenger side', hint: 'Show any existing damage' },
       { key: 'tow_access', label: 'Tow access', hint: 'Show access path and vehicle position for towing' },
     ],
     intakeQuestions: [
@@ -58,8 +59,6 @@ export const SERVICE_FLOW_SCHEMAS = {
     icon: 'battery-charging-outline',
     requiredPhotos: [
       { key: 'front', label: 'Front of vehicle', hint: 'License plate must be readable' },
-      { key: 'vin', label: 'VIN', hint: 'VIN label must be clear and readable' },
-      { key: 'odometer', label: 'Odometer', hint: 'Mileage reading must be visible' },
       { key: 'battery_area', label: 'Battery area', hint: 'Show battery terminals or jump points if accessible' },
     ],
     intakeQuestions: [
@@ -83,8 +82,6 @@ export const SERVICE_FLOW_SCHEMAS = {
     icon: 'battery-full-outline',
     requiredPhotos: [
       { key: 'front', label: 'Front of vehicle', hint: 'License plate must be readable' },
-      { key: 'vin', label: 'VIN', hint: 'VIN label must be clear and readable' },
-      { key: 'odometer', label: 'Odometer', hint: 'Mileage reading must be visible' },
       { key: 'battery_area', label: 'Battery area', hint: 'Show current battery label and terminals' },
     ],
     intakeQuestions: [
@@ -108,7 +105,6 @@ export const SERVICE_FLOW_SCHEMAS = {
     icon: 'lock-open-outline',
     requiredPhotos: [
       { key: 'front', label: 'Front of vehicle', hint: 'License plate must be readable' },
-      { key: 'vin', label: 'VIN', hint: 'VIN label must be clear and readable if accessible' },
       { key: 'door_area', label: 'Door area', hint: 'Show the affected door/lock area' },
     ],
     intakeQuestions: [
@@ -131,8 +127,6 @@ export const SERVICE_FLOW_SCHEMAS = {
     icon: 'disc-outline',
     requiredPhotos: [
       { key: 'front', label: 'Front of vehicle', hint: 'License plate must be readable' },
-      { key: 'vin', label: 'VIN', hint: 'VIN label must be clear and readable' },
-      { key: 'odometer', label: 'Odometer', hint: 'Mileage reading must be visible' },
       { key: 'problem', label: 'Problem tire', hint: 'Show the flat/damaged tire and wheel position' },
     ],
     intakeQuestions: [
@@ -236,7 +230,7 @@ export function getOrderServiceType(order) {
   const explicitType = order.serviceType || order.service?.serviceType || order.service?.typeKey || order.orderContext?.serviceType;
   if (explicitType && SERVICE_FLOW_SCHEMAS[explicitType]) return explicitType;
   const serviceText = getServiceTypeText(order);
-  if (serviceText.includes('tow')) return 'towing';
+  if (serviceText.includes('tow') || serviceText.includes('out of charge')) return 'towing';
   if (serviceText.includes('jump') || serviceText.includes('dead battery') || serviceText.includes('boost')) return 'jump_start';
   if (serviceText.includes('lock') || serviceText.includes('key')) return 'lockout';
   if (serviceText.includes('tire') || serviceText.includes('tyre') || serviceText.includes('flat') || serviceText.includes('wheel')) return 'tire_change';
@@ -568,6 +562,16 @@ export async function fetchJson(url, options) {
   if (!text) return null;
   if (!contentType.includes('application/json')) throw new Error(`Expected JSON, received ${contentType || 'unknown content type'}`);
   return JSON.parse(text);
+}
+
+// How far a mobile job has got, as the server's order status (later = higher).
+// A step's status is sent once, the first time the job reaches it.
+const JOB_STATUS_RANK = {
+  accepted: 0, confirmed: 0, en_route: 1, arrived: 2, inspection: 3,
+  estimate_sent: 4, estimate_declined: 4, estimate_approved: 5, in_progress: 6, completed: 7,
+};
+export function jobStatusRank(status) {
+  return JOB_STATUS_RANK[status] ?? -1;
 }
 
 export function getBackendStatusFromWorkflowStage(stage) {

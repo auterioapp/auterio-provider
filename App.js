@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Animated, AppState, Easing, Linking, Modal, PanResponder, Platform, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, AppState, Dimensions, Easing, Linking, Modal, PanResponder, Platform, RefreshControl, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { Ionicons } from '@expo/vector-icons';
 import * as Notifications from 'expo-notifications';
@@ -26,7 +26,7 @@ import JobDetailScreen from './screens/JobDetailScreen';
 import { getJobProgressIndex } from './utils/jobUtils';
 import { API_URL, TAB_BAR_PADDING, TAB_INDICATOR_EXTRA_WIDTH, TAB_INDICATOR_DROP_SCALE, TABS, ACTIVE_SHOP_STATUSES } from './constants';
 
-import { getServiceMeta, getRequestLocation, getBackendStatusFromWorkflowStage } from './utils/serviceUtils';
+import { getServiceMeta, getRequestLocation, getBackendStatusFromWorkflowStage, jobStatusRank } from './utils/serviceUtils';
 import { loadPricing, savePricing, DEFAULT_PRICING } from './utils/pricingStore';
 import { setAuthFailureHandler as setApiAuthFailureHandler } from './apiClient';
 import { ProviderContextProvider, useProvider } from './ProviderContext';
@@ -105,6 +105,10 @@ const MOBILE_STAGE_FROM_STATUS = {
   in_progress: 'working',
 };
 
+
+// The step a swipe back leads to (JobPopupScreen goBack); steps without one
+// (waiting for the customer, working, completing) don't swipe.
+const JOB_PREVIOUS_STAGE = { route: 'accepted', arrived: 'route', diagnosis: 'arrived', estimate: 'diagnosis' };
 
 function normalizeOrderToJob(order) {
   const serviceMeta = getServiceMeta(order);
@@ -218,6 +222,24 @@ function AppInner() {
   const [allowScheduling, setAllowScheduling] = useState(false);
   const [appointmentOrder, setAppointmentOrder] = useState(null);
   const [jobWorkflows, setJobWorkflows] = useState({});
+  // Highest step a job has reached: its status on the server or a step sent since.
+  const sentJobRank = useRef({});
+  const reachedJobRank = (jobId) => {
+    const job = selectedJob && String(selectedJob.id) === String(jobId) ? selectedJob : null;
+    return Math.max(jobStatusRank(job?.status), sentJobRank.current[jobId] ?? -1);
+  };
+  // The open job's "back one step" (JobPopupScreen fills it in), for the Android
+  // back button and the swipe to the previous step.
+  const jobBackRef = useRef(null);
+  // Swiping right shows the previous step, like the Jobs tabs (SwipePager): it
+  // lies to the left of the current one in a paging ScrollView. Landing on it
+  // makes it the current step (jobBackRef), and the pager moves back under it.
+  const jobPagerRef = useRef(null);
+  const [jobPagerWidth, setJobPagerWidth] = useState(0);
+  const jobPagerHasPrevious = useRef(false);
+  const keepJobPagerOnCurrent = () => {
+    if (jobPagerWidth) jobPagerRef.current?.scrollTo({ x: jobPagerHasPrevious.current ? jobPagerWidth : 0, animated: false });
+  };
   const getJobWorkflowFor = (job) => {
     const existing = jobWorkflows[job?.id];
     if (existing?.stage) return existing;
@@ -1108,6 +1130,12 @@ function AppInner() {
 
     const nextStatus = getBackendStatusFromWorkflowStage(patch?.stage);
     if (!nextStatus) return;
+    // A step's status goes to the server once, the first time the job reaches it;
+    // going back and forward again only changes the screen. Location updates and
+    // a (revised) estimate are always sent.
+    const isNewStep = jobStatusRank(nextStatus) > reachedJobRank(jobId);
+    if (!isNewStep && !patch?.providerLocation && !patch?.estimate) return;
+    if (isNewStep) sentJobRank.current[jobId] = jobStatusRank(nextStatus);
 
     const currentWorkflow = { ...(jobWorkflows[jobId] || {}), ...patch };
     const body = { status: nextStatus, estimate: patch?.estimate };
@@ -1585,7 +1613,7 @@ function AppInner() {
         <Modal
           visible={!!selectedJob}
           animationType="slide"
-          onRequestClose={() => setSelectedJob(null)}
+          onRequestClose={() => (jobBackRef.current ? jobBackRef.current() : setSelectedJob(null))}
         >
           <View style={styles.requestModalOverlay}>
             <View style={styles.requestModalSheet}>
@@ -1606,18 +1634,62 @@ function AppInner() {
                   }}
                 />
               ) : !!selectedJob && (
-                <JobPopupScreen
-                  job={selectedJob}
-                  workflow={getJobWorkflowFor(selectedJob)}
-                  onWorkflowChange={(patch) => updateJobWorkflow(selectedJob.id, patch)}
-                  onBack={() => setSelectedJob(null)}
-                  onCancel={async (o) => {
-                    setSelectedJob(null);
-                    await cancelShopJob(o);
-                  }}
-                  refreshControl={refreshControl}
-                  providerLiveCoord={providerLiveCoord}
-                />
+                (() => {
+                  const workflow = getJobWorkflowFor(selectedJob);
+                  const previousStage = JOB_PREVIOUS_STAGE[workflow.stage];
+                  jobPagerHasPrevious.current = !!previousStage && !!jobPagerWidth;
+                  const popupProps = {
+                    job: selectedJob,
+                    onBack: () => setSelectedJob(null),
+                    onCancel: async (o) => {
+                      setSelectedJob(null);
+                      await cancelShopJob(o);
+                    },
+                    refreshControl,
+                    providerLiveCoord,
+                    reachedRank: reachedJobRank(selectedJob.id),
+                  };
+                  return (
+                    <ScrollView
+                      ref={jobPagerRef}
+                      horizontal
+                      pagingEnabled
+                      nestedScrollEnabled
+                      directionalLockEnabled
+                      decelerationRate="fast"
+                      bounces={false}
+                      scrollEnabled={jobPagerHasPrevious.current}
+                      showsHorizontalScrollIndicator={false}
+                      style={{ flex: 1 }}
+                      onLayout={event => setJobPagerWidth(event.nativeEvent.layout.width)}
+                      onContentSizeChange={keepJobPagerOnCurrent}
+                      onMomentumScrollEnd={(event) => {
+                        if (jobPagerHasPrevious.current && event.nativeEvent.contentOffset.x < jobPagerWidth / 2) {
+                          jobBackRef.current?.();
+                        }
+                        keepJobPagerOnCurrent();
+                      }}
+                    >
+                      {jobPagerHasPrevious.current && (
+                        <View key={`previous-${previousStage}`} style={{ width: jobPagerWidth }} pointerEvents="none">
+                          <JobPopupScreen
+                            {...popupProps}
+                            workflow={{ ...workflow, stage: previousStage === 'accepted' ? undefined : previousStage }}
+                            onWorkflowChange={() => {}}
+                          />
+                        </View>
+                      )}
+                      <View key="current" style={{ width: jobPagerWidth || Dimensions.get('window').width }}>
+                        <JobPopupScreen
+                          {...popupProps}
+                          workflow={workflow}
+                          onWorkflowChange={(patch) => updateJobWorkflow(selectedJob.id, patch)}
+                          backRef={jobBackRef}
+                        />
+                      </View>
+                    </ScrollView>
+                  );
+                })()
               )}
             </View>
           </View>

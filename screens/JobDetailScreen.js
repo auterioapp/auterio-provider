@@ -353,7 +353,7 @@ const styles = StyleSheet.create({
   stepperCircle: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#FFFFFF', borderWidth: 1.5, borderColor: '#E1E4E8', alignItems: 'center', justifyContent: 'center' },
   stepperCircleCompleted: { backgroundColor: '#F04416', borderColor: '#F04416' },
   stepperCircleCurrent: { backgroundColor: '#F04416', borderColor: '#F04416' },
-  stepperLabel: { color: '#8B9098', fontSize: 8, fontWeight: '700', textAlign: 'center' },
+  stepperLabel: { color: '#8B9098', fontSize: 11, lineHeight: 14, fontWeight: '500', textAlign: 'center' },
   stepperLabelActive: { color: '#F04416' },
   jobDetailHeading: { color: '#17191D', fontSize: 15, fontWeight: '700', marginBottom: 11 },
   jobDetailRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', paddingVertical: 10, gap: 12 },

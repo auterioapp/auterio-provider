@@ -47,7 +47,6 @@ export default function OrderPhotos({ orderId }) {
           <Ionicons name="images-outline" size={16} color="#F04416" />
         </View>
         <Text style={styles.title}>Customer photos</Text>
-        <Text style={styles.count}>{photos.length}</Text>
       </View>
       <View style={styles.row}>
         {photos.map((photo, index) => (
@@ -82,8 +81,7 @@ const styles = StyleSheet.create({
   wrap: { marginTop: 12 },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
   icon: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#F0441618', alignItems: 'center', justifyContent: 'center' },
-  title: { flex: 1, color: '#17191D', fontSize: 13, fontWeight: '700' },
-  count: { color: '#5E646D', fontSize: 13, fontWeight: '700' },
+  title: { flex: 1, color: '#17191D', fontSize: 13, lineHeight: 17, fontWeight: '600' },
   row: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   thumb: { width: 76, height: 76, borderRadius: 12, backgroundColor: '#F3F4F5' }, // same as the customer's (IssueDetailsScreen photoThumb)
   viewer: { flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', justifyContent: 'center' },
