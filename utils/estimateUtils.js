@@ -1,4 +1,4 @@
-import { getOrderServiceType } from './serviceUtils';
+import { getOrderServiceType, getVehicleClass } from './serviceUtils';
 import { getPricing } from './pricingStore';
 
 export function sumAmounts(items) {
@@ -68,24 +68,82 @@ export function formatCurrency(value) {
   return `$${num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+// Heavy trucks: recommendations from their own checks (serviceUtils HEAVY_DIAGNOSIS).
+function getHeavyRecommendations(serviceType, answers, batteryVoltage) {
+  const recommendations = [];
+  if (serviceType === 'towing') {
+    if (answers.towMethod === 'rotator') recommendations.push('Rotator Recovery');
+    if (answers.towMethod === 'lowboy') recommendations.push('Lowboy Transport');
+    if (answers.trailer === 'loaded') recommendations.push('Loaded Trailer Tow');
+    if (answers.airBrakes === 'caged') recommendations.push('Brake Caging');
+    if (answers.driveshaft === 'pulled') recommendations.push('Driveshaft Removal');
+    if (answers.hazmat === 'yes') recommendations.push('Hazmat Handling');
+    return recommendations.length ? recommendations : ['Heavy Tow Service'];
+  }
+  if (serviceType === 'jump_start' || serviceType === 'battery_replacement') {
+    // A healthy bank rests at about 12.6V, or 25.2V on a 24V system.
+    const voltage = Number.parseFloat(String(batteryVoltage || '').replace(',', '.'));
+    const low = answers.systemVoltage === '24v' ? 24.4 : 12.2;
+    if (serviceType === 'jump_start' && Number.isFinite(voltage) && voltage < low) recommendations.push('Battery Bank Replacement');
+    if (answers.fuelGelled === 'yes') recommendations.push('Fuel Anti-Gel Treatment');
+    if (answers.coldStartAid === 'not_working') recommendations.push('Grid Heater / Glow Plug Repair');
+    if (answers.alternator === 'failed') recommendations.push('Alternator Replacement');
+    if (answers.jumpStart === 'not_started') recommendations.push('Advanced Electrical Diagnosis');
+    if (answers.systemTest === 'failed') recommendations.push('Charging System Check');
+    return recommendations.length ? recommendations : [serviceType === 'jump_start' ? 'Heavy-Duty Jump Start' : 'Heavy-Duty Battery Replacement'];
+  }
+  if (serviceType === 'lockout') {
+    return answers.ownershipVerified === 'not_verified' ? ['Customer Verification Required'] : ['Truck Lockout Service'];
+  }
+  if (serviceType === 'fuel_delivery') {
+    if (answers.def === 'topped_up') recommendations.push('DEF Refill');
+    if (answers.antiGel === 'added') recommendations.push('Anti-Gel Treatment');
+    if (answers.primed === 'primed') recommendations.push('Fuel System Priming');
+    if (answers.started === 'not_started') recommendations.push('Fuel System Diagnosis');
+    return recommendations.length ? ['Diesel Fuel Delivery', ...recommendations] : ['Diesel Fuel Delivery'];
+  }
+  if (serviceType === 'tire_change') {
+    if (answers.replacement === 'new') recommendations.push('Tire Replacement (New)');
+    if (answers.replacement === 'recap') recommendations.push('Tire Replacement (Recap)');
+    if (answers.wheelCondition === 'damaged') recommendations.push('Wheel Inspection');
+    if (answers.torque === 'done') recommendations.push('Re-torque After 50–100 Miles');
+    return recommendations.length ? recommendations : ['Heavy-Duty Tire Service'];
+  }
+  if (answers.scanResult === 'codes_present') recommendations.push('Advanced Diagnostics');
+  if (answers.airLeaks === 'leak') recommendations.push('Air System Repair');
+  if (answers.dpf === 'regen_needed') recommendations.push('DPF Regeneration');
+  if (answers.outOfService === 'out_of_service') recommendations.push('Safety Inspection');
+  return recommendations.length ? recommendations : ['Heavy-Duty Diagnostics'];
+}
+
 export function getRecommendedServicesFromDiagnosis(answers, batteryVoltage, order) {
   const serviceType = getOrderServiceType(order);
+  if (getVehicleClass(order) === 'heavy') return getHeavyRecommendations(serviceType, answers, batteryVoltage);
   if (serviceType === 'tire_change') {
     const recommendations = [];
     if (answers.tireDamage === 'not_repairable') recommendations.push('Tire Replacement');
     if (answers.spareTire === 'not_available') recommendations.push('Tow to Tire Shop');
+    if (answers.spareTire === 'repair_kit') recommendations.push('Tire Plug / Sealant Repair');
+    if (answers.wheelLock === 'missing') recommendations.push('Wheel Lock Removal');
     if (answers.wheelCondition === 'damaged') recommendations.push('Wheel Inspection');
     return recommendations.length ? recommendations : ['Tire Change Labor'];
   }
   if (serviceType === 'towing') {
     const recommendations = [];
     if (answers.towMethod === 'flatbed') recommendations.push('Flatbed Towing');
+    if (answers.drivetrain === 'awd' && answers.towMethod !== 'flatbed') recommendations.push('Flatbed Recommended (AWD / 4x4)');
     if (answers.vehicleRolls === 'locked' || answers.steering === 'locked') recommendations.push('Special Recovery Setup');
     return recommendations.length ? recommendations : ['Tow Service'];
   }
   if (serviceType === 'lockout') {
     if (answers.ownershipVerified === 'not_verified') return ['Customer Verification Required'];
     return ['Lockout Service'];
+  }
+  if (serviceType === 'fuel_delivery') {
+    const recommendations = ['Fuel Delivery'];
+    if (answers.fuelLeak === 'found') recommendations.push('Fuel Leak Inspection');
+    if (answers.started === 'not_started') recommendations.push('Fuel System Diagnosis');
+    return recommendations;
   }
   if (serviceType === 'mobile_mechanic') {
     const recommendations = [];
@@ -101,6 +159,12 @@ export function getRecommendedServicesFromDiagnosis(answers, batteryVoltage, ord
   }
   if (answers.alternator === 'failed') {
     recommendations.push('Alternator Replacement');
+  }
+  if (answers.dcdc === 'failed') {
+    recommendations.push('12V Charging Check (DC-DC)');
+  }
+  if (answers.registration === 'done') {
+    recommendations.push('Battery Registration');
   }
   if (answers.jumpStart === 'not_started') {
     recommendations.push('Advanced Electrical Diagnosis');
@@ -138,6 +202,11 @@ export function getDemoEstimate(answers, batteryVoltage, extraItems = [], remove
   } else if (serviceType === 'lockout') {
     labor = [
       { id: 'base-labor-lockout-service', source: 'base', scope: 'required', label: 'Lockout Service', hours: '0.7 hr', amount: Math.round(lr * 0.7 * 100) / 100 },
+    ];
+    parts = [];
+  } else if (serviceType === 'fuel_delivery') {
+    labor = [
+      { id: 'base-labor-fuel-delivery', source: 'base', scope: 'required', label: 'Fuel Delivery', hours: '0.5 hr', amount: Math.round(lr * 0.5 * 100) / 100 },
     ];
     parts = [];
   } else if (serviceType === 'mobile_mechanic') {

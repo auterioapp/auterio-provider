@@ -32,6 +32,7 @@ export const SERVICE_FLOW_SCHEMAS = {
     icon: 'car-sport-outline',
     requiredPhotos: [
       { key: 'front', label: 'Front of vehicle', hint: 'License plate must be readable' },
+      { key: 'vin', label: 'VIN', hint: 'VIN label must be clear and readable' },
       { key: 'rear', label: 'Rear of vehicle', hint: 'Show any existing damage' },
       { key: 'left_side', label: 'Driver side', hint: 'Show any existing damage' },
       { key: 'right_side', label: 'Passenger side', hint: 'Show any existing damage' },
@@ -45,8 +46,8 @@ export const SERVICE_FLOW_SCHEMAS = {
     ],
     diagnosis: {
       title: 'Towing Readiness',
-      metric: { key: 'towAccess', label: 'Tow Access Clearance', icon: 'resize-outline', unit: '' },
       checks: [
+        { key: 'drivetrain', icon: 'cog-outline', label: 'Drivetrain', options: [{ label: 'FWD', value: 'fwd' }, { label: 'RWD', value: 'rwd' }, { label: 'AWD / 4x4', value: 'awd' }] },
         { key: 'vehicleRolls', icon: 'car-sport-outline', label: 'Vehicle Rolls', options: [{ label: 'Rolls', value: 'rolls' }, { label: 'Does Not Roll', value: 'locked' }] },
         { key: 'steering', icon: 'git-branch-outline', label: 'Steering Condition', options: [{ label: 'Steers', value: 'steers' }, { label: 'Locked', value: 'locked' }] },
         { key: 'towMethod', icon: 'trail-sign-outline', label: 'Tow Method', options: [{ label: 'Wheel Lift', value: 'wheel_lift' }, { label: 'Flatbed', value: 'flatbed' }] },
@@ -59,6 +60,7 @@ export const SERVICE_FLOW_SCHEMAS = {
     icon: 'battery-charging-outline',
     requiredPhotos: [
       { key: 'front', label: 'Front of vehicle', hint: 'License plate must be readable' },
+      { key: 'vin', label: 'VIN', hint: 'VIN label must be clear and readable' },
       { key: 'battery_area', label: 'Battery area', hint: 'Show battery terminals or jump points if accessible' },
     ],
     intakeQuestions: [
@@ -71,8 +73,8 @@ export const SERVICE_FLOW_SCHEMAS = {
       metric: { key: 'batteryVoltage', label: 'Battery Voltage', icon: 'battery-half-outline', unit: 'V', keyboardType: 'decimal-pad' },
       checks: [
         { key: 'jumpStart', icon: 'flash-outline', label: 'Jump Start Result', options: [{ label: 'Vehicle Started', value: 'started' }, { label: 'Vehicle Did Not Start', value: 'not_started' }] },
-        { key: 'alternator', icon: 'battery-charging-outline', label: 'Charging System (Alternator)', options: [{ label: 'Alternator OK', value: 'ok' }, { label: 'Alternator Failed', value: 'failed' }] },
-        { key: 'loadTest', icon: 'shield-checkmark-outline', label: 'Battery Load Test', options: [{ label: 'Good', value: 'good' }, { label: 'Weak', value: 'weak' }, { label: 'Bad', value: 'bad' }] },
+        { key: 'alternator', icon: 'battery-charging-outline', label: 'Charging System (Alternator)', options: [{ label: 'OK', value: 'ok' }, { label: 'Failed', value: 'failed' }, { label: 'N/A', value: 'na' }] },
+        { key: 'loadTest', icon: 'shield-checkmark-outline', label: 'Battery Load Test', options: [{ label: 'Good', value: 'good' }, { label: 'Weak', value: 'weak' }, { label: 'Bad', value: 'bad' }, { label: 'N/A', value: 'na' }] },
       ],
       fallbackRecommendations: ['Electrical System Check'],
     },
@@ -82,6 +84,7 @@ export const SERVICE_FLOW_SCHEMAS = {
     icon: 'battery-full-outline',
     requiredPhotos: [
       { key: 'front', label: 'Front of vehicle', hint: 'License plate must be readable' },
+      { key: 'vin', label: 'VIN', hint: 'VIN label must be clear and readable' },
       { key: 'battery_area', label: 'Battery area', hint: 'Show current battery label and terminals' },
     ],
     intakeQuestions: [
@@ -94,6 +97,9 @@ export const SERVICE_FLOW_SCHEMAS = {
       metric: { key: 'batteryVoltage', label: 'Battery Voltage', icon: 'battery-half-outline', unit: 'V', keyboardType: 'decimal-pad' },
       checks: [
         { key: 'batteryFitment', icon: 'barcode-outline', label: 'Battery Fitment', options: [{ label: 'Matched', value: 'matched' }, { label: 'Mismatch', value: 'mismatch' }] },
+        { key: 'batteryType', icon: 'layers-outline', label: 'Battery Type', options: [{ label: 'Flooded', value: 'flooded' }, { label: 'AGM', value: 'agm' }, { label: 'Lithium', value: 'lithium' }] },
+        // BMW, Audi, VW, Mercedes and others: the car's computer is told about the new battery.
+        { key: 'registration', icon: 'hardware-chip-outline', label: 'Battery Registration', options: [{ label: 'Done', value: 'done' }, { label: 'Not Needed', value: 'not_needed' }] },
         { key: 'terminalCondition', icon: 'hardware-chip-outline', label: 'Terminal Condition', options: [{ label: 'Clean', value: 'clean' }, { label: 'Corroded', value: 'corroded' }] },
         { key: 'systemTest', icon: 'checkmark-circle-outline', label: 'Post-install Test', options: [{ label: 'Passed', value: 'passed' }, { label: 'Failed', value: 'failed' }] },
       ],
@@ -105,6 +111,7 @@ export const SERVICE_FLOW_SCHEMAS = {
     icon: 'lock-open-outline',
     requiredPhotos: [
       { key: 'front', label: 'Front of vehicle', hint: 'License plate must be readable' },
+      { key: 'vin', label: 'VIN', hint: 'VIN label must be clear and readable' },
       { key: 'door_area', label: 'Door area', hint: 'Show the affected door/lock area' },
     ],
     intakeQuestions: [
@@ -127,6 +134,7 @@ export const SERVICE_FLOW_SCHEMAS = {
     icon: 'disc-outline',
     requiredPhotos: [
       { key: 'front', label: 'Front of vehicle', hint: 'License plate must be readable' },
+      { key: 'vin', label: 'VIN', hint: 'VIN label must be clear and readable' },
       { key: 'problem', label: 'Problem tire', hint: 'Show the flat/damaged tire and wheel position' },
     ],
     intakeQuestions: [
@@ -138,10 +146,35 @@ export const SERVICE_FLOW_SCHEMAS = {
       metric: { key: 'tirePressure', label: 'Tire Pressure', icon: 'speedometer-outline', unit: 'PSI', keyboardType: 'decimal-pad' },
       checks: [
         { key: 'tireDamage', icon: 'disc-outline', label: 'Tire Damage', options: [{ label: 'Repairable', value: 'repairable' }, { label: 'Not Repairable', value: 'not_repairable' }] },
-        { key: 'spareTire', icon: 'ellipse-outline', label: 'Spare Tire', options: [{ label: 'Available', value: 'available' }, { label: 'Not Available', value: 'not_available' }] },
+        { key: 'spareTire', icon: 'ellipse-outline', label: 'Spare Tire', options: [{ label: 'Available', value: 'available' }, { label: 'Repair Kit Only', value: 'repair_kit' }, { label: 'None', value: 'not_available' }] },
+        { key: 'wheelLock', icon: 'key-outline', label: 'Wheel Lock Key', options: [{ label: 'Has Key', value: 'has_key' }, { label: 'No Locks', value: 'no_locks' }, { label: 'Key Missing', value: 'missing' }] },
         { key: 'wheelCondition', icon: 'radio-button-on-outline', label: 'Wheel / Rim Condition', options: [{ label: 'OK', value: 'ok' }, { label: 'Damaged', value: 'damaged' }] },
       ],
       fallbackRecommendations: ['Tire Change Labor'],
+    },
+  },
+  // The customer's "Fuel Problem" (customer app issueQuestions.js): fuel brought to the car.
+  fuel_delivery: {
+    title: 'Fuel Delivery',
+    icon: 'water-outline',
+    requiredPhotos: [
+      { key: 'front', label: 'Front of vehicle', hint: 'License plate must be readable' },
+      { key: 'vin', label: 'VIN', hint: 'VIN label must be clear and readable' },
+      { key: 'fuel_gauge', label: 'Fuel gauge', hint: 'Show the gauge before refueling' },
+    ],
+    intakeQuestions: [
+      { key: 'fuel_gauge_empty', label: 'Is the fuel gauge on empty?' },
+      { key: 'fuel_type', label: 'What fuel does the vehicle take?' },
+    ],
+    diagnosis: {
+      title: 'Fuel Delivery',
+      metric: { key: 'gallons', label: 'Gallons Delivered', icon: 'water-outline', unit: 'gal', keyboardType: 'decimal-pad' },
+      checks: [
+        { key: 'fuelType', icon: 'water-outline', label: 'Fuel Delivered', options: [{ label: 'Regular 87', value: 'regular' }, { label: 'Premium 91+', value: 'premium' }, { label: 'Diesel', value: 'diesel' }] },
+        { key: 'fuelLeak', icon: 'alert-circle-outline', label: 'Fuel Leak / Smell', options: [{ label: 'None', value: 'none' }, { label: 'Found', value: 'found' }] },
+        { key: 'started', icon: 'flash-outline', label: 'Vehicle Started', options: [{ label: 'Started', value: 'started' }, { label: 'Did Not Start', value: 'not_started' }] },
+      ],
+      fallbackRecommendations: ['Fuel Delivery'],
     },
   },
   mobile_mechanic: {
@@ -162,13 +195,145 @@ export const SERVICE_FLOW_SCHEMAS = {
       title: 'General Mechanical Diagnosis',
       checks: [
         { key: 'visualInspection', icon: 'eye-outline', label: 'Visual Inspection', options: [{ label: 'Normal', value: 'normal' }, { label: 'Issue Found', value: 'issue_found' }] },
-        { key: 'scanResult', icon: 'speedometer-outline', label: 'Scan / Warning Lights', options: [{ label: 'No Codes', value: 'no_codes' }, { label: 'Codes Present', value: 'codes_present' }] },
+        { key: 'scanResult', icon: 'speedometer-outline', label: 'Scan / Warning Lights', options: [{ label: 'No Codes', value: 'no_codes' }, { label: 'Codes Present', value: 'codes_present' }, { label: 'N/A', value: 'na' }] },
         { key: 'safeToDrive', icon: 'shield-checkmark-outline', label: 'Safe To Drive', options: [{ label: 'Yes', value: 'yes' }, { label: 'No', value: 'no' }] },
       ],
       fallbackRecommendations: ['General Diagnostics'],
     },
   },
 };
+
+// Vehicle class the platform priced the order with (backend services/pricing.js):
+// light (car/SUV), light_truck (pickup/van), heavy (semi, box
+// truck, straight truck, trailer). Older orders without a price: from the type.
+const HEAVY_SUBTYPES = ['semi', 'box_truck', 'straight_truck', 'trailer'];
+const LIGHT_TRUCK_SUBTYPES = ['pickup', 'van'];
+
+export function getVehicleClass(order) {
+  const priced = order?.payment?.pricing?.vehicleClass;
+  if (priced) return priced;
+  const type = order?.service?.vehicleType;
+  const subType = order?.service?.vehicleSubType || order?.service?.diagnosticInfo?.vehicleSubType;
+  if (HEAVY_SUBTYPES.includes(subType) || type === 'truck') return 'heavy';
+  if (LIGHT_TRUCK_SUBTYPES.includes(subType)) return 'light_truck';
+  return 'light';
+}
+
+// Heavy trucks: the unit's number on arrival, and their own checks per service.
+const HEAVY_UNIT_PHOTO = { key: 'unit_number', label: 'USDOT / unit number', hint: 'Number on the cab door must be readable' };
+
+const HEAVY_DIAGNOSIS = {
+  towing: {
+    title: 'Heavy Tow Readiness',
+    checks: [
+      { key: 'towMethod', icon: 'trail-sign-outline', label: 'Tow Method', options: [{ label: 'Heavy Wrecker', value: 'heavy_wrecker' }, { label: 'Rotator', value: 'rotator' }, { label: 'Lowboy', value: 'lowboy' }] },
+      { key: 'trailer', icon: 'cube-outline', label: 'Trailer', options: [{ label: 'No Trailer', value: 'none' }, { label: 'Empty', value: 'empty' }, { label: 'Loaded', value: 'loaded' }] },
+      { key: 'airBrakes', icon: 'speedometer-outline', label: 'Air Brakes', options: [{ label: 'Air Builds', value: 'air_builds' }, { label: 'Brakes Caged', value: 'caged' }] },
+      { key: 'driveshaft', icon: 'git-commit-outline', label: 'Driveshaft', options: [{ label: 'Pulled', value: 'pulled' }, { label: 'Not Needed', value: 'not_needed' }] },
+      { key: 'hazmat', icon: 'warning-outline', label: 'Hazmat Load', options: [{ label: 'No', value: 'no' }, { label: 'Yes', value: 'yes' }] },
+    ],
+    fallbackRecommendations: ['Heavy Tow Service'],
+  },
+  jump_start: {
+    title: 'Heavy-Duty Electrical',
+    metric: { key: 'batteryVoltage', label: 'Battery Bank Voltage', icon: 'battery-half-outline', unit: 'V', keyboardType: 'decimal-pad' },
+    checks: [
+      { key: 'systemVoltage', icon: 'flash-outline', label: 'System Voltage', options: [{ label: '12V', value: '12v' }, { label: '24V', value: '24v' }] },
+      { key: 'batteryCount', icon: 'battery-full-outline', label: 'Batteries In Bank', options: [{ label: '2', value: '2' }, { label: '3', value: '3' }, { label: '4+', value: '4_plus' }] },
+      { key: 'jumpStart', icon: 'flash-outline', label: 'Jump Start Result', options: [{ label: 'Started', value: 'started' }, { label: 'Did Not Start', value: 'not_started' }] },
+      { key: 'fuelGelled', icon: 'snow-outline', label: 'Fuel Gelled', options: [{ label: 'No', value: 'no' }, { label: 'Yes', value: 'yes' }] },
+      { key: 'coldStartAid', icon: 'thermometer-outline', label: 'Grid Heater / Glow Plugs', options: [{ label: 'Working', value: 'working' }, { label: 'Not Working', value: 'not_working' }, { label: 'N/A', value: 'na' }] },
+      { key: 'alternator', icon: 'battery-charging-outline', label: 'Charging System (Alternator)', options: [{ label: 'OK', value: 'ok' }, { label: 'Failed', value: 'failed' }, { label: 'N/A', value: 'na' }] },
+    ],
+    fallbackRecommendations: ['Heavy-Duty Jump Start'],
+  },
+  battery_replacement: {
+    title: 'Heavy-Duty Battery Replacement',
+    metric: { key: 'batteryVoltage', label: 'Battery Bank Voltage', icon: 'battery-half-outline', unit: 'V', keyboardType: 'decimal-pad' },
+    checks: [
+      { key: 'batteriesReplaced', icon: 'battery-full-outline', label: 'Batteries Replaced', options: [{ label: '1', value: '1' }, { label: '2', value: '2' }, { label: '3', value: '3' }, { label: '4+', value: '4_plus' }] },
+      { key: 'batteryType', icon: 'barcode-outline', label: 'Battery Type', options: [{ label: 'Flooded', value: 'flooded' }, { label: 'AGM', value: 'agm' }] },
+      { key: 'bankTested', icon: 'shield-checkmark-outline', label: 'Whole Bank Tested', options: [{ label: 'All Tested', value: 'tested' }, { label: 'Not Tested', value: 'not_tested' }] },
+      { key: 'terminalCondition', icon: 'hardware-chip-outline', label: 'Terminal Condition', options: [{ label: 'Clean', value: 'clean' }, { label: 'Corroded', value: 'corroded' }] },
+      { key: 'systemTest', icon: 'checkmark-circle-outline', label: 'Post-install Test', options: [{ label: 'Passed', value: 'passed' }, { label: 'Failed', value: 'failed' }] },
+    ],
+    fallbackRecommendations: ['Heavy-Duty Battery Replacement'],
+  },
+  lockout: {
+    title: 'Truck Lockout Verification',
+    checks: [
+      { key: 'ownershipVerified', icon: 'shield-checkmark-outline', label: 'Permission', options: [{ label: 'Driver CDL', value: 'driver_cdl' }, { label: 'Carrier Dispatch', value: 'carrier_dispatch' }, { label: 'Not Verified', value: 'not_verified' }] },
+      { key: 'entryMethod', icon: 'lock-open-outline', label: 'Entry Method', options: [{ label: 'Standard Entry', value: 'standard' }, { label: 'Key Service', value: 'key_service' }] },
+      { key: 'damageCheck', icon: 'car-outline', label: 'Damage Check', options: [{ label: 'No Damage', value: 'no_damage' }, { label: 'Damage Present', value: 'damage' }] },
+    ],
+    fallbackRecommendations: ['Truck Lockout Service'],
+  },
+  tire_change: {
+    title: 'Heavy-Duty Tire & Wheel',
+    metric: { key: 'tirePressure', label: 'Tire Pressure', icon: 'speedometer-outline', unit: 'PSI', keyboardType: 'decimal-pad' },
+    checks: [
+      { key: 'tirePosition', icon: 'locate-outline', label: 'Tire Position', options: [{ label: 'Steer', value: 'steer' }, { label: 'Drive', value: 'drive' }, { label: 'Trailer', value: 'trailer' }] },
+      { key: 'dualPosition', icon: 'pause-outline', label: 'Single / Dual', options: [{ label: 'Single', value: 'single' }, { label: 'Inner Dual', value: 'inner' }, { label: 'Outer Dual', value: 'outer' }] },
+      { key: 'replacement', icon: 'disc-outline', label: 'Replaced With', options: [{ label: 'New', value: 'new' }, { label: 'Recap', value: 'recap' }, { label: "Customer's", value: 'customer' }] },
+      { key: 'torque', icon: 'construct-outline', label: 'Lug Nuts Torqued To Spec', options: [{ label: 'Done', value: 'done' }, { label: 'Not Done', value: 'not_done' }] },
+      { key: 'wheelCondition', icon: 'radio-button-on-outline', label: 'Wheel / Rim Condition', options: [{ label: 'OK', value: 'ok' }, { label: 'Damaged', value: 'damaged' }] },
+    ],
+    fallbackRecommendations: ['Heavy-Duty Tire Service'],
+  },
+  fuel_delivery: {
+    title: 'Diesel Fuel Delivery',
+    metric: { key: 'gallons', label: 'Gallons Delivered', icon: 'water-outline', unit: 'gal', keyboardType: 'decimal-pad' },
+    checks: [
+      { key: 'fuelType', icon: 'water-outline', label: 'Fuel Delivered', options: [{ label: 'Diesel', value: 'diesel' }, { label: 'Gas', value: 'gas' }] },
+      { key: 'def', icon: 'color-fill-outline', label: 'DEF Topped Up', options: [{ label: 'Topped Up', value: 'topped_up' }, { label: 'Not Needed', value: 'not_needed' }] },
+      { key: 'antiGel', icon: 'snow-outline', label: 'Anti-Gel Added', options: [{ label: 'Added', value: 'added' }, { label: 'Not Needed', value: 'not_needed' }] },
+      { key: 'primed', icon: 'refresh-outline', label: 'Fuel System Primed', options: [{ label: 'Primed', value: 'primed' }, { label: 'Not Needed', value: 'not_needed' }] },
+      { key: 'started', icon: 'flash-outline', label: 'Truck Started', options: [{ label: 'Started', value: 'started' }, { label: 'Did Not Start', value: 'not_started' }] },
+    ],
+    fallbackRecommendations: ['Diesel Fuel Delivery'],
+  },
+  mobile_mechanic: {
+    title: 'Heavy-Duty Diagnosis',
+    checks: [
+      { key: 'visualInspection', icon: 'eye-outline', label: 'Visual Inspection', options: [{ label: 'Normal', value: 'normal' }, { label: 'Issue Found', value: 'issue_found' }] },
+      { key: 'scanResult', icon: 'speedometer-outline', label: 'Scan (J1939)', options: [{ label: 'No Codes', value: 'no_codes' }, { label: 'Codes Present', value: 'codes_present' }, { label: 'N/A', value: 'na' }] },
+      { key: 'airLeaks', icon: 'cloud-outline', label: 'Air System Leaks', options: [{ label: 'No Leaks', value: 'none' }, { label: 'Leak Found', value: 'leak' }] },
+      { key: 'dpf', icon: 'filter-outline', label: 'DPF / Regen', options: [{ label: 'Normal', value: 'normal' }, { label: 'Regen Needed', value: 'regen_needed' }] },
+      { key: 'outOfService', icon: 'shield-checkmark-outline', label: 'Road Ready', options: [{ label: 'Road Ready', value: 'road_ready' }, { label: 'Out Of Service', value: 'out_of_service' }] },
+    ],
+    fallbackRecommendations: ['Heavy-Duty Diagnostics'],
+  },
+};
+
+// Pickups and vans: a dually's rear tire can be the inner or outer one.
+const LIGHT_TRUCK_TIRE_CHECK = { key: 'dualPosition', icon: 'pause-outline', label: 'Wheel Position', options: [{ label: 'Single', value: 'single' }, { label: 'Inner Dual', value: 'inner' }, { label: 'Outer Dual', value: 'outer' }] };
+
+// Electric and hybrid cars: no alternator (a DC-DC converter charges the 12V
+// battery), "started" means Ready mode, and an EV or plug-in rides on a flatbed only.
+const HIGH_VOLTAGE = ['electric', 'plugin', 'hybrid'];
+
+// gas | hybrid | plugin | electric (customer app utils.POWERTRAINS); older orders: gas.
+export function getPowertrain(order) {
+  return order?.vehicle?.powertrain || order?.service?.diagnosticInfo?.powertrain || 'gas';
+}
+
+function withPowertrain(diagnosis, serviceType, powertrain) {
+  if (!diagnosis || !HIGH_VOLTAGE.includes(powertrain)) return diagnosis;
+  const checks = diagnosis.checks.map((check) => {
+    if (check.key === 'alternator') {
+      return { key: 'dcdc', icon: check.icon, label: '12V Charging (DC-DC)', options: [{ label: 'Charging OK', value: 'ok' }, { label: 'Not Charging', value: 'failed' }, { label: 'N/A', value: 'na' }] };
+    }
+    if (check.key === 'jumpStart') {
+      return { ...check, options: [{ label: 'Ready Mode', value: 'started' }, { label: 'No Ready Mode', value: 'not_started' }] };
+    }
+    if (check.key === 'towMethod' && powertrain !== 'hybrid') {
+      return { ...check, options: [{ label: 'Flatbed Only', value: 'flatbed' }] };
+    }
+    return check;
+  });
+  const title = serviceType === 'battery_replacement' ? '12V Battery Replacement' : diagnosis.title;
+  return { ...diagnosis, title, checks };
+}
 
 const DEMO_SERVICE_BY_ID = {
   9025: { title: 'Towing', icon: 'car-sport-outline' },
@@ -235,6 +400,7 @@ export function getOrderServiceType(order) {
   if (serviceText.includes('lock') || serviceText.includes('key')) return 'lockout';
   if (serviceText.includes('tire') || serviceText.includes('tyre') || serviceText.includes('flat') || serviceText.includes('wheel')) return 'tire_change';
   if (serviceText.includes('battery replacement') || serviceText.includes('replace battery')) return 'battery_replacement';
+  if (serviceText.includes('fuel problem') || serviceText.includes('out of fuel') || serviceText.includes('fuel delivery')) return 'fuel_delivery';
   return 'mobile_mechanic';
 }
 
@@ -262,7 +428,21 @@ export function getServiceTitle(order) {
 }
 
 export function getServiceFlowSchema(order) {
-  return SERVICE_FLOW_SCHEMAS[getOrderServiceType(order)] || SERVICE_FLOW_SCHEMAS.mobile_mechanic || {
+  const serviceType = getOrderServiceType(order);
+  const schema = SERVICE_FLOW_SCHEMAS[serviceType] || SERVICE_FLOW_SCHEMAS.mobile_mechanic;
+  const vehicleClass = getVehicleClass(order);
+  if (vehicleClass === 'heavy') {
+    // The unit number right after the front and VIN.
+    const photos = [...schema.requiredPhotos.slice(0, 2), HEAVY_UNIT_PHOTO, ...schema.requiredPhotos.slice(2)];
+    return { ...schema, requiredPhotos: photos, diagnosis: HEAVY_DIAGNOSIS[serviceType] || HEAVY_DIAGNOSIS.mobile_mechanic };
+  }
+  if (vehicleClass === 'light_truck' && serviceType === 'tire_change') {
+    const [first, ...rest] = schema.diagnosis.checks;
+    return { ...schema, diagnosis: { ...schema.diagnosis, checks: [first, LIGHT_TRUCK_TIRE_CHECK, ...rest] } };
+  }
+  const diagnosis = withPowertrain(schema.diagnosis, serviceType, getPowertrain(order));
+  if (diagnosis !== schema.diagnosis) return { ...schema, diagnosis };
+  return schema || {
     title: 'Mobile Mechanic',
     icon: 'construct-outline',
     requiredPhotos: [
