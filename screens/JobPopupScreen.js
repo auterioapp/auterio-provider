@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Alert, Animated, Dimensions, Image, KeyboardAvoidingView, Linking, Modal, Platform, ScrollView, Share, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Animated, Dimensions, Image, KeyboardAvoidingView, Linking, Modal, Platform, ScrollView, Share, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
@@ -369,6 +369,49 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
     const canOpenApp = await Linking.canOpenURL(target.app);
     Linking.openURL(canOpenApp ? target.app : target.web);
   };
+
+  // The customer hasn't accepted this provider's price yet: nothing to do but
+  // wait (App.js checks every 5 s and opens or closes the job).
+  if (job.status === 'awaiting_customer') {
+    const offered = job.payment?.providerPrice || {};
+    const offeredText = offered.work != null
+      ? formatCurrency(offered.work)
+      : (offered.workMin != null ? `${formatCurrency(offered.workMin)}–${formatCurrency(offered.workMax).slice(1)}` : null);
+    return (
+      <View style={styles.requestDetailShell}>
+        <View style={styles.requestDetailHeader}>
+          <View style={styles.requestHeaderIconBtn} />
+          <View style={styles.jobPopupHeaderTextWrap}>
+            <Text style={styles.jobPopupHeaderTitle}>Job #{job.number}</Text>
+          </View>
+          <TouchableOpacity onPress={onBack} activeOpacity={0.8} style={[styles.requestHeaderIconBtn, styles.requestHeaderCloseBtn]} accessibilityRole="button" accessibilityLabel="Close">
+            <Ionicons name="close" size={24} color="#17191D" />
+          </TouchableOpacity>
+        </View>
+        <View style={styles.offerWaitContent}>
+          <ActivityIndicator size="large" color="#F04416" />
+          <Text style={styles.offerWaitTitle}>Waiting for the customer</Text>
+          <Text style={styles.offerWaitText}>We sent them your price. You'll head out once they accept. If they choose someone else, this job closes.</Text>
+          <View style={styles.offerWaitCard}>
+            <Text style={styles.offerWaitService} numberOfLines={1}>{serviceMeta.title}</Text>
+            {!!vehicleDisplayParts.main && <Text style={styles.offerWaitMeta} numberOfLines={1}>{vehicleDisplayParts.main}</Text>}
+            {!!offeredText && (
+              <View style={styles.offerWaitRow}>
+                <Text style={styles.offerWaitLabel}>Your price</Text>
+                <Text style={styles.offerWaitValue}>{offeredText}</Text>
+              </View>
+            )}
+            {offered.callFee != null && (
+              <View style={styles.offerWaitRow}>
+                <Text style={styles.offerWaitLabel}>Service call fee, included</Text>
+                <Text style={styles.offerWaitValue}>{formatCurrency(offered.callFee)}</Text>
+              </View>
+            )}
+          </View>
+        </View>
+      </View>
+    );
+  }
 
   if (estimateOpen) {
     const workingIndex = Math.max(0, JOB_STEPS.findIndex(step => step.key === 'inspection'));

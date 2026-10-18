@@ -1,4 +1,10 @@
 export function formatMoney(order) {
+  // An open request priced with this provider's rates (server providerQuote):
+  // one price, or a range for a repair. Nothing is held before the customer accepts.
+  const quote = order.providerQuote;
+  const whole = (n) => `$${Math.round(Number(n)).toLocaleString('en-US')}`;
+  if (quote?.work != null) return `$${Number(quote.work).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  if (quote?.workMin != null && quote?.workMax != null) return `${whole(quote.workMin)}–${whole(quote.workMax).slice(1)}`;
   const rawValue = order.pricing?.total ?? order.payment?.totalHeld ?? order.price ?? order.total ?? order.estimate ?? order.service?.price;
   if (typeof rawValue === 'number') return `$${rawValue.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   if (typeof rawValue === 'string' && rawValue.trim()) return rawValue.startsWith('$') ? rawValue : `$${rawValue}`;

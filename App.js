@@ -712,6 +712,41 @@ function AppInner() {
     return () => clearInterval(timer);
   }, [isDemo, provider.id]);
 
+  // Push isn't set up yet, so while the customer is deciding on this provider's
+  // price the order is checked every 5 s: accepted → the job opens as theirs;
+  // another provider chosen or the offer expired → it leaves the list.
+  const waitingIds = acceptedJobs.filter(job => job.status === 'awaiting_customer').map(job => String(job.id)).join(',');
+  useEffect(() => {
+    if (isDemo || !provider.id || !waitingIds) return undefined;
+    const ids = waitingIds.split(',');
+    const check = async () => {
+      for (const id of ids) {
+        let order = null;
+        try {
+          order = await fetchJson(`${API_URL}/orders/${id}`);
+        } catch (error) {
+          if (error?.status !== 403 && error?.status !== 404) continue;
+        }
+        if (order?.status === 'awaiting_customer') continue;
+        const stillMine = order && String(order.provider?.id || '') === String(provider.id) && order.status !== 'cancelled';
+        if (stillMine) {
+          const job = addAcceptedJob(order, { status: order.status });
+          setSelectedJob(prev => (prev && String(prev.id) === id ? job : prev));
+          showToast('The customer accepted your price. You can head out.');
+        } else {
+          setAcceptedJobs(current => current.filter(job => String(job.id) !== id));
+          setAcceptedRequestIds(current => current.filter(item => item !== id));
+          setSelectedJob(prev => (prev && String(prev.id) === id ? null : prev));
+          showToast(order?.tracking?.searchReason === 'offer_expired'
+            ? 'The customer didn\'t confirm your price in time.'
+            : 'The customer chose another provider.');
+        }
+      }
+    };
+    const timer = setInterval(check, 5000);
+    return () => clearInterval(timer);
+  }, [isDemo, provider.id, waitingIds]);
+
   // While online and doing mobile work, periodically share the provider's live position so
   // customer search can prefer it over the static geocoded business address. Foreground only —
   // stops as soon as the provider goes offline or the app is backgrounded.
@@ -954,9 +989,8 @@ function AppInner() {
       });
       // A repair waits for the customer to accept this provider's price first.
       if (acceptedOrder) addAcceptedJob(acceptedOrder, { status: acceptedOrder.status === 'awaiting_customer' ? 'awaiting_customer' : 'accepted' });
-      if (acceptedOrder?.status === 'awaiting_customer') showToast('Price sent. Waiting for the customer to confirm.');
       loadRequests();
-      return nextJob;
+      return acceptedOrder?.status === 'awaiting_customer' ? { ...nextJob, status: 'awaiting_customer' } : nextJob;
     } catch (error) {
       // Rollback optimistic update
       setAcceptedJobs(current => current.filter(j => String(j.id) !== orderId));
@@ -1594,8 +1628,14 @@ function AppInner() {
                       setSelectedRequest(null);
                       await acceptScheduledBooking(o);
                     } else {
-                      await acceptOrder(o);
+                      const job = await acceptOrder(o);
                       setSelectedRequest(null);
+                      // A price offer: the customer accepts it before the job is theirs.
+                      if (job?.status === 'awaiting_customer') {
+                        setSelectedJob(job);
+                        showToast('Price sent. Waiting for the customer to confirm.');
+                        return;
+                      }
                     }
                     showToast('Request accepted — check the Jobs tab');
                   }}

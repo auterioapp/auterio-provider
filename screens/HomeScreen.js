@@ -513,7 +513,7 @@ const styles = StyleSheet.create({
   incomingTitle: { color: '#17191D', fontSize: 16, lineHeight: 20, fontWeight: '700', marginBottom: 1 },
   incomingVehicle: { color: '#5E646D', fontSize: 13, fontWeight: '600', marginBottom: 3 },
   incomingMetaRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
-  incomingMeta: { color: '#5E646D', fontSize: 10, lineHeight: 14, fontWeight: '600', flex: 1 },
+  incomingMeta: { color: '#5E646D', fontSize: 12, lineHeight: 16, fontWeight: '600', flex: 1 },
   incomingPriceBox: { width: 70, alignItems: 'flex-end' },
   incomingPrice: { color: '#F04416', fontSize: 22, lineHeight: 26, fontWeight: '800' },
   incomingEta: { color: '#5E646D', fontSize: 10, lineHeight: 14, fontWeight: '700', textAlign: 'right' },

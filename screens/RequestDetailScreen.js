@@ -21,9 +21,69 @@ function haversineMiles(lat1, lng1, lat2, lng2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+const money = (n) => formatCurrency(Number(n) || 0);
+const range = (min, max) => `${money(min)}–${money(max).slice(1)}`;
+
+// What the customer will be asked to pay if this provider accepts (server
+// providerQuote): their rate × the job hours, their minimum, their surcharges.
+// Folded to the price; tap for how it's made up.
+function PriceBreakdown({ quote, earnLabel }) {
+  const [open, setOpen] = useState(false);
+  const rows = [];
+  if (quote.kind === 'labor') {
+    const byHours = Number(quote.laborRate) * Number(quote.hours || 0);
+    const usedMinimum = quote.minJobFee > 0 && byHours < quote.minJobFee;
+    rows.push({ key: 'price', label: 'Your price', value: money(quote.work), strong: true,
+      sub: `${quote.hours} h × ${money(quote.laborRate)}${usedMinimum ? `, your minimum ${money(quote.minJobFee)}` : ''}` });
+  } else if (quote.kind === 'tow') {
+    rows.push({ key: 'price', label: 'Your price', value: money(quote.work), strong: true,
+      sub: `Hook-up ${money(quote.hookUp)}, ${quote.includedMiles} mi included, then ${money(quote.perMile)}/mi${quote.miles != null ? ` · about ${quote.miles} mi` : ''}` });
+  } else {
+    rows.push({ key: 'price', label: 'Your price', value: range(quote.workMin, quote.workMax), strong: true,
+      sub: `${quote.hours?.min}–${quote.hours?.max} h × ${money(quote.laborRate)}. Final price in your estimate.` });
+  }
+  (quote.surcharges || []).forEach(item => rows.push({ key: item.key, label: item.label, value: `+${money(item.amount)}`, sub: 'Included in your price' }));
+  rows.push({ key: 'call', label: 'Service call fee', value: money(quote.callFee), sub: 'Included. Held when the customer accepts you; yours if they decline the estimate.' });
+  rows.push({ key: 'earn', label: 'You earn', value: earnLabel, strong: true });
+  const usual = typeof quote.usual === 'number' ? money(quote.usual)
+    : (quote.usual?.min != null ? range(quote.usual.min, quote.usual.max) : null);
+  if (usual) rows.push({ key: 'usual', label: 'Usually in the area', value: usual });
+  return (
+    <View style={styles.priceCard}>
+      <TouchableOpacity
+        style={[styles.priceRow, styles.priceHeader]}
+        onPress={() => setOpen(value => !value)}
+        activeOpacity={0.8}
+        accessibilityRole="button"
+        accessibilityState={{ expanded: open }}
+        accessibilityLabel={`Your price ${rows[0].value}. ${open ? 'Hide' : 'Show'} details`}
+      >
+        <View style={styles.priceRowText}>
+          <Text style={[styles.priceLabel, styles.priceLabelStrong]}>{rows[0].label}</Text>
+          {open && !!rows[0].sub && <Text style={styles.priceSub}>{rows[0].sub}</Text>}
+        </View>
+        <Text style={[styles.priceValue, styles.priceValueStrong]} numberOfLines={1}>{rows[0].value}</Text>
+        <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={18} color="#5E646D" />
+      </TouchableOpacity>
+      {open && rows.slice(1).map(row => (
+        <View key={row.key} style={[styles.priceRow, styles.priceRowBorder]}>
+          <View style={styles.priceRowText}>
+            <Text style={[styles.priceLabel, row.strong && styles.priceLabelStrong]}>{row.label}</Text>
+            {!!row.sub && <Text style={styles.priceSub}>{row.sub}</Text>}
+          </View>
+          <Text style={[styles.priceValue, row.strong && styles.priceValueStrong]} numberOfLines={1}>{row.value}</Text>
+        </View>
+      ))}
+      {open && !!quote.plusFuel && <Text style={styles.priceFootnote}>The fuel itself goes in your estimate.</Text>}
+    </View>
+  );
+}
+
 export default function RequestDetailScreen({ order, accepting, providerType = 'mobile', providerLiveCoord, onBack, onAccept, onSchedule, onDecline, refreshControl }) {
   const { provider } = useProvider();
   const [bottomPanelHeight, setBottomPanelHeight] = useState(0);
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [photoCount, setPhotoCount] = useState(0);
   const [timeLeft, setTimeLeft] = useState(TIMER_SECONDS);
   // Demo orders can come without the auto-decline (server: order.noAutoDecline).
   const autoDecline = !order?.noAutoDecline;
@@ -113,6 +173,8 @@ export default function RequestDetailScreen({ order, accepting, providerType = '
           <EarningStat icon="map-outline" value={distance} label="Distance" />
         </View>
 
+        {!!quote && <PriceBreakdown quote={quote} earnLabel={netLabel} />}
+
         <View style={styles.verifiedCard}>
           <View style={styles.verifiedIcon}>
             <Ionicons name="shield-checkmark-outline" size={22} color="#F04416" />
@@ -156,17 +218,36 @@ export default function RequestDetailScreen({ order, accepting, providerType = '
         <View style={styles.requestBriefCard}>
           <Text style={styles.jobDetailHeading}>Job Details</Text>
 
-          {/* The customer's note in full under its label; their photos follow. */}
+          {/* The customer's note and photos, folded to one line; tap to read and see them. */}
           <View style={styles.noteBlock}>
-            <View style={styles.noteBlockHeader}>
+            <TouchableOpacity
+              style={styles.noteBlockHeader}
+              onPress={() => setNoteOpen(value => !value)}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: noteOpen }}
+            >
               <View style={[styles.requestInfoIcon, { backgroundColor: '#2F80FF' + '18' }]}>
                 <Ionicons name="chatbox-outline" size={16} color="#2F80FF" />
               </View>
-              <Text style={styles.jobDetailTitle}>Customer Note</Text>
+              <View style={styles.noteFoldText}>
+                <Text style={styles.jobDetailTitle}>Customer Note & Photos</Text>
+                {!noteOpen && (
+                  <Text style={styles.noteFoldPreview} numberOfLines={1}>
+                    {[customerNote || 'No note', photoCount ? `${photoCount} photo${photoCount > 1 ? 's' : ''}` : 'no photos'].join(' · ')}
+                  </Text>
+                )}
+              </View>
+              <Ionicons name={noteOpen ? 'chevron-up' : 'chevron-down'} size={18} color="#5E646D" />
+            </TouchableOpacity>
+            {noteOpen && (
+              <Text style={[styles.noteBlockText, !customerNote && styles.noteBlockEmpty]}>{customerNote || 'No additional info'}</Text>
+            )}
+            {/* Mounted while folded too, so the count is known. */}
+            <View style={!noteOpen && styles.foldHidden}>
+              <OrderPhotos orderId={order.id} bare onCount={setPhotoCount} />
             </View>
-            <Text style={[styles.noteBlockText, !customerNote && styles.noteBlockEmpty]}>{customerNote || 'No additional info'}</Text>
           </View>
-          <OrderPhotos orderId={order.id} />
 
           {intakeRows.length > 0 && (
             <>
@@ -217,7 +298,7 @@ export default function RequestDetailScreen({ order, accepting, providerType = '
           {isMobileOrder && (
             <TouchableOpacity style={styles.largeAcceptButton} onPress={() => onAccept(order)} disabled={accepting} activeOpacity={0.84}>
               <Text style={styles.largeAcceptTitle}>{accepting ? 'Accepting...' : 'Accept'}</Text>
-              <Text style={styles.largeAcceptSubtitle}>Accept and head out</Text>
+              <Text style={styles.largeAcceptSubtitle}>{quote ? 'Send your price to the customer' : 'Accept and head out'}</Text>
             </TouchableOpacity>
           )}
           {isShopOrder && (
@@ -261,6 +342,17 @@ export function RequestInfoRow({ icon, color, label, value, chevron, onPress, va
 }
 
 const styles = StyleSheet.create({
+  priceCard: { backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', paddingHorizontal: 14, marginBottom: 10 },
+  priceRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, paddingVertical: 10 },
+  priceRowBorder: { borderTopWidth: 1, borderTopColor: '#F0F1F3' },
+  priceHeader: { alignItems: 'center' },
+  priceRowText: { flex: 1, minWidth: 0 },
+  priceLabel: { color: '#17191D', fontSize: 13, lineHeight: 17, fontWeight: '600' },
+  priceLabelStrong: { fontWeight: '700' },
+  priceSub: { color: '#5E646D', fontSize: 11, lineHeight: 15, fontWeight: '500', marginTop: 2 },
+  priceValue: { color: '#17191D', fontSize: 14, lineHeight: 18, fontWeight: '600', flexShrink: 0 },
+  priceValueStrong: { color: '#F04416', fontSize: 15, fontWeight: '800' },
+  priceFootnote: { color: '#5E646D', fontSize: 11, lineHeight: 15, fontWeight: '500', paddingBottom: 10 },
   container: { flex: 1, backgroundColor: '#020C1A' },
   requestDetailShell: { flex: 1, backgroundColor: '#FFFFFF' },
   requestDetailHeader: { minHeight: 68, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 20, paddingTop: 72, backgroundColor: '#FFFFFF' },
@@ -316,6 +408,9 @@ const styles = StyleSheet.create({
   jobDetailTitle: { color: '#17191D', fontSize: 13, lineHeight: 17, fontWeight: '600' },
   noteBlockText: { color: '#17191D', fontSize: 13, lineHeight: 18, fontWeight: '500' },
   noteBlockEmpty: { color: '#5E646D' },
+  noteFoldText: { flex: 1, minWidth: 0 },
+  noteFoldPreview: { color: '#5E646D', fontSize: 12, lineHeight: 16, fontWeight: '500', marginTop: 1 },
+  foldHidden: { display: 'none' },
   requestInfoRow: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 8, paddingRight: 22, borderBottomWidth: 1, borderBottomColor: '#E1E4E8', position: 'relative' },
   requestInfoLabelFit: { width: 'auto', flexShrink: 0 },
   requestInfoIcon: { width: 25, height: 25, borderRadius: 7, alignItems: 'center', justifyContent: 'center' },
@@ -329,7 +424,7 @@ const styles = StyleSheet.create({
   largeButtonSubtitle: { color: '#5E646D', fontSize: 11, lineHeight: 14, fontWeight: '600' },
   largeAcceptButton: { flex: 1, minHeight: 60, borderRadius: 8, backgroundColor: '#17191D', alignItems: 'center', justifyContent: 'center', gap: 3 },
   largeAcceptTitle: { color: '#fff', fontSize: 17, lineHeight: 20, fontWeight: '800' },
-  largeAcceptSubtitle: { color: 'rgba(255,255,255,0.78)', fontSize: 11, lineHeight: 14, fontWeight: '600' },
+  largeAcceptSubtitle: { color: 'rgba(255,255,255,0.78)', fontSize: 11, lineHeight: 14, fontWeight: '600', textAlign: 'center', paddingHorizontal: 8 },
   largeScheduleButton: { flex: 1, minHeight: 60, borderRadius: 8, backgroundColor: '#2563EB', alignItems: 'center', justifyContent: 'center', gap: 3 },
   largeScheduleTitle: { color: '#fff', fontSize: 17, lineHeight: 20, fontWeight: '800' },
   largeScheduleSubtitle: { color: 'rgba(255,255,255,0.78)', fontSize: 11, lineHeight: 14, fontWeight: '600' },

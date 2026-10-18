@@ -11,7 +11,8 @@ import { API_URL } from '../constants';
 // is passed to <Image> directly.
 const SERVER_URL = API_URL.replace(/\/api\/?$/, '');
 
-export default function OrderPhotos({ orderId }) {
+// bare: just the thumbnails (the caller shows the title); onCount gets how many there are.
+export default function OrderPhotos({ orderId, bare = false, onCount }) {
   const [photos, setPhotos] = useState([]);
   const [token, setToken] = useState(null);
   const [openIndex, setOpenIndex] = useState(null);
@@ -29,6 +30,7 @@ export default function OrderPhotos({ orderId }) {
         if (!active) return;
         setToken(savedToken);
         setPhotos(Array.isArray(list) ? list : []);
+        onCount?.(Array.isArray(list) ? list.length : 0);
       } catch {
         if (active) setPhotos([]);
       }
@@ -41,13 +43,15 @@ export default function OrderPhotos({ orderId }) {
   const sourceOf = (photo) => ({ uri: `${SERVER_URL}${photo.url}`, headers: { Authorization: `Bearer ${token}` } });
 
   return (
-    <View style={styles.wrap}>
-      <View style={styles.titleRow}>
-        <View style={styles.icon}>
-          <Ionicons name="images-outline" size={16} color="#F04416" />
+    <View style={bare ? styles.bareWrap : styles.wrap}>
+      {!bare && (
+        <View style={styles.titleRow}>
+          <View style={styles.icon}>
+            <Ionicons name="images-outline" size={16} color="#F04416" />
+          </View>
+          <Text style={styles.title}>Customer photos</Text>
         </View>
-        <Text style={styles.title}>Customer photos</Text>
-      </View>
+      )}
       <View style={styles.row}>
         {photos.map((photo, index) => (
           <TouchableOpacity key={photo.id} onPress={() => setOpenIndex(index)} activeOpacity={0.85} accessibilityRole="imagebutton" accessibilityLabel={`Customer photo ${index + 1}`}>
@@ -79,6 +83,7 @@ export default function OrderPhotos({ orderId }) {
 
 const styles = StyleSheet.create({
   wrap: { marginTop: 12 },
+  bareWrap: { marginTop: 4 },
   titleRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
   icon: { width: 30, height: 30, borderRadius: 15, backgroundColor: '#F0441618', alignItems: 'center', justifyContent: 'center' },
   title: { flex: 1, color: '#17191D', fontSize: 13, lineHeight: 17, fontWeight: '600' },

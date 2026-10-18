@@ -11,6 +11,8 @@ export function getJobProgressIndex(status) {
 // Inspection, In Progress, Completed. Diagnosis/estimate/waiting-for-approval all
 // collapse into "Inspection" here; the detail lives inside the opened job screen.
 export function getJobStatusMeta(status) {
+  // The provider's price was sent; the customer hasn't accepted it yet.
+  if (status === 'awaiting_customer') return { label: 'WAITING FOR CUSTOMER', actionLabel: 'View', actionIcon: 'time-outline', color: '#D97706' };
   if (status === 'accepted') return { label: 'CONFIRMED', actionLabel: 'Navigate', actionIcon: 'navigate-outline', color: '#2563EB' };
   if (status === 'en_route' || status === 'on_the_way') return { label: 'ON THE WAY', actionLabel: 'Navigate', actionIcon: 'navigate-outline', color: '#F04416' };
   if (status === 'arrived') return { label: 'ARRIVED', actionLabel: 'Start Inspection', actionIcon: 'construct-outline', color: '#22C55E' };
