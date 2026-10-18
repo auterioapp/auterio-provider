@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Animated, Dimensions, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { authorizedFetch } from '../apiClient';
+import { authorizedFetch, fetchJson } from '../apiClient';
 import { loadPricing, savePricing, DEFAULT_PRICING } from '../utils/pricingStore';
 import { API_URL } from '../constants';
 import { useProvider } from '../ProviderContext';
@@ -62,23 +62,6 @@ function MileRow({ label, sub, value, onChange, border }) {
   );
 }
 
-function ToggleRow({ label, sub, value, onChange, border }) {
-  return (
-    <View style={[styles.row, border && styles.rowBorder]}>
-      <View style={styles.rowInfo}>
-        <Text style={styles.rowLabel}>{label}</Text>
-        {sub ? <Text style={styles.rowSub}>{sub}</Text> : null}
-      </View>
-      <Switch
-        value={value}
-        onValueChange={onChange}
-        trackColor={{ false: '#E6E8EB', true: '#16A34A' }}
-        thumbColor="#FFFFFF"
-      />
-    </View>
-  );
-}
-
 function FeeRow({ label, sub, price, onPrice, enabled, onEnabled, border }) {
   return (
     <View style={[styles.row, border && styles.rowBorder]}>
@@ -108,6 +91,38 @@ function FeeRow({ label, sub, price, onPrice, enabled, onEnabled, border }) {
   );
 }
 
+// Saved on the server with the profile (backend cleanProviderRates); the labor
+// rate and service-call fee go as laborRate and dispatch.
+const RATE_AMOUNTS = ['minJobFee', 'diagFee', 'hookUpFee', 'towMileage', 'afterHoursFee', 'weekendFee', 'heavyDutyFee'];
+const RATE_SWITCHES = ['afterHoursEnabled', 'weekendEnabled', 'heavyDutyEnabled'];
+
+const toMoneyInput = (value) => (Number.isFinite(Number(value)) ? Number(value).toFixed(2) : undefined);
+
+// The server's copy over this phone's (fields the server doesn't have stay).
+function fromProfile(local, profile) {
+  if (!profile) return local;
+  const next = { ...local };
+  if (profile.dispatch != null) next.serviceCallFee = toMoneyInput(profile.dispatch);
+  if (profile.laborRate != null) next.laborRate = toMoneyInput(profile.laborRate);
+  const rates = profile.rates || {};
+  for (const key of RATE_AMOUNTS) if (rates[key] != null) next[key] = toMoneyInput(rates[key]);
+  if (rates.freeTowMiles != null) next.freeTowMiles = String(rates.freeTowMiles);
+  for (const key of RATE_SWITCHES) if (typeof rates[key] === 'boolean') next[key] = rates[key];
+  return next;
+}
+
+function ratesBody(v) {
+  const rates = {};
+  for (const key of RATE_AMOUNTS) {
+    const n = Number.parseFloat(String(v[key] ?? '').replace(',', '.'));
+    if (Number.isFinite(n) && n >= 0) rates[key] = Math.round(n * 100) / 100;
+  }
+  const miles = Number.parseFloat(String(v.freeTowMiles ?? ''));
+  if (Number.isFinite(miles) && miles >= 0) rates.freeTowMiles = miles;
+  for (const key of RATE_SWITCHES) rates[key] = !!v[key];
+  return rates;
+}
+
 export default function PricingScreen({ visible, onClose, isDemoAccount }) {
   const { provider } = useProvider();
   const [v, setV] = useState(DEFAULT_PRICING);
@@ -117,7 +132,16 @@ export default function PricingScreen({ visible, onClose, isDemoAccount }) {
   const slideAnim = useRef(new Animated.Value(Dimensions.get('window').width)).current;
 
   useEffect(() => {
-    if (visible) loadPricing().then(setV);
+    if (!visible) return undefined;
+    let active = true;
+    (async () => {
+      const local = await loadPricing();
+      const profile = isDemoAccount || !provider?.id
+        ? null
+        : await fetchJson(`${API_URL}/profiles/${provider.id}`).catch(() => null);
+      if (active) setV(fromProfile(local, profile));
+    })();
+    return () => { active = false; };
   }, [visible]);
 
   useEffect(() => {
@@ -136,8 +160,8 @@ export default function PricingScreen({ visible, onClose, isDemoAccount }) {
     const rate = parseFloat(v.laborRate);
     const serviceCallFee = parseFloat(v.serviceCallFee);
     if (!isDemoAccount) {
-      // dispatch is the service-call fee customers see and are held for at booking.
-      const body = {};
+      // dispatch is the service-call fee, held when the customer accepts you.
+      const body = { rates: ratesBody(v) };
       if (!isNaN(rate)) body.laborRate = rate;
       if (!isNaN(serviceCallFee) && serviceCallFee >= 0) body.dispatch = Math.round(serviceCallFee * 100) / 100;
       try {
@@ -146,6 +170,11 @@ export default function PricingScreen({ visible, onClose, isDemoAccount }) {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         });
+        if (res.status === 400) {
+          const data = await res.json().catch(() => ({}));
+          Alert.alert('Check your prices', data.error || 'One of the prices is not a valid number.');
+          return;
+        }
         if (!res.ok) throw new Error(`Request failed: ${res.status}`);
       } catch {
         Alert.alert('Saved on this device only', 'We couldn\'t update your prices on the server. Check your connection and save again.');
@@ -177,16 +206,9 @@ export default function PricingScreen({ visible, onClose, isDemoAccount }) {
           {isMobile && <Section icon="call-outline" iconColor="#F97316" title="SERVICE CALL">
             <PriceRow
               label="Service Call Fee"
-              sub="Charged when provider arrives on site. Applied toward final invoice if service is completed."
+              sub="Held when the customer accepts you. Counted toward the job if they approve your estimate; yours if they decline."
               value={v.serviceCallFee}
               onChange={set('serviceCallFee')}
-            />
-            <ToggleRow
-              border
-              label="Apply to Final Invoice"
-              sub="If enabled, this fee will be credited toward the final invoice when the job is completed."
-              value={v.applyToInvoice}
-              onChange={set('applyToInvoice')}
             />
           </Section>}
 
@@ -214,31 +236,6 @@ export default function PricingScreen({ visible, onClose, isDemoAccount }) {
               onChange={set('diagFee')}
             />
           </Section>
-
-          {/* Travel — mobile only */}
-          {isMobile && <Section icon="navigate-outline" iconColor="#16A34A" title="TRAVEL">
-            <PriceRow
-              label="Travel Fee"
-              sub="Flat travel fee within your service area"
-              value={v.travelFee}
-              onChange={set('travelFee')}
-            />
-            <MileRow
-              border
-              label="Free Travel Radius"
-              sub="No travel fee within this range"
-              value={v.freeTravelRadius}
-              onChange={set('freeTravelRadius')}
-            />
-            <PriceRow
-              border
-              label="Additional Mile Rate"
-              sub="Charge per mile outside free radius"
-              value={v.extraMileRate}
-              onChange={set('extraMileRate')}
-              unit="/mi"
-            />
-          </Section>}
 
           {/* Towing — mobile only */}
           {isMobile && <Section icon="car-outline" iconColor="#374151" title="TOWING">
@@ -287,7 +284,7 @@ export default function PricingScreen({ visible, onClose, isDemoAccount }) {
             <FeeRow
               border
               label="Heavy Duty Surcharge"
-              sub="Apply for larger vehicles"
+              sub="Added to every semi, box truck or trailer job"
               price={v.heavyDutyFee}
               onPrice={set('heavyDutyFee')}
               enabled={v.heavyDutyEnabled}

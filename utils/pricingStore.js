@@ -5,13 +5,9 @@ const KEY = '@provider_pricing_v1';
 export const DEFAULT_PRICING = {
   providerType: 'mobile',
   serviceCallFee: '49.00',
-  applyToInvoice: true,
   laborRate: '120.00',
   minJobFee: '79.00',
   diagFee: '79.00',
-  travelFee: '15.00',
-  freeTravelRadius: '10',
-  extraMileRate: '2.00',
   hookUpFee: '95.00',
   towMileage: '4.50',
   freeTowMiles: '5',
