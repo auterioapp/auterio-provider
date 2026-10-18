@@ -71,6 +71,8 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
   const [estimateOpen, setEstimateOpen] = useState(workflow.stage === 'estimate');
   const [approvalOpen, setApprovalOpen] = useState(workflow.stage === 'approval');
   const [estimateDeclinedOpen, setEstimateDeclinedOpen] = useState(workflow.stage === 'estimate_declined');
+  // When the customer must answer the estimate by (server, services/estimateWindow.js); none at a shop.
+  const [estimateDueAt, setEstimateDueAt] = useState(job.orderContext?.estimateExpiresAt || null);
   const [workOpen, setWorkOpen] = useState(workflow.stage === 'working');
   const [completeOpen, setCompleteOpen] = useState(workflow.stage === 'complete_review' || workflow.stage === 'invoice');
   // Back one step (the screens checked in the same order they render): only the
@@ -244,6 +246,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
       try {
         const order = await fetchJson(`${API_URL}/orders/${job.id}`);
         const step = order?.tracking?.currentStep;
+        setEstimateDueAt(order?.orderContext?.estimateExpiresAt || null);
         if (step === 'estimate_approved') {
           clearInterval(interval);
           setApprovalOpen(false);
@@ -261,7 +264,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
           clearInterval(interval);
           setApprovalOpen(false);
           setEstimateDeclinedOpen(true);
-          onWorkflowChange?.({ stage: 'estimate_declined', declineReason: order?.orderContext?.declineReason });
+          onWorkflowChange?.({ stage: 'estimate_declined', declineReason: order?.orderContext?.declineReason, declinedBy: order?.orderContext?.estimateDeclinedBy || null });
         }
       } catch {}
     }, 8000);
@@ -770,6 +773,8 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
 
   if (estimateDeclinedOpen) {
     const declineReason = workflow.declineReason || 'No reason provided';
+    // Declined by the server: no answer in time (services/estimateWindow.js).
+    const noAnswer = workflow.declinedBy === 'system';
     const isShop = providerTypeCached === 'shop';
     const feeLabel = isShop ? 'Diagnostic Fee' : 'Service Call Fee';
     const feeAmount = isShop
@@ -795,13 +800,17 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
               <Ionicons name="close-circle" size={32} color="#DC2626" />
             </View>
             <Text style={styles.declinedNoticeTitle}>Estimate Declined</Text>
-            <Text style={styles.declinedNoticeSubtitle}>The customer has declined your estimate.</Text>
+            <Text style={styles.declinedNoticeSubtitle}>
+              {noAnswer ? 'The customer didn\'t answer your estimate within 15 minutes.' : 'The customer has declined your estimate.'}
+            </Text>
           </View>
 
-          <View style={styles.declinedReasonCard}>
-            <Text style={styles.declinedReasonLabel}>Reason from customer</Text>
-            <Text style={styles.declinedReasonValue}>{declineReason}</Text>
-          </View>
+          {!noAnswer && (
+            <View style={styles.declinedReasonCard}>
+              <Text style={styles.declinedReasonLabel}>Reason from customer</Text>
+              <Text style={styles.declinedReasonValue}>{declineReason}</Text>
+            </View>
+          )}
 
           <View style={styles.declinedFeeCard}>
             <View style={styles.declinedFeeRow}>
@@ -886,6 +895,11 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
             </View>
             <Text style={styles.approvalTitle}>Waiting Customer Approval</Text>
             <Text style={styles.approvalSubtitle}>We've sent the estimate to {customerFirstName}.</Text>
+            {!!estimateDueAt && Number.isFinite(Date.parse(estimateDueAt)) && (
+              <Text style={styles.approvalSubtitle}>
+                {`No answer by ${new Date(estimateDueAt).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })} counts as declined: the service call fee is yours.`}
+              </Text>
+            )}
           </View>
 
           <TouchableOpacity style={styles.approvalEstimateCard} activeOpacity={0.86} onPress={() => { pulseTabChange(); setEstimatePreviewOpen(true); }}>

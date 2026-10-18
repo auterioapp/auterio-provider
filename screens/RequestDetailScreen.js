@@ -43,7 +43,7 @@ function PriceBreakdown({ quote, earnLabel }) {
       sub: `${quote.hours?.min}–${quote.hours?.max} h × ${money(quote.laborRate)}. Final price in your estimate.` });
   }
   (quote.surcharges || []).forEach(item => rows.push({ key: item.key, label: item.label, value: `+${money(item.amount)}`, sub: 'Included in your price' }));
-  rows.push({ key: 'call', label: 'Service call fee', value: money(quote.callFee), sub: 'Included. Held when the customer accepts you; yours if they decline the estimate.' });
+  rows.push({ key: 'call', label: 'Service call fee', value: money(quote.callFee), sub: "Included. Held when the customer accepts you; yours if they decline the estimate or don't answer it within 15 min. The customer pays at least this fee." });
   rows.push({ key: 'earn', label: 'You earn', value: earnLabel, strong: true });
   const usual = typeof quote.usual === 'number' ? money(quote.usual)
     : (quote.usual?.min != null ? range(quote.usual.min, quote.usual.max) : null);
