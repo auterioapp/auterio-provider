@@ -49,6 +49,10 @@ export default function AuthScreen({ mode = 'login', onLogin, onRegisterCredenti
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || data.error || 'Something went wrong');
+      // A customer account signs in fine but the server refuses every provider request (403).
+      if (data.user?.role && data.user.role !== 'provider') {
+        throw new Error('This is a customer account. Sign in with your provider account, or use the Auterio app.');
+      }
       onLogin(data.token, data.refreshToken || null, data.user);
     } catch (error) {
       alert(error.message || 'Something went wrong');
