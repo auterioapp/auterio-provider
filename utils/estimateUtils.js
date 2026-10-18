@@ -1,4 +1,4 @@
-import { getOrderServiceType, getVehicleClass } from './serviceUtils';
+import { getOrderServiceType, getVehicleClass, getServiceMeta } from './serviceUtils';
 import { getPricing } from './pricingStore';
 
 export function sumAmounts(items) {
@@ -183,7 +183,8 @@ export function getDemoEstimate(answers, batteryVoltage, extraItems = [], remove
     source: 'base',
     scope: 'required',
     locked: true,
-    label: order?.service?.issueName || order?.service?.type || 'Service',
+    // The work done (Tire Change), not the customer's problem (Flat Tire).
+    label: getServiceMeta(order || {}).title || order?.service?.issueName || 'Service',
     hours: accepted.kind === 'tow'
       ? (accepted.miles != null ? `~${accepted.miles} mi` : undefined)
       : (accepted.hours != null ? `${accepted.hours} hr` : undefined),

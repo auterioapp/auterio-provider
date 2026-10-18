@@ -887,7 +887,7 @@ function AppInner() {
     if (status === 'completed') {
       body.serviceDetails = {
         providerNotes: extra.workSummary || order.workSummary || '',
-        photos: extra.workPhotos || order.workPhotos || [],
+        photos: (extra.workPhotos || order.workPhotos || []).filter(photo => photo?.saved).length,
       };
     }
 
@@ -1186,7 +1186,8 @@ function AppInner() {
       body.serviceDetails = {
         servicesPerformed: (currentWorkflow.estimateItems || []).map(i => i.label).filter(Boolean),
         providerNotes: currentWorkflow.workSummary || '',
-        photos: currentWorkflow.workPhotos || [],
+        // The photos themselves are on the server (POST /orders/:id/work-photos).
+        photos: (currentWorkflow.workPhotos || []).filter(photo => photo?.saved).length,
         duration: currentWorkflow.workDuration || null,
         warranty: currentWorkflow.warranty || { days: 90, miles: 4000 },
         diagnosisResults: {

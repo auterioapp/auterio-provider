@@ -145,7 +145,9 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
   const [changeRequestReason, setChangeRequestReason] = useState('');
   const [changeRequestAmount, setChangeRequestAmount] = useState('');
   const [changeRequestEvidence, setChangeRequestEvidence] = useState('');
-  const [workPhotos, setWorkPhotos] = useState(workflow.workPhotos || ['Old battery', 'New battery', 'System test']);
+  // Photos of the finished work: { uri, saving | saved | failed }, uploaded as taken
+  // (POST /orders/:id/work-photos). Older workflows kept text labels; those are dropped.
+  const [workPhotos, setWorkPhotos] = useState((workflow.workPhotos || []).filter(photo => photo && typeof photo === 'object'));
   const [workSummary, setWorkSummary] = useState(workflow.workSummary || 'Replaced old battery with new Group 35 battery.\nSystem tested. Vehicle starts normally.');
   const [workCustomerNote, setWorkCustomerNote] = useState(workflow.workCustomerNote || 'Thanks for choosing our service!');
   const [diagnosisAnswers, setDiagnosisAnswers] = useState(workflow.diagnosisAnswers || {
@@ -157,11 +159,43 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
   const [includeCallFee, setIncludeCallFee] = useState(true);
   const [providerTypeCached, setProviderTypeCached] = useState('mobile');
   const [workTimer, setWorkTimer] = useState(0);
-  const addWorkPhoto = () => {
-    pulseTabChange();
-    const nextPhotos = [...workPhotos, `Repair photo ${workPhotos.length + 1}`];
-    setWorkPhotos(nextPhotos);
-    onWorkflowChange?.({ stage: completeOpen ? 'complete_review' : 'working', workPhotos: nextPhotos, workSummary, workCustomerNote, additionalApprovals });
+  // The job's workflow keeps the photos (and their saved state) across screens.
+  useEffect(() => {
+    if (workPhotos.length) onWorkflowChange?.({ workPhotos });
+  }, [workPhotos]);
+  const addWorkPhoto = async () => {
+    try {
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+      if (!permission.granted) {
+        Alert.alert('Camera access needed', 'Enable camera access in your device settings to add photos.');
+        return;
+      }
+      const result = await ImagePicker.launchCameraAsync({ mediaTypes: ['images'], quality: 1 });
+      const asset = result.assets?.[0];
+      if (result.canceled || !asset?.uri) return;
+      pulseTabChange();
+      // Shrunk like the arrival photos, then saved on the server right away.
+      const side = (asset.width || 0) >= (asset.height || 0) ? { width: 1200 } : { height: 1200 };
+      const small = await ImageManipulator.manipulateAsync(asset.uri, [{ resize: side }], {
+        compress: 0.6, format: ImageManipulator.SaveFormat.JPEG, base64: true,
+      });
+      const key = `work-${Date.now()}`;
+      const update = (patch) => setWorkPhotos(current => current.map(photo => (photo.key === key ? { key, uri: small.uri, ...patch } : photo)));
+      setWorkPhotos(current => [...current, { key, uri: small.uri, saving: true }]);
+      try {
+        await fetchJson(`${API_URL}/orders/${job.id}/work-photos`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: small.base64 }),
+        });
+        update({ saved: true });
+      } catch (uploadError) {
+        update({ failed: true });
+        Alert.alert('Photo not saved', uploadError?.message || 'Check your connection and take it again.');
+      }
+    } catch (error) {
+      console.log('Camera error:', error.message);
+    }
   };
   const updateWorkSummary = (value) => {
     setWorkSummary(value);
@@ -923,6 +957,50 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
       optionalParts: persistedEstimate.optionalParts || [],
     } : estimate;
     const approvedAdditionalTotal = sumAmounts(additionalApprovals.filter(item => item.status === 'approved'));
+    const renderChangeRequest = (item) => {
+      const isApproved = item.status === 'approved';
+      const isDeclined = item.status === 'declined';
+      const isPending = item.status === 'pending';
+      return (
+        <View key={item.id} style={[styles.crCard, isApproved && styles.crCardApproved, isDeclined && styles.crCardDeclined]}>
+          <View style={styles.crHeader}>
+            <Text style={styles.crTitle}>Additional Work Required</Text>
+            <Text style={[styles.crAmount, isApproved && styles.crAmountApproved, isDeclined && styles.crAmountDeclined]}>
+              {formatCurrency(item.amount)}
+            </Text>
+          </View>
+          <View style={styles.crFieldGroup}>
+            <Text style={styles.crFieldLabel}>Work or part needed</Text>
+            <Text style={styles.crSubtitle} numberOfLines={1}>{item.title}</Text>
+          </View>
+          {item.description ? (
+            <View style={styles.crFieldGroup}>
+              <Text style={styles.crFieldLabel}>Why is it required?</Text>
+              <Text style={styles.crDesc}>{item.description}</Text>
+            </View>
+          ) : null}
+          {item.evidence ? (
+            <View style={styles.crFieldGroup}>
+              <Text style={styles.crFieldLabel}>Evidence</Text>
+              <View style={styles.crEvidenceRow}>
+                <Ionicons name="camera-outline" size={13} color="#5E646D" />
+                <Text style={styles.crEvidenceText}>{item.evidence}</Text>
+              </View>
+            </View>
+          ) : null}
+          <View style={[styles.crStatusRow, isApproved && styles.crStatusApproved, isDeclined && styles.crStatusDeclined, isPending && styles.crStatusPending]}>
+            <Ionicons
+              name={isApproved ? 'checkmark-circle' : isDeclined ? 'close-circle' : 'time-outline'}
+              size={14}
+              color={isApproved ? '#16A34A' : isDeclined ? '#DC2626' : '#5E646D'}
+            />
+            <Text style={[styles.crStatusText, isApproved && styles.crStatusTextApproved, isDeclined && styles.crStatusTextDeclined]}>
+              {isApproved ? 'Approved by customer' : isDeclined ? 'Declined by customer' : 'Waiting for customer...'}
+            </Text>
+          </View>
+        </View>
+      );
+    };
     const pendingAdditionalTotal = sumAmounts(additionalApprovals.filter(item => item.status === 'pending'));
     const saveAdditionalApprovals = (nextItems) => {
       setAdditionalApprovals(nextItems);
@@ -1028,6 +1106,13 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
             </View>
           </TouchableOpacity>
 
+          {/* Extra work the customer approved is part of the job: right under the estimate. */}
+          {additionalApprovals.some(item => item.status === 'approved') && (
+            <View style={styles.approvedChangesWrap}>
+              {additionalApprovals.filter(item => item.status === 'approved').map(renderChangeRequest)}
+            </View>
+          )}
+
           <View style={styles.additionalApprovalCard}>
             <Text style={styles.changeRequestsSectionTitle}>Required change requests</Text>
             <Text style={styles.additionalApprovalSubtitle}>Use this only if the approved repair cannot be completed without an extra required item. Non-urgent recommendations should be saved for a future service.</Text>
@@ -1037,57 +1122,14 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
                 <Text style={styles.additionalRequiredText}>Request required change</Text>
               </TouchableOpacity>
             </View>
-            {additionalApprovals.length === 0 ? (
+            {additionalApprovals.length === 0 && (
               <View style={styles.additionalEmptyBox}>
                 <Ionicons name="document-text-outline" size={20} color="#5E646D" />
                 <Text style={styles.additionalEmptyText}>No additional approvals yet.</Text>
               </View>
-            ) : (
-              additionalApprovals.map(item => {
-                const isApproved = item.status === 'approved';
-                const isDeclined = item.status === 'declined';
-                const isPending = item.status === 'pending';
-                return (
-                  <View key={item.id} style={[styles.crCard, isApproved && styles.crCardApproved, isDeclined && styles.crCardDeclined]}>
-                    <View style={styles.crHeader}>
-                      <Text style={styles.crTitle}>Additional Work Required</Text>
-                      <Text style={[styles.crAmount, isApproved && styles.crAmountApproved, isDeclined && styles.crAmountDeclined]}>
-                        {formatCurrency(item.amount)}
-                      </Text>
-                    </View>
-                    <View style={styles.crFieldGroup}>
-                      <Text style={styles.crFieldLabel}>Work or part needed</Text>
-                      <Text style={styles.crSubtitle} numberOfLines={1}>{item.title}</Text>
-                    </View>
-                    {item.description ? (
-                      <View style={styles.crFieldGroup}>
-                        <Text style={styles.crFieldLabel}>Why is it required?</Text>
-                        <Text style={styles.crDesc}>{item.description}</Text>
-                      </View>
-                    ) : null}
-                    {item.evidence ? (
-                      <View style={styles.crFieldGroup}>
-                        <Text style={styles.crFieldLabel}>Evidence</Text>
-                        <View style={styles.crEvidenceRow}>
-                          <Ionicons name="camera-outline" size={13} color="#5E646D" />
-                          <Text style={styles.crEvidenceText}>{item.evidence}</Text>
-                        </View>
-                      </View>
-                    ) : null}
-                    <View style={[styles.crStatusRow, isApproved && styles.crStatusApproved, isDeclined && styles.crStatusDeclined, isPending && styles.crStatusPending]}>
-                      <Ionicons
-                        name={isApproved ? 'checkmark-circle' : isDeclined ? 'close-circle' : 'time-outline'}
-                        size={14}
-                        color={isApproved ? '#16A34A' : isDeclined ? '#DC2626' : '#5E646D'}
-                      />
-                      <Text style={[styles.crStatusText, isApproved && styles.crStatusTextApproved, isDeclined && styles.crStatusTextDeclined]}>
-                        {isApproved ? 'Approved by customer' : isDeclined ? 'Declined by customer' : 'Waiting for customer...'}
-                      </Text>
-                    </View>
-                  </View>
-                );
-              })
             )}
+            {/* Waiting for the customer, or declined; approved ones are up with the estimate. */}
+            {additionalApprovals.filter(item => item.status !== 'approved').map(renderChangeRequest)}
           </View>
 
           <View style={styles.repairProgressCard}>
@@ -1306,10 +1348,11 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
           <View style={styles.repairNoteCard}>
             <Text style={styles.repairFieldLabel}>Photos (Optional)</Text>
             <View style={styles.completePhotosGrid}>
-              {workPhotos.map((photo, index) => (
-                <View key={`${photo}-complete-${index}`} style={styles.completePhotoTile}>
-                  <Ionicons name={index === 2 ? 'speedometer-outline' : 'image-outline'} size={20} color="#F04416" />
-                  <Text style={styles.repairPhotoText} numberOfLines={2}>{photo}</Text>
+              {workPhotos.map(photo => (
+                <View key={photo.key} style={styles.completePhotoTile}>
+                  <Image source={{ uri: photo.uri }} style={styles.workPhotoThumb} />
+                  {photo.saving && <Text style={styles.repairPhotoText}>Saving…</Text>}
+                  {photo.failed && <Text style={styles.workPhotoFailed}>Not saved</Text>}
                 </View>
               ))}
               <TouchableOpacity style={styles.completePhotoTile} activeOpacity={0.84} onPress={addWorkPhoto}>
@@ -1867,7 +1910,9 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
     const timeLabel = (d) => d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
     const dateLabel = (d) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
     const durationLabel = job.orderContext?.serviceDetails?.duration || workflow?.workDuration || jobDuration;
-    const completedPhotos = job.orderContext?.serviceDetails?.photos || [];
+    // How many work photos were saved (older orders kept a list of labels).
+    const photos = job.orderContext?.serviceDetails?.photos;
+    const completedPhotoCount = Array.isArray(photos) ? photos.length : Number(photos) || 0;
     const warranty = job.orderContext?.serviceDetails?.warranty;
     const servicesPerformed = completedInvoiceEstimate.labor.map(item => item.label);
     const shareInvoice = async () => {
@@ -2078,21 +2123,9 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
                 </View>
               </>}
 
-              {completedPhotos.length > 0 && <>
-                <Text style={styles.sdSectionTitle}>Photos ({completedPhotos.length})</Text>
-                <View style={styles.sdPhotosRow}>
-                  {completedPhotos.map((photo, i) => (
-                    <View key={i} style={styles.sdPhotoItem}>
-                      <View style={styles.sdPhotoPlaceholder}>
-                        <Ionicons name="image-outline" size={22} color="#5E646D" />
-                      </View>
-                      <Text style={styles.sdPhotoLabel} numberOfLines={1}>{typeof photo === 'string' ? photo : `Photo ${i + 1}`}</Text>
-                    </View>
-                  ))}
-                </View>
-              </>}
+              <OrderPhotos orderId={job.id} kind="work" title="Photos after the work" />
 
-              {!servicesPerformed.length && !completedPhotos.length && (customerNote === 'No note provided' || !customerNote) && (
+              {!servicesPerformed.length && !completedPhotoCount && (customerNote === 'No note provided' || !customerNote) && (
                 <Text style={{ color: '#5E646D', fontSize: 13, textAlign: 'center', marginTop: 40 }}>No service details available</Text>
               )}
 

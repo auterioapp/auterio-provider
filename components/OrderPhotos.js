@@ -12,7 +12,8 @@ import { API_URL } from '../constants';
 const SERVER_URL = API_URL.replace(/\/api\/?$/, '');
 
 // bare: just the thumbnails (the caller shows the title); onCount gets how many there are.
-export default function OrderPhotos({ orderId, bare = false, onCount }) {
+// kind 'work': the provider's photos of the finished work, under their own title.
+export default function OrderPhotos({ orderId, bare = false, onCount, kind, title = 'Customer photos' }) {
   const [photos, setPhotos] = useState([]);
   const [token, setToken] = useState(null);
   const [openIndex, setOpenIndex] = useState(null);
@@ -24,7 +25,7 @@ export default function OrderPhotos({ orderId, bare = false, onCount }) {
     (async () => {
       try {
         const [list, savedToken] = await Promise.all([
-          fetchJson(`${API_URL}/orders/${orderId}/photos`),
+          fetchJson(`${API_URL}/orders/${orderId}/photos${kind ? `?kind=${kind}` : ''}`),
           SecureStore.getItemAsync('providerToken'),
         ]);
         if (!active) return;
@@ -36,7 +37,7 @@ export default function OrderPhotos({ orderId, bare = false, onCount }) {
       }
     })();
     return () => { active = false; };
-  }, [orderId]);
+  }, [orderId, kind]);
 
   if (!photos.length || !token) return null;
 
@@ -49,7 +50,7 @@ export default function OrderPhotos({ orderId, bare = false, onCount }) {
           <View style={styles.icon}>
             <Ionicons name="images-outline" size={16} color="#F04416" />
           </View>
-          <Text style={styles.title}>Customer photos</Text>
+          <Text style={styles.title}>{title}</Text>
         </View>
       )}
       <View style={styles.row}>
