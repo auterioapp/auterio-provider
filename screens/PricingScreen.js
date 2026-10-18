@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Animated, Dimensions, KeyboardAvoidingView, Modal, Platform, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { authorizedFetch } from '../apiClient';
+import { authorizedFetch, fetchJson } from '../apiClient';
 import { loadPricing, savePricing, DEFAULT_PRICING } from '../utils/pricingStore';
 import { API_URL } from '../constants';
 import { useProvider } from '../ProviderContext';
@@ -108,16 +108,105 @@ function FeeRow({ label, sub, price, onPrice, enabled, onEnabled, border }) {
   );
 }
 
+// Vehicle classes the prices are set for (backend services/pricing.js).
+const CLASSES = [
+  { key: 'light', label: 'Car' },
+  { key: 'light_truck', label: 'Pickup' },
+  { key: 'heavy', label: 'Truck' },
+];
+
+const toInput = (value) => (Number.isFinite(Number(value)) && value !== null && value !== '' ? String(value) : '');
+const toNumberOrNull = (value) => {
+  const n = Number.parseFloat(String(value ?? '').replace(',', '.'));
+  return Number.isFinite(n) && n >= 0 ? Math.round(n * 100) / 100 : null;
+};
+
+// The provider's saved prices, or the average where a price was never set.
+function initialServicePrices(rows, saved = {}) {
+  const fill = (savedPart, averagePart) => Object.fromEntries(CLASSES.map(({ key }) => [
+    key, toInput(savedPart?.[key] ?? averagePart?.[key]),
+  ]));
+  return Object.fromEntries(rows.map(row => [row.issue, {
+    prices: fill(saved[row.issue]?.prices, row.prices),
+    ...(row.kind === 'tow' ? { perMile: fill(saved[row.issue]?.perMile, row.perMile) } : {}),
+  }]));
+}
+
+// One price per vehicle class, with the average under it (orange when above).
+function ClassPrices({ title, values, averages, onChange, unit }) {
+  return (
+    <View style={styles.classBlock}>
+      {!!title && <Text style={styles.classTitle}>{title}</Text>}
+      <View style={styles.classRow}>
+        {CLASSES.map(({ key, label }) => {
+          const price = toNumberOrNull(values?.[key]);
+          const average = Number(averages?.[key]);
+          const above = price != null && Number.isFinite(average) && price > average;
+          return (
+            <View key={key} style={styles.classCell}>
+              <Text style={styles.classLabel}>{label}</Text>
+              <View style={[styles.inputWrap, styles.classInputWrap, above && styles.inputWrapAbove]}>
+                <Text style={styles.inputPrefix}>$</Text>
+                <TextInput
+                  style={[styles.input, styles.classInput]}
+                  value={values?.[key] ?? ''}
+                  onChangeText={(text) => onChange(key, text)}
+                  keyboardType="decimal-pad"
+                  selectTextOnFocus
+                  placeholder="—"
+                  placeholderTextColor="#9AA0A6"
+                />
+                {unit ? <Text style={styles.inputUnit}>{unit}</Text> : null}
+              </View>
+              {Number.isFinite(average) && (
+                <Text style={[styles.classAvg, above && styles.classAvgAbove]}>
+                  {above ? 'Above avg' : 'Avg'} ${average % 1 ? average.toFixed(2) : average}
+                </Text>
+              )}
+            </View>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
 export default function PricingScreen({ visible, onClose, isDemoAccount }) {
   const { provider } = useProvider();
   const [v, setV] = useState(DEFAULT_PRICING);
   const set = (key) => (val) => setV(prev => ({ ...prev, [key]: val }));
+  // Simple services: the averages (admin table) and this provider's prices.
+  const [averageRows, setAverageRows] = useState([]);
+  const [servicePrices, setServicePrices] = useState({});
+  const setServicePrice = (issue, part) => (cls, text) => setServicePrices(prev => ({
+    ...prev,
+    [issue]: { ...prev[issue], [part]: { ...prev[issue]?.[part], [cls]: text } },
+  }));
   const isMobile = v.providerType !== 'shop';
   const [modalVisible, setModalVisible] = useState(visible);
   const slideAnim = useRef(new Animated.Value(Dimensions.get('window').width)).current;
 
   useEffect(() => {
-    if (visible) loadPricing().then(setV);
+    if (!visible) return undefined;
+    let active = true;
+    (async () => {
+      const local = await loadPricing();
+      const [averages, profile] = await Promise.all([
+        fetchJson(`${API_URL}/pricing/averages`).catch(() => null),
+        isDemoAccount || !provider?.id ? null : fetchJson(`${API_URL}/profiles/${provider.id}`).catch(() => null),
+      ]);
+      if (!active) return;
+      // What's on the server wins over this phone's copy.
+      setV({
+        ...local,
+        ...(profile?.dispatch != null ? { serviceCallFee: Number(profile.dispatch).toFixed(2) } : {}),
+        ...(profile?.laborRate != null ? { laborRate: Number(profile.laborRate).toFixed(2) } : {}),
+      });
+      const rows = Array.isArray(averages?.rows) ? averages.rows : [];
+      setAverageRows(rows);
+      setServicePrices(initialServicePrices(rows, profile?.servicePrices || local.servicePrices || {}));
+    })();
+    return () => { active = false; };
   }, [visible]);
 
   useEffect(() => {
@@ -132,20 +221,43 @@ export default function PricingScreen({ visible, onClose, isDemoAccount }) {
   }, [visible]);
 
   const handleSave = async () => {
-    await savePricing(v);
+    // Numbers only; an emptied price is "not set".
+    const cleanPrices = Object.fromEntries(averageRows.map(row => {
+      const pick = (part) => Object.fromEntries(CLASSES
+        .map(({ key }) => [key, toNumberOrNull(servicePrices[row.issue]?.[part]?.[key])])
+        .filter(([, value]) => value != null));
+      return [row.issue, { prices: pick('prices'), ...(row.kind === 'tow' ? { perMile: pick('perMile') } : {}) }];
+    }));
+    // Estimates still read the car tow price from this phone (utils/estimateUtils.js).
+    const tow = cleanPrices['Need a Tow'];
+    const towRow = averageRows.find(row => row.issue === 'Need a Tow');
+    const localPricing = {
+      ...v,
+      servicePrices: cleanPrices,
+      ...(tow?.prices?.light != null ? { hookUpFee: tow.prices.light.toFixed(2) } : {}),
+      ...(tow?.perMile?.light != null ? { towMileage: tow.perMile.light.toFixed(2) } : {}),
+      ...(towRow?.includedMiles != null ? { freeTowMiles: String(towRow.includedMiles) } : {}),
+    };
+    await savePricing(localPricing);
     const rate = parseFloat(v.laborRate);
     const serviceCallFee = parseFloat(v.serviceCallFee);
     if (!isDemoAccount) {
-      // dispatch is the service-call fee customers see and are held for at booking.
+      // dispatch is the service-call fee, held when the customer accepts you.
       const body = {};
       if (!isNaN(rate)) body.laborRate = rate;
       if (!isNaN(serviceCallFee) && serviceCallFee >= 0) body.dispatch = Math.round(serviceCallFee * 100) / 100;
+      if (averageRows.length) body.servicePrices = cleanPrices;
       try {
         const res = await authorizedFetch(`${API_URL}/profiles/${provider.id}`, {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(body),
         });
+        if (res.status === 400) {
+          const data = await res.json().catch(() => ({}));
+          Alert.alert('Check your prices', data.error || 'One of the prices is not a valid number.');
+          return;
+        }
         if (!res.ok) throw new Error(`Request failed: ${res.status}`);
       } catch {
         Alert.alert('Saved on this device only', 'We couldn\'t update your prices on the server. Check your connection and save again.');
@@ -177,7 +289,7 @@ export default function PricingScreen({ visible, onClose, isDemoAccount }) {
           {isMobile && <Section icon="call-outline" iconColor="#F97316" title="SERVICE CALL">
             <PriceRow
               label="Service Call Fee"
-              sub="Charged when provider arrives on site. Applied toward final invoice if service is completed."
+              sub="Held when the customer accepts you. Counted toward the job if they approve your estimate; yours if they decline."
               value={v.serviceCallFee}
               onChange={set('serviceCallFee')}
             />
@@ -188,6 +300,40 @@ export default function PricingScreen({ visible, onClose, isDemoAccount }) {
               value={v.applyToInvoice}
               onChange={set('applyToInvoice')}
             />
+          </Section>}
+
+          {/* Simple services — mobile only */}
+          {isMobile && averageRows.length > 0 && <Section icon="pricetags-outline" iconColor="#F04416" title="SERVICE PRICES">
+            <Text style={styles.sectionNote}>Your price for each job. Customers see the average before they order, and your price when you accept.</Text>
+            {averageRows.map((row, index) => (
+              <View key={row.issue} style={[styles.serviceBlock, index > 0 && styles.rowBorder]}>
+                <Text style={styles.rowLabel}>{row.issue}</Text>
+                {row.kind === 'tow' ? (
+                  <>
+                    <ClassPrices
+                      title={`Hook-up, first ${row.includedMiles || 0} mi included`}
+                      values={servicePrices[row.issue]?.prices}
+                      averages={row.prices}
+                      onChange={setServicePrice(row.issue, 'prices')}
+                    />
+                    <ClassPrices
+                      title="Each mile after"
+                      values={servicePrices[row.issue]?.perMile}
+                      averages={row.perMile}
+                      onChange={setServicePrice(row.issue, 'perMile')}
+                      unit="/mi"
+                    />
+                  </>
+                ) : (
+                  <ClassPrices
+                    values={servicePrices[row.issue]?.prices}
+                    averages={row.prices}
+                    onChange={setServicePrice(row.issue, 'prices')}
+                  />
+                )}
+                {!!row.plusFuel && <Text style={styles.rowSub}>The fuel itself goes in the estimate.</Text>}
+              </View>
+            ))}
           </Section>}
 
           {/* Labor */}
@@ -237,31 +383,6 @@ export default function PricingScreen({ visible, onClose, isDemoAccount }) {
               value={v.extraMileRate}
               onChange={set('extraMileRate')}
               unit="/mi"
-            />
-          </Section>}
-
-          {/* Towing — mobile only */}
-          {isMobile && <Section icon="car-outline" iconColor="#374151" title="TOWING">
-            <PriceRow
-              label="Hook-Up Fee"
-              sub="Flat fee to hook up the vehicle"
-              value={v.hookUpFee}
-              onChange={set('hookUpFee')}
-            />
-            <PriceRow
-              border
-              label="Mileage Rate"
-              sub="Charge per mile for towing"
-              value={v.towMileage}
-              onChange={set('towMileage')}
-              unit="/mi"
-            />
-            <MileRow
-              border
-              label="Free Towing Miles"
-              sub="Miles included in the hook-up fee"
-              value={v.freeTowMiles}
-              onChange={set('freeTowMiles')}
             />
           </Section>}
 
@@ -338,6 +459,19 @@ const styles = StyleSheet.create({
   inputUnit: { paddingRight: 8, color: '#5E646D', fontSize: 12, fontWeight: '600' },
 
   feeRight: { flexDirection: 'row', alignItems: 'center', gap: 10, flexShrink: 0 },
+
+  sectionNote: { color: '#5E646D', fontSize: 12, lineHeight: 17, fontWeight: '500', paddingTop: 12 },
+  serviceBlock: { paddingVertical: 14, gap: 8 },
+  classBlock: { gap: 6 },
+  classTitle: { color: '#5E646D', fontSize: 12, fontWeight: '600' },
+  classRow: { flexDirection: 'row', gap: 8 },
+  classCell: { flex: 1, minWidth: 0, gap: 4 },
+  classLabel: { color: '#5E646D', fontSize: 11, fontWeight: '700' },
+  classInputWrap: { alignSelf: 'stretch' },
+  classInput: { flex: 1, minWidth: 0, maxWidth: undefined },
+  inputWrapAbove: { borderColor: '#F97316' },
+  classAvg: { color: '#5E646D', fontSize: 11, fontWeight: '600' },
+  classAvgAbove: { color: '#EA580C' },
 
   footerNote: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, backgroundColor: '#FFFFFF', borderRadius: 12, borderWidth: 1, borderColor: '#ECEEF0', paddingHorizontal: 14, paddingVertical: 12 },
   footerNoteText: { flex: 1, color: '#5E646D', fontSize: 12, lineHeight: 18, fontWeight: '500' },
