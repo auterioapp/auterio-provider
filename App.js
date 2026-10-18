@@ -1207,6 +1207,8 @@ function AppInner() {
       const stamps = {};
       for (const key of JOB_STEP_STAMPS) if (updated[key]) stamps[key] = updated[key];
       if (updated.status) stamps.status = updated.status;
+      // The estimate as the server saved it (totals recomputed there) is what the job shows.
+      if (updated.orderContext) stamps.orderContext = updated.orderContext;
       const merge = job => (job && String(job.id) === String(jobId) ? { ...job, ...stamps } : job);
       setAcceptedJobs(current => current.map(merge));
       setSelectedJob(merge);

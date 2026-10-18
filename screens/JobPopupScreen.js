@@ -419,7 +419,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
   if (estimateOpen) {
     const workingIndex = Math.max(0, JOB_STEPS.findIndex(step => step.key === 'inspection'));
     const estimate = getDemoEstimate(diagnosisAnswers, batteryVoltage, estimateItems, estimateRemovedItems, job, { includeServiceCallFee: includeCallFee });
-    const estimateCatalog = getEstimateCatalog(estimatePickerMode);
+    const estimateCatalog = getEstimateCatalog(estimatePickerMode, job);
     const filteredEstimateCatalog = estimateCatalog.filter(item => {
       const query = estimateSearch.trim().toLowerCase();
       if (!query) return true;
@@ -540,7 +540,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
           </View>
 
           <EstimateSection title="Labor" icon="construct-outline" color="#17191D" onAdd={() => openEstimatePicker('labor')}>
-            {estimate.labor.map((item, index) => <EstimateLine key={`${item.id}-${index}`} {...item} onRemove={() => removeEstimateItem(item)} />)}
+            {estimate.labor.map((item, index) => <EstimateLine key={`${item.id}-${index}`} {...item} onRemove={item.locked ? undefined : () => removeEstimateItem(item)} />)}
             <EstimateLine label="Labor Subtotal" amount={estimate.laborSubtotal} strong />
           </EstimateSection>
 
@@ -550,7 +550,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
           </EstimateSection>
 
           <EstimateSection title="Fees" icon="cash-outline" color="#7C3AED">
-            {providerTypeCached === 'both' && (
+            {providerTypeCached === 'both' && !job.payment?.providerPrice && (
               <View style={styles.callFeeToggleRow}>
                 <View style={styles.callFeeToggleInfo}>
                   <Text style={styles.callFeeToggleLabel}>Service Call Fee</Text>
@@ -822,7 +822,9 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
   if (approvalOpen) {
     const workingIndex = Math.max(0, JOB_STEPS.findIndex(step => step.key === 'inspection'));
     const estimate = getDemoEstimate(diagnosisAnswers, batteryVoltage, estimateItems, estimateRemovedItems, job);
-    const sentTotal = estimate.optionalSubtotal > 0 ? estimate.totalIfApproved : estimate.total;
+    // The estimate as the server saved it, once its answer is back; this phone's copy until then.
+    const sentEstimate = job.orderContext?.estimate || estimate;
+    const sentTotal = sentEstimate.optionalSubtotal > 0 ? sentEstimate.totalIfApproved : sentEstimate.total;
     const sentLabel = workflow.estimateSentAt || 'Sent just now';
     return (
       <View style={styles.requestDetailShell}>
@@ -2518,9 +2520,11 @@ function EstimateSection({ title, icon, color, onAdd, optional, children }) {
   );
 }
 
-function EstimateLine({ label, hours, amount, strong, total, mutedLabel, onRemove, priceWarning }) {
+// locked: the price the customer already accepted (can't be changed or removed).
+function EstimateLine({ label, hours, amount, strong, total, mutedLabel, onRemove, priceWarning, locked }) {
   return (
     <View style={styles.estimateLine}>
+      {locked && <Ionicons name="lock-closed" size={12} color="#5E646D" />}
       <Text style={[styles.estimateLineLabel, strong && styles.estimateLineStrong, mutedLabel && styles.estimateLineMuted]} numberOfLines={1}>{label}</Text>
       {!!priceWarning && <Ionicons name="alert-circle-outline" size={14} color="#F04416" />}
       {!!hours && <Text style={styles.estimateLineHours}>{hours}</Text>}

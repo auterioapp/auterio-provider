@@ -174,7 +174,31 @@ export function getRecommendedServicesFromDiagnosis(answers, batteryVoltage, ord
 
 export function getDemoEstimate(answers, batteryVoltage, extraItems = [], removedItems = [], order, options = {}) {
   const pricing = getPricing();
-  const lr = Math.round(parseFloat(pricing.laborRate || '120') * 100) / 100;
+  // An order this provider priced (server payment.providerPrice, accepted by the
+  // customer): that price is the first line, locked, and nothing is added on its
+  // own; extra work goes in as the provider adds it. Their rate prices the rest.
+  const accepted = order?.payment?.providerPrice;
+  const acceptedLine = accepted?.work != null ? {
+    id: 'base-accepted-price',
+    source: 'base',
+    scope: 'required',
+    locked: true,
+    label: order?.service?.issueName || order?.service?.type || 'Service',
+    hours: accepted.kind === 'tow'
+      ? (accepted.miles != null ? `~${accepted.miles} mi` : undefined)
+      : (accepted.hours != null ? `${accepted.hours} hr` : undefined),
+    // The job without the surcharges; those are listed under Fees.
+    amount: Math.round((Number(accepted.work) - (accepted.surcharges || []).reduce((sum, item) => sum + (Number(item.amount) || 0), 0)) * 100) / 100,
+  } : null;
+  // The provider's own fees from their Pricing screen that apply to this job
+  // (server providerPrice.surcharges), named as there.
+  const SURCHARGE_LABELS = { weekend: 'Weekend Fee', after_hours: 'After Hours Fee', heavy_duty: 'Heavy Duty Surcharge' };
+  const acceptedFees = acceptedLine
+    ? (accepted.surcharges || []).map(item => ({ label: SURCHARGE_LABELS[item.key] || item.label, amount: Math.round(Number(item.amount) * 100) / 100, locked: true }))
+    : [];
+  const lr = Number(accepted?.laborRate) > 0
+    ? Math.round(Number(accepted.laborRate) * 100) / 100
+    : Math.round(parseFloat(pricing.laborRate || '120') * 100) / 100;
   const serviceCallFee = Math.round(parseFloat(pricing.serviceCallFee || '49') * 100) / 100;
   const hookUpFee = Math.round(parseFloat(pricing.hookUpFee || '95') * 100) / 100;
 
@@ -182,7 +206,10 @@ export function getDemoEstimate(answers, batteryVoltage, extraItems = [], remove
   let labor = [];
   let parts = [];
 
-  if (serviceType === 'tire_change') {
+  if (acceptedLine) {
+    labor = [acceptedLine];
+    parts = [];
+  } else if (serviceType === 'tire_change') {
     labor = [
       { id: 'base-labor-tire-change', source: 'base', scope: 'required', label: 'Tire Change Labor', hours: '0.6 hr', amount: Math.round(lr * 0.6 * 100) / 100 },
     ];
@@ -229,18 +256,18 @@ export function getDemoEstimate(answers, batteryVoltage, extraItems = [], remove
   const optionalLabor = [];
   const optionalParts = [];
 
-  if (serviceType === 'tire_change' && answers.wheelCondition === 'damaged') {
+  if (!acceptedLine && serviceType === 'tire_change' && answers.wheelCondition === 'damaged') {
     optionalLabor.push({ id: 'ai-labor-wheel-inspection', source: 'ai', scope: 'optional', label: 'Wheel Inspection', hours: '0.4 hr', amount: 48 });
   }
-  if ((serviceType === 'jump_start' || serviceType === 'battery_replacement') && answers.alternator === 'failed') {
+  if (!acceptedLine && (serviceType === 'jump_start' || serviceType === 'battery_replacement') && answers.alternator === 'failed') {
     labor.push({ id: 'ai-labor-alternator-replacement', source: 'ai', scope: 'required', label: 'Alternator Replacement', hours: '1.2 hr', amount: 144 });
     parts.splice(1, 0, { id: 'ai-part-alternator', source: 'ai', scope: 'required', label: 'Alternator', amount: 189 });
   }
-  if ((serviceType === 'jump_start' || serviceType === 'battery_replacement') && answers.jumpStart === 'not_started') {
+  if (!acceptedLine && (serviceType === 'jump_start' || serviceType === 'battery_replacement') && answers.jumpStart === 'not_started') {
     labor.push({ id: 'ai-labor-electrical-diagnosis', source: 'ai', scope: 'required', label: 'Electrical Diagnosis', hours: '0.8 hr', amount: 96 });
   }
   const voltage = Number.parseFloat(String(batteryVoltage || '').replace(',', '.'));
-  if ((serviceType === 'jump_start' || serviceType === 'battery_replacement') && Number.isFinite(voltage) && voltage >= 12.2 && answers.loadTest === 'good') {
+  if (!acceptedLine && (serviceType === 'jump_start' || serviceType === 'battery_replacement') && Number.isFinite(voltage) && voltage >= 12.2 && answers.loadTest === 'good') {
     parts.splice(0, 1);
   }
 
@@ -261,12 +288,19 @@ export function getDemoEstimate(answers, batteryVoltage, extraItems = [], remove
   const providerType = pricing.providerType || 'mobile';
   const feeByDefault = providerType !== 'shop';
   const includeServiceCallFee = options.includeServiceCallFee !== undefined ? options.includeServiceCallFee : feeByDefault;
-  const fees = includeServiceCallFee ? [{ label: 'Service Call Fee', amount: serviceCallFee }] : [];
+  // An order priced by this provider: their service call fee is part of the
+  // accepted price, listed as included (the server does the same).
+  const fees = acceptedLine
+    ? [
+      ...acceptedFees,
+      ...(Number(accepted.callFee) > 0 ? [{ label: 'Service Call Fee (included)', amount: Math.round(Number(accepted.callFee) * 100) / 100, included: true }] : []),
+    ]
+    : (includeServiceCallFee ? [{ label: 'Service Call Fee', amount: serviceCallFee }] : []);
   const laborSubtotal = sumAmounts(visibleLabor);
   const partsSubtotal = sumAmounts(visibleParts);
   const optionalLaborSubtotal = sumAmounts(visibleOptionalLabor);
   const optionalPartsSubtotal = sumAmounts(visibleOptionalParts);
-  const feesSubtotal = sumAmounts(fees);
+  const feesSubtotal = sumAmounts(fees.filter(fee => !fee.included));
   const subtotal = laborSubtotal + partsSubtotal + feesSubtotal;
   const optionalSubtotal = optionalLaborSubtotal + optionalPartsSubtotal;
   const tax = Math.round(subtotal * 0.0675 * 100) / 100;
@@ -292,25 +326,75 @@ export function getDemoEstimate(answers, batteryVoltage, extraItems = [], remove
   };
 }
 
-export function getEstimateCatalog(type) {
-  const lr = Math.round(parseFloat(getPricing().laborRate || '120') * 100) / 100;
-  const labor = [
-    { type: 'labor', label: 'Battery Replacement', hours: '1.0 hr', amount: Math.round(lr * 1.0 * 100) / 100, category: 'Electrical' },
-    { type: 'labor', label: 'Alternator Replacement', hours: '1.2 hr', amount: Math.round(lr * 1.2 * 100) / 100, category: 'Electrical' },
-    { type: 'labor', label: 'Starter Replacement', hours: '1.4 hr', amount: Math.round(lr * 1.4 * 100) / 100, category: 'Electrical' },
-    { type: 'labor', label: 'Electrical Diagnosis', hours: '0.8 hr', amount: Math.round(lr * 0.8 * 100) / 100, category: 'Diagnostics' },
-    { type: 'labor', label: 'Tire Change Labor', hours: '0.6 hr', amount: Math.round(lr * 0.6 * 100) / 100, category: 'Roadside' },
-    { type: 'labor', label: 'Brake Inspection', hours: '0.7 hr', amount: Math.round(lr * 0.7 * 100) / 100, category: 'Inspection' },
-  ];
-  const parts = [
-    { type: 'parts', label: 'Battery Group 35', amount: 169, category: 'Battery' },
-    { type: 'parts', label: 'Alternator', amount: 189, category: 'Charging System' },
-    { type: 'parts', label: 'Starter Motor', amount: 215, category: 'Starting System' },
-    { type: 'parts', label: 'Battery Terminal Kit', amount: 24, category: 'Electrical' },
-    { type: 'parts', label: 'Serpentine Belt', amount: 39, category: 'Engine' },
-    { type: 'parts', label: 'Shop Supplies', amount: 12, category: 'Supplies' },
-  ];
-  return type === 'parts' ? parts : labor;
+// What the provider can add to an estimate, by vehicle class (cars and pickups,
+// or heavy trucks). Labor is hours × the provider's rate from the order (server
+// payment.providerPrice), else the rate saved on this phone. Part prices are
+// typical starting points; the provider can add their own.
+const CAR_LABOR = [
+  ['Second Tire Change', 0.5, 'Roadside'],
+  ['Tire Repair (Plug)', 0.5, 'Roadside'],
+  ['Wheel Lock Removal', 0.5, 'Roadside'],
+  ['Tire Change Labor', 0.6, 'Roadside'],
+  ['Battery Replacement', 1.0, 'Electrical'],
+  ['Battery Registration', 0.3, 'Electrical'],
+  ['Alternator Replacement', 1.2, 'Electrical'],
+  ['Starter Replacement', 1.4, 'Electrical'],
+  ['Electrical Diagnosis', 0.8, 'Diagnostics'],
+  ['Fuel System Diagnosis', 1.0, 'Diagnostics'],
+  ['Brake Inspection', 0.7, 'Inspection'],
+];
+const CAR_PARTS = [
+  ['Tire', 140, 'Tires'],
+  ['Tire Plug Kit', 15, 'Tires'],
+  ['Battery Group 35', 169, 'Battery'],
+  ['Battery Group 24F', 175, 'Battery'],
+  ['AGM Battery H6', 230, 'Battery'],
+  ['Alternator', 189, 'Charging System'],
+  ['Starter Motor', 215, 'Starting System'],
+  ['Battery Terminal Kit', 24, 'Electrical'],
+  ['Serpentine Belt', 39, 'Engine'],
+  ['Shop Supplies', 12, 'Supplies'],
+];
+const TRUCK_LABOR = [
+  ['Heavy-Duty Tire Change', 1.5, 'Roadside'],
+  ['Tire Mount & Balance', 1.0, 'Roadside'],
+  ['Re-torque Check', 0.3, 'Roadside'],
+  ['Battery Bank Replacement', 1.5, 'Electrical'],
+  ['Alternator Replacement', 2.0, 'Electrical'],
+  ['Starter Replacement', 2.0, 'Electrical'],
+  ['Electrical Diagnosis (J1939)', 1.0, 'Diagnostics'],
+  ['Air Leak Repair', 1.0, 'Air Brakes'],
+  ['Brake Chamber Replacement', 1.5, 'Air Brakes'],
+  ['Slack Adjuster Replacement', 1.0, 'Air Brakes'],
+  ['DPF Regeneration', 1.0, 'Engine'],
+  ['Fuel System Priming', 0.5, 'Fuel'],
+];
+const TRUCK_PARTS = [
+  ['Drive Tire 11R22.5', 520, 'Tires'],
+  ['Steer Tire 295/75R22.5', 560, 'Tires'],
+  ['Battery Group 31', 210, 'Battery'],
+  ['Heavy-Duty Alternator', 420, 'Charging System'],
+  ['Heavy-Duty Starter', 450, 'Starting System'],
+  ['Brake Chamber', 95, 'Air Brakes'],
+  ['Slack Adjuster', 120, 'Air Brakes'],
+  ['Air Line / Fitting', 35, 'Air Brakes'],
+  ['Diesel Anti-Gel', 25, 'Fuel'],
+  ['DEF, 2.5 gal', 20, 'Fuel'],
+  ['Shop Supplies', 15, 'Supplies'],
+];
+
+export function getEstimateCatalog(type, order) {
+  const accepted = Number(order?.payment?.providerPrice?.laborRate);
+  const lr = accepted > 0
+    ? Math.round(accepted * 100) / 100
+    : Math.round(parseFloat(getPricing().laborRate || '120') * 100) / 100;
+  const heavy = getVehicleClass(order) === 'heavy';
+  if (type === 'parts') {
+    return (heavy ? TRUCK_PARTS : CAR_PARTS).map(([label, amount, category]) => ({ type: 'parts', label, amount, category }));
+  }
+  return (heavy ? TRUCK_LABOR : CAR_LABOR).map(([label, hours, category]) => ({
+    type: 'labor', label, hours: `${hours.toFixed(1)} hr`, amount: Math.round(lr * hours * 100) / 100, category,
+  }));
 }
 
 export function getEstimatePriceCheck(type, name, amount) {

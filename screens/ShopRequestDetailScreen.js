@@ -193,7 +193,7 @@ export default function ShopRequestDetailScreen({ order, accepting, onBack, onAc
   const setDiagnosisAnswer = (key, value) => setDiagnosisAnswers(prev => ({ ...prev, [key]: value }));
 
   const estimate = getDemoEstimate(diagnosisAnswers, batteryVoltage, estimateItems, estimateRemovedItems, order);
-  const estimateCatalog = getEstimateCatalog(estimatePickerMode);
+  const estimateCatalog = getEstimateCatalog(estimatePickerMode, order);
   const filteredEstimateCatalog = estimateCatalog.filter(item => {
     const q = estimateSearch.trim().toLowerCase();
     return !q || `${item.label} ${item.category || ''}`.toLowerCase().includes(q);
