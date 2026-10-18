@@ -237,8 +237,9 @@ function EarningStat({ icon, value, label }) {
   );
 }
 
-// singleLine: the label and the value each stay on one line (the label as wide as its text).
-export function RequestInfoRow({ icon, color, label, value, chevron, onPress, valueStyle, labelStyle, singleLine = false }) {
+// singleLine: the label and the value each stay on one line (the label as wide as its text);
+// valueLines lets the value wrap anyway (an address).
+export function RequestInfoRow({ icon, color, label, value, chevron, onPress, valueStyle, labelStyle, singleLine = false, valueLines }) {
   const RowComponent = onPress ? TouchableOpacity : View;
   const rowProps = onPress ? { activeOpacity: 0.82, onPress } : {};
   return (
@@ -247,7 +248,7 @@ export function RequestInfoRow({ icon, color, label, value, chevron, onPress, va
         <Ionicons name={icon} size={16} color={color} />
       </View>
       <Text style={[styles.requestInfoLabel, labelStyle, singleLine && styles.requestInfoLabelFit]} numberOfLines={singleLine ? 1 : undefined}>{label}</Text>
-      <Text style={[styles.requestInfoValue, valueStyle]} numberOfLines={singleLine ? 1 : 2}>{value}</Text>
+      <Text style={[styles.requestInfoValue, valueStyle]} numberOfLines={valueLines || (singleLine ? 1 : 2)}>{value}</Text>
       {chevron && <Ionicons style={styles.requestInfoChevron} name="chevron-forward" size={16} color="#5E646D" />}
     </RowComponent>
   );

@@ -157,6 +157,9 @@ function normalizeOrderToJob(order) {
       model: order.vehicle?.model || '',
       year: order.vehicle?.year || '',
       vin: order.vehicle?.vin,
+      color: order.vehicle?.color || '',
+      plate: order.vehicle?.plate || '',
+      powertrain: order.vehicle?.powertrain,
     },
     pickup: {
       ...(order.pickup || {}),
@@ -1122,6 +1125,8 @@ function AppInner() {
     }
   };
 
+  // Times the server records as a job moves on (routes/orders.js getTimestampForStatus).
+  const JOB_STEP_STAMPS = ['acceptedAt', 'enRouteAt', 'arrivedAt', 'estimateSentAt', 'estimateApprovedAt', 'startedAt', 'completedAt'];
   const updateJobWorkflow = (jobId, patch) => {
     setJobWorkflows(current => ({
       ...current,
@@ -1160,6 +1165,15 @@ function AppInner() {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
+    }).then((updated) => {
+      // The server stamps each step (arrivedAt shows in the job's header).
+      if (!updated || typeof updated !== 'object') return;
+      const stamps = {};
+      for (const key of JOB_STEP_STAMPS) if (updated[key]) stamps[key] = updated[key];
+      if (updated.status) stamps.status = updated.status;
+      const merge = job => (job && String(job.id) === String(jobId) ? { ...job, ...stamps } : job);
+      setAcceptedJobs(current => current.map(merge));
+      setSelectedJob(merge);
     }).catch((error) => {
       console.log('Job status sync error:', error.message);
       showToast('Could not save — check your connection and try again');
