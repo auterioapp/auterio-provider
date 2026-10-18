@@ -116,7 +116,9 @@ function normalizeOrderToJob(order) {
   const number = order.number || String(requestId).replace(/\D/g, '').slice(-5) || '12345';
   const customerName = order.customer?.name || order.contactInfo?.name || 'Customer';
   const initials = customerName.split(' ').map(part => part[0]).join('').slice(0, 2).toUpperCase() || 'CU';
-  const total = Number(order.payment?.total || order.payment?.totalHeld || order.payment?.priceMax || order.price || order.total || 0);
+  // A job priced with this provider's rates (payment.providerPrice) shows that price.
+  const offered = order.payment?.providerPrice;
+  const total = Number(order.payment?.total || offered?.work || offered?.workMin || order.payment?.totalHeld || order.payment?.priceMax || order.price || order.total || 0);
   const shopStatus = order.shopStatus || (getServiceMode(order) === 'shop' ? SHOP_STATUS_FROM_ORDER_STATUS[order.status] : undefined);
   // approvedTotal/approveOptional/estimateApprovedAt/additionalApprovals live under
   // orderContext on the backend but are read as top-level job fields in the provider

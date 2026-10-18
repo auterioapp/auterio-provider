@@ -47,10 +47,16 @@ export default function RequestDetailScreen({ order, accepting, providerType = '
   const displayVehicle = getVehicleDisplayLabel(order);
   const address = order.pickup?.address || 'Location pending';
   const dropoffAddress = getDropoffAddress(order);
-  const payout = Number(order.payment?.totalHeld || order.payment?.total || 0);
+  // The server prices the job with this provider's own rates (providerQuote):
+  // one price, or a range for a repair. Older orders: the amount held.
+  const quote = order.providerQuote;
   const commissionRate = provider?.commissionRate ?? 0.15;
-  const platformFee = payout > 0 ? Math.round(payout * commissionRate * 100) / 100 : 0;
-  const net = Math.max(0, payout - platformFee);
+  const netOf = (amount) => Math.max(0, amount - Math.round(amount * commissionRate * 100) / 100);
+  const payout = Number(quote?.work ?? quote?.workMin ?? (order.payment?.totalHeld || order.payment?.total || 0));
+  const net = netOf(payout);
+  const netLabel = quote?.workMin != null && quote?.workMax != null
+    ? `$${Math.round(netOf(quote.workMin))}–${Math.round(netOf(quote.workMax))}`
+    : (net > 0 ? formatCurrency(net) : '—');
   const driveTime = order.eta || order.tracking?.eta || '—';
   const customerCoord = (order.pickup?.latitude != null && order.pickup?.longitude != null)
     ? { latitude: Number(order.pickup.latitude), longitude: Number(order.pickup.longitude) }
@@ -98,7 +104,7 @@ export default function RequestDetailScreen({ order, accepting, providerType = '
         <View style={styles.requestSummaryCard}>
           <View style={styles.earningsMain}>
             <Text style={styles.earningsLabel}>ESTIMATED{'\n'}EARNINGS</Text>
-            <Text style={styles.earningsAmount} numberOfLines={1}>{net > 0 ? formatCurrency(net) : '—'}</Text>
+            <Text style={styles.earningsAmount} numberOfLines={1}>{netLabel}</Text>
             <Text style={styles.earningsNet} numberOfLines={1}>Net earnings</Text>
           </View>
           <View style={styles.earningsDivider} />
