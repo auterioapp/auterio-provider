@@ -28,8 +28,9 @@ module.exports = {
     web: {
       favicon: "./assets/favicon.png",
     },
-    // EAS project id for push tokens: set EAS_PROJECT_ID in .env (from `eas init`).
-    extra: process.env.EAS_PROJECT_ID ? { eas: { projectId: process.env.EAS_PROJECT_ID } } : {},
+    // EAS project @medinka/auterio-provider (push tokens); EAS_PROJECT_ID in .env overrides it.
+    owner: "medinka",
+    extra: { eas: { projectId: process.env.EAS_PROJECT_ID || "00dff672-87ec-49ca-9a54-bf3085cee52a" } },
     plugins: [
       "expo-notifications",
       "expo-status-bar",
