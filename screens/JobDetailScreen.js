@@ -90,7 +90,7 @@ export default function JobDetailScreen({ job, onBack, onStatusChange, refreshCo
             <View style={styles.jobStatusDot} />
             <Text style={styles.jobStatusText}>{JOB_STEPS[currentStepIndex]?.label || 'Accepted'}</Text>
           </View>
-          <Text style={styles.jobEtaText}>ETA {job.eta}</Text>
+          <Text style={styles.jobEtaText}>{job.eta ? `ETA ${job.eta}` : "ETA pending"}</Text>
         </View>
 
         <View style={styles.jobCard}>

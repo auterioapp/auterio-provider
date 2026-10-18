@@ -10,7 +10,8 @@ const DEFAULT_PROVIDER = {
   initials: 'AP',
   phone: '+15551234567',
   rating: 4.9,
-  eta: '18-25 min',
+  // No fixed drive time: the server works it out from where the provider is.
+  eta: null,
 };
 
 const ProviderContext = createContext(null);

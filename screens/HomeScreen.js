@@ -361,7 +361,7 @@ export default function HomeScreen({ online, setOnline, requests = [], requestAn
                   </View>
                   <View style={styles.sheetRowRight}>
                     <Text style={styles.sheetRowPrice}>{formatMoney(order)}</Text>
-                    <Text style={styles.sheetRowEta}>{order.eta || 'Est. 20 min'}</Text>
+                    <Text style={styles.sheetRowEta}>{order.eta || ''}</Text>
                   </View>
                   <Ionicons name="chevron-forward" size={16} color="#C4C9D1" />
                 </TouchableOpacity>
@@ -440,7 +440,7 @@ function IncomingRequest({ order, accepting, onOpen, onAccept, onDecline, allowS
           >
             {formatMoney(order)}
           </Text>
-          <Text style={styles.incomingEta}>{order.eta || 'Est. 25 min'}</Text>
+          <Text style={styles.incomingEta}>{order.eta || ''}</Text>
         </View>
       </View>
     </TouchableOpacity>

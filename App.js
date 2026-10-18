@@ -138,7 +138,7 @@ function normalizeOrderToJob(order) {
     approveOptional,
     estimateApprovedAt,
     additionalApprovals,
-    eta: order.tracking?.eta || order.eta || '20-30 min',
+    eta: order.tracking?.eta || order.eta || null,
     accent: order.accent || '#F04416',
     icon: order.icon || serviceMeta.icon,
     customer: {
