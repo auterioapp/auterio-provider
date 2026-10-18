@@ -65,6 +65,9 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
   }, [routeOpen]);
   const [arrivedOpen, setArrivedOpen] = useState(workflow.stage === 'arrived');
   const [diagnosisOpen, setDiagnosisOpen] = useState(workflow.stage === 'diagnosis');
+  // Job Details: the customer's note and photos, folded (as on RequestDetailScreen).
+  const [noteOpen, setNoteOpen] = useState(false);
+  const [notePhotoCount, setNotePhotoCount] = useState(0);
   const [estimateOpen, setEstimateOpen] = useState(workflow.stage === 'estimate');
   const [approvalOpen, setApprovalOpen] = useState(workflow.stage === 'approval');
   const [estimateDeclinedOpen, setEstimateDeclinedOpen] = useState(workflow.stage === 'estimate_declined');
@@ -2379,17 +2382,36 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
         <View style={styles.requestBriefCard}>
           <Text style={styles.jobDetailHeading}>Job Details</Text>
 
-          {/* The customer's note in full under its title; their photos follow. */}
+          {/* The customer's note and photos, folded to one line; tap to read and see them. */}
           <View style={styles.noteBlock}>
-            <View style={styles.noteBlockHeader}>
+            <TouchableOpacity
+              style={styles.noteBlockHeader}
+              onPress={() => setNoteOpen(value => !value)}
+              activeOpacity={0.8}
+              accessibilityRole="button"
+              accessibilityState={{ expanded: noteOpen }}
+            >
               <View style={[styles.requestInfoIcon, { backgroundColor: '#2F80FF' + '18' }]}>
                 <Ionicons name="chatbox-outline" size={16} color="#2F80FF" />
               </View>
-              <Text style={styles.jobDetailTitle}>Customer Note</Text>
+              <View style={styles.noteFoldText}>
+                <Text style={styles.jobDetailTitle}>Customer Note & Photos</Text>
+                {!noteOpen && (
+                  <Text style={styles.noteFoldPreview} numberOfLines={1}>
+                    {[customerNote || 'No note', notePhotoCount ? `${notePhotoCount} photo${notePhotoCount > 1 ? 's' : ''}` : 'no photos'].join(' · ')}
+                  </Text>
+                )}
+              </View>
+              <Ionicons name={noteOpen ? 'chevron-up' : 'chevron-down'} size={18} color="#5E646D" />
+            </TouchableOpacity>
+            {noteOpen && (
+              <Text style={[styles.noteBlockText, !customerNote && styles.noteBlockEmpty]}>{customerNote || 'No additional info'}</Text>
+            )}
+            {/* Mounted while folded too, so the count is known. */}
+            <View style={!noteOpen && styles.foldHidden}>
+              <OrderPhotos orderId={job.id} bare onCount={setNotePhotoCount} />
             </View>
-            <Text style={[styles.noteBlockText, !customerNote && styles.noteBlockEmpty]}>{customerNote || 'No additional info'}</Text>
           </View>
-          <OrderPhotos orderId={job.id} />
 
           {intakeRows.length > 0 && (
             <>

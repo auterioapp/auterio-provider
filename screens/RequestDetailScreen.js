@@ -330,7 +330,7 @@ export function RequestInfoRow({ icon, color, label, value, chevron, onPress, va
   const RowComponent = onPress ? TouchableOpacity : View;
   const rowProps = onPress ? { activeOpacity: 0.82, onPress } : {};
   return (
-    <RowComponent style={styles.requestInfoRow} {...rowProps}>
+    <RowComponent style={[styles.requestInfoRow, chevron && styles.requestInfoRowChevron]} {...rowProps}>
       <View style={[styles.requestInfoIcon, { backgroundColor: color + '18' }]}>
         <Ionicons name={icon} size={16} color={color} />
       </View>
@@ -397,7 +397,7 @@ const styles = StyleSheet.create({
   jobDetailSectionRow: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: '#E1E4E8' },
   jobDetailSectionLabel: { flex: 1, color: '#5E646D', fontSize: 10, lineHeight: 13, fontWeight: '600' },
   diagnosticIndent: { paddingLeft: 20 },
-  diagnosticRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, paddingVertical: 7, paddingRight: 22, borderBottomWidth: 1, borderBottomColor: '#E1E4E8' },
+  diagnosticRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, paddingVertical: 7, paddingRight: 10, borderBottomWidth: 1, borderBottomColor: '#E1E4E8' },
   diagnosticDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#C4C9D1', marginTop: 5 },
   diagnosticLabel: { flex: 2, color: '#5E646D', fontSize: 12, lineHeight: 16, fontWeight: '600' },
   diagnosticValue: { flex: 1, color: '#17191D', fontSize: 12, lineHeight: 16, fontWeight: '600', textAlign: 'right' },
@@ -411,12 +411,14 @@ const styles = StyleSheet.create({
   noteFoldText: { flex: 1, minWidth: 0 },
   noteFoldPreview: { color: '#5E646D', fontSize: 12, lineHeight: 16, fontWeight: '500', marginTop: 1 },
   foldHidden: { display: 'none' },
-  requestInfoRow: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 8, paddingRight: 22, borderBottomWidth: 1, borderBottomColor: '#E1E4E8', position: 'relative' },
+  requestInfoRow: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 8, paddingRight: 10, borderBottomWidth: 1, borderBottomColor: '#E1E4E8', position: 'relative' },
   requestInfoLabelFit: { width: 'auto', flexShrink: 0 },
   requestInfoIcon: { width: 25, height: 25, borderRadius: 7, alignItems: 'center', justifyContent: 'center' },
   requestInfoLabel: { width: 104, color: '#5E646D', fontSize: 10, lineHeight: 13, fontWeight: '600' },
   requestInfoValue: { flex: 1, minWidth: 0, color: '#17191D', fontSize: 11, lineHeight: 15, fontWeight: '600', textAlign: 'right' },
   requestInfoChevron: { position: 'absolute', right: 0 },
+  // Room for the chevron on the right.
+  requestInfoRowChevron: { paddingRight: 22 },
   requestBottomPanel: { position: 'absolute', left: 10, right: 10, bottom: 28, borderRadius: 14, backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#ECEEF0', paddingHorizontal: 10, paddingTop: 12, paddingBottom: 10, shadowColor: '#000', shadowOpacity: 0.12, shadowRadius: 14, shadowOffset: { width: 0, height: 6 }, elevation: 10 },
   requestBottomActions: { flexDirection: 'row', gap: 10 },
   largeDeclineButton: { flex: 1, minHeight: 60, borderRadius: 8, borderWidth: 1.5, borderColor: '#F04416', backgroundColor: '#FFFFFF', alignItems: 'center', justifyContent: 'center', gap: 3 },
