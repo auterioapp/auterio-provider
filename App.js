@@ -782,7 +782,7 @@ function AppInner() {
     if (data.type === 'new_order') {
       selectTabAt(Math.max(0, TABS.findIndex(t => t.key === 'requests')));
       loadRequests();
-    } else if (data.type === 'estimate_approved' || data.type === 'order_status' || data.type === 'order_cancelled' || data.type === 'order_confirmed' || data.type === 'order_released') {
+    } else if (['estimate_approved', 'estimate_declined', 'change_request', 'order_status', 'order_cancelled', 'order_confirmed', 'order_released'].includes(data.type)) {
       selectTabAt(Math.max(0, TABS.findIndex(t => t.key === 'jobs')));
       loadProviderJobsFromBackend(provider.id);
     } else if (data.type === 'verification_update') {
