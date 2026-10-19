@@ -25,6 +25,27 @@ import OrderPhotos from '../components/OrderPhotos';
 // Saved photos come back as /api/... paths and need the auth header to load.
 const SERVER_URL = API_URL.replace(/\/api\/?$/, '');
 
+// The provider's warranty (Services → Warranty, '@warranty_policy'), or null when
+// they offer none or never chose one: nothing is promised for them.
+async function loadWarrantyPolicy() {
+  try {
+    const saved = JSON.parse(await AsyncStorage.getItem('@warranty_policy') || 'null');
+    return saved && (saved.days || saved.miles) ? saved : null;
+  } catch {
+    return null;
+  }
+}
+
+// "90-day / 4,000-mile warranty on parts and labor", or null without a warranty.
+function warrantyLine(warranty) {
+  if (!warranty || (!warranty.days && !warranty.miles)) return null;
+  const parts = [
+    warranty.days ? (warranty.days === 365 ? '1-year' : `${warranty.days}-day`) : null,
+    warranty.miles ? `${Number(warranty.miles).toLocaleString('en-US')}-mile` : null,
+  ].filter(Boolean);
+  return `${parts.join(' / ')} warranty on parts and labor`;
+}
+
 function haversineMiles(lat1, lng1, lat2, lng2) {
   const R = 3958.8;
   const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -95,6 +116,8 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
   const [estimateItemScope, setEstimateItemScope] = useState('required');
   const [estimatePreviewOpen, setEstimatePreviewOpen] = useState(false);
   const [completeInvoicePreviewOpen, setCompleteInvoicePreviewOpen] = useState(false);
+  // Final review photo grid: four square tiles and three 8pt gaps fill its width exactly.
+  const [photoGridWidth, setPhotoGridWidth] = useState(0);
   const [completedInvoicePreviewOpen, setCompletedInvoicePreviewOpen] = useState(false);
   const [completedServiceDetailsOpen, setCompletedServiceDetailsOpen] = useState(false);
   const [customerProfileOpen, setCustomerProfileOpen] = useState(false);
@@ -150,8 +173,9 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
   // Photos of the finished work: { uri, saving | saved | failed }, uploaded as taken
   // (POST /orders/:id/work-photos). Older workflows kept text labels; those are dropped.
   const [workPhotos, setWorkPhotos] = useState((workflow.workPhotos || []).filter(photo => photo && typeof photo === 'object'));
-  const [workSummary, setWorkSummary] = useState(workflow.workSummary || 'Replaced old battery with new Group 35 battery.\nSystem tested. Vehicle starts normally.');
-  const [workCustomerNote, setWorkCustomerNote] = useState(workflow.workCustomerNote || 'Thanks for choosing our service!');
+  // Empty until the provider writes them: the summary and the note go to the customer.
+  const [workSummary, setWorkSummary] = useState(workflow.workSummary || '');
+  const [workCustomerNote, setWorkCustomerNote] = useState(workflow.workCustomerNote || '');
   const [diagnosisAnswers, setDiagnosisAnswers] = useState(workflow.diagnosisAnswers || {
     jumpStart: 'started',
     alternator: 'failed',
@@ -185,12 +209,13 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
       const update = (patch) => setWorkPhotos(current => current.map(photo => (photo.key === key ? { key, uri: small.uri, ...patch } : photo)));
       setWorkPhotos(current => [...current, { key, uri: small.uri, saving: true }]);
       try {
-        await fetchJson(`${API_URL}/orders/${job.id}/work-photos`, {
+        const saved = await fetchJson(`${API_URL}/orders/${job.id}/work-photos`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ image: small.base64 }),
         });
-        update({ saved: true });
+        // The server's id, so the photo can be removed later.
+        update({ saved: true, id: saved?.id });
       } catch (uploadError) {
         update({ failed: true });
         Alert.alert('Photo not saved', uploadError?.message || 'Check your connection and take it again.');
@@ -198,6 +223,25 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
     } catch (error) {
       console.log('Camera error:', error.message);
     }
+  };
+  // Removes a work photo here and on the server (DELETE /orders/:id/work-photos/:photoId);
+  // one that never saved is only dropped from the list.
+  const removeWorkPhoto = (photo) => {
+    Alert.alert('Remove this photo?', 'The customer won\'t see it.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Remove',
+        style: 'destructive',
+        onPress: async () => {
+          try {
+            if (photo.id) await fetchJson(`${API_URL}/orders/${job.id}/work-photos/${photo.id}`, { method: 'DELETE' });
+            setWorkPhotos(current => current.filter(item => item.key !== photo.key));
+          } catch (error) {
+            Alert.alert('Photo not removed', error?.message || 'Check your connection and try again.');
+          }
+        },
+      },
+    ]);
   };
   const updateWorkSummary = (value) => {
     setWorkSummary(value);
@@ -1273,7 +1317,10 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
     const completeIndex = Math.max(0, JOB_STEPS.findIndex(step => step.key === 'completed'));
     const estimate = getDemoEstimate(diagnosisAnswers, batteryVoltage, estimateItems, estimateRemovedItems, job, { includeServiceCallFee: includeCallFee });
     const pendingRequiredChanges = additionalApprovals.filter(item => item.status === 'pending');
-    const canSubmitCompletion = pendingRequiredChanges.length === 0;
+    // A photo still uploading wouldn't be in the report yet.
+    const photosSaving = workPhotos.some(photo => photo.saving);
+    const photoTileSize = photoGridWidth ? { width: Math.floor((photoGridWidth - 24) / 4) } : null;
+    const canSubmitCompletion = pendingRequiredChanges.length === 0 && !photosSaving;
     const {
       invoiceEstimate, invoiceNumber, paymentMethod, invoiceTax, invoiceSubtotal, finalTotal, approvedRequiredChanges, approveOptional: invoiceApproveOptional,
     } = getInvoiceData(job, workflow, additionalApprovals, estimate);
@@ -1286,11 +1333,6 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
       const workDuration = durationMins
         ? (durationMins < 60 ? `${durationMins} min` : `${Math.floor(durationMins / 60)}h ${durationMins % 60}m`)
         : null;
-      let warranty = { id: '90d', days: 90, miles: 4000 };
-      try {
-        const wVal = await AsyncStorage.getItem('@warranty_policy');
-        if (wVal) warranty = JSON.parse(wVal);
-      } catch { }
       onWorkflowChange?.({
         stage: 'completed',
         workPhotos,
@@ -1300,7 +1342,7 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
         completedAt: 'Completed just now',
         invoiceNumber,
         workDuration,
-        warranty,
+        warranty: await loadWarrantyPolicy(),
       });
       onBack?.();
     };
@@ -1320,88 +1362,88 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
           </TouchableOpacity>
         </View>
 
-        <ScrollView style={[styles.container, styles.requestDetailScroll]} contentContainerStyle={styles.completeContent} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
+        <ScrollView style={[styles.container, styles.requestDetailScroll]} contentContainerStyle={styles.finContent} showsVerticalScrollIndicator={false} refreshControl={refreshControl}>
           <View style={styles.jobProgressCard}>
             <JobStepper steps={JOB_STEPS} currentIndex={completeIndex} />
           </View>
 
-          <View style={styles.completeHeroCard}>
-            <View style={styles.completeHeroIcon}>
-              <Ionicons name="clipboard-outline" size={24} color="#FFFFFF" />
-            </View>
-            <View style={styles.completeHeroInfo}>
-              <Text style={styles.completeHeroTitle}>Complete Job</Text>
-              <Text style={styles.completeHeroSubtitle}>Review final photos, work summary, approvals, and total before submitting completion.</Text>
-            </View>
-          </View>
-
-          <View style={styles.completeChecklistCard}>
-            <Text style={styles.completeChecklistTitle}>Completion checklist</Text>
-            <CompletionCheckRow done={!pendingRequiredChanges.length} title="No pending approvals" detail={pendingRequiredChanges.length ? 'Resolve pending required changes first' : 'All change requests resolved'} />
-          </View>
-
-          <View style={styles.repairNoteCard}>
-            <Text style={styles.repairFieldLabel}>Work Summary (Optional)</Text>
+          {/* What the customer reads in their order: the summary and a note. */}
+          <View style={styles.finCard}>
+            <Text style={styles.finLabel}>Work summary</Text>
             <TextInput
-              style={styles.repairSummaryInput}
+              style={styles.finInput}
               value={workSummary}
               onChangeText={updateWorkSummary}
               multiline
-              placeholder="Describe completed work"
+              placeholder="What did you do? The customer sees this in their order."
               placeholderTextColor="#5E646D"
             />
-            {!!workCustomerNote.trim() && (
-              <>
-                <View style={styles.customerEstimateDivider} />
-                <Text style={styles.repairFieldLabel}>Customer Note</Text>
-                <Text style={styles.completeSummaryText}>{workCustomerNote}</Text>
-              </>
-            )}
+            <Text style={[styles.finLabel, styles.finLabelGap]}>Note for the customer</Text>
+            <TextInput
+              style={styles.finInput}
+              value={workCustomerNote}
+              onChangeText={(value) => {
+                setWorkCustomerNote(value);
+                onWorkflowChange?.({ stage: 'complete_review', workCustomerNote: value, workSummary, workPhotos, additionalApprovals });
+              }}
+              multiline
+              placeholder="Optional: advice, next service, thanks"
+              placeholderTextColor="#5E646D"
+            />
           </View>
 
-          <View style={styles.repairNoteCard}>
-            <Text style={styles.repairFieldLabel}>Photos (Optional)</Text>
-            <View style={styles.completePhotosGrid}>
+          <View style={styles.finCard}>
+            <Text style={styles.finLabel}>Photos of the work</Text>
+            <View style={styles.finPhotoGrid} onLayout={(event) => setPhotoGridWidth(event.nativeEvent.layout.width)}>
               {workPhotos.map(photo => (
-                <View key={photo.key} style={styles.completePhotoTile}>
-                  <Image source={{ uri: photo.uri }} style={styles.workPhotoThumb} />
-                  {photo.saving && <Text style={styles.repairPhotoText}>Saving…</Text>}
-                  {photo.failed && <Text style={styles.workPhotoFailed}>Not saved</Text>}
+                <View key={photo.key} style={[styles.finPhotoTile, photoTileSize]}>
+                  <Image source={{ uri: photo.uri }} style={styles.finPhotoImage} />
+                  {(photo.saving || photo.failed) && (
+                    <View style={[styles.finPhotoBadge, photo.failed && styles.finPhotoBadgeFailed]}>
+                      <Text style={styles.finPhotoBadgeText}>{photo.failed ? 'Not saved' : 'Saving…'}</Text>
+                    </View>
+                  )}
+                  {!photo.saving && (
+                    <TouchableOpacity style={styles.finPhotoRemove} onPress={() => removeWorkPhoto(photo)} hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }} accessibilityRole="button" accessibilityLabel="Remove photo">
+                      <Ionicons name="close" size={14} color="#FFFFFF" />
+                    </TouchableOpacity>
+                  )}
                 </View>
               ))}
-              <TouchableOpacity style={styles.completePhotoTile} activeOpacity={0.84} onPress={addWorkPhoto}>
-                <Ionicons name="add" size={20} color="#5E646D" />
-                <Text style={styles.repairPhotoText}>Add Photo</Text>
-              </TouchableOpacity>
+              {/* Up to 6 work photos per order (backend MAX_WORK_PHOTOS). */}
+              {workPhotos.length < 6 && (
+                <TouchableOpacity style={[styles.finPhotoTile, photoTileSize, styles.finPhotoAdd]} activeOpacity={0.84} onPress={addWorkPhoto} accessibilityRole="button" accessibilityLabel="Add photo">
+                  <Ionicons name="camera-outline" size={20} color="#5E646D" />
+                  <Text style={styles.finPhotoAddText}>Add</Text>
+                </TouchableOpacity>
+              )}
             </View>
           </View>
 
-          {/* Compact invoice summary — tap to review the exact invoice the customer sees */}
-          <TouchableOpacity style={styles.approvedEstimateCard} activeOpacity={0.84} onPress={() => setCompleteInvoicePreviewOpen(true)}>
-            <View style={styles.approvedEstimateLeft}>
-              <View style={[styles.approvedEstimateIconWrap, { backgroundColor: 'rgba(124,58,237,0.12)' }]}>
-                <Ionicons name="document-text-outline" size={20} color="#7C3AED" />
-              </View>
-              <View>
-                <Text style={styles.approvedEstimateTitle}>Invoice · {invoiceNumber}</Text>
-                <Text style={styles.approvedEstimateAmount}>{formatCurrency(finalTotal)}</Text>
-              </View>
+          {/* The invoice the customer gets — tap to review it line by line. */}
+          <TouchableOpacity style={[styles.finCard, styles.finInvoiceRow]} activeOpacity={0.84} onPress={() => setCompleteInvoicePreviewOpen(true)} accessibilityRole="button" accessibilityLabel={`Review invoice, ${formatCurrency(finalTotal)}`}>
+            <View style={styles.finInvoiceIcon}>
+              <Ionicons name="document-text-outline" size={20} color="#17191D" />
             </View>
-            <View style={styles.approvedEstimateRight}>
-              <Text style={{ color: '#5E646D', fontSize: 11, fontWeight: '700' }}>Review</Text>
-              <Ionicons name="chevron-forward" size={16} color="#5E646D" />
+            <View style={styles.finInvoiceInfo}>
+              <Text style={styles.finInvoiceTitle}>Invoice · {invoiceNumber}</Text>
+              <Text style={styles.finInvoiceAmount}>{formatCurrency(finalTotal)}</Text>
             </View>
+            <Text style={styles.finInvoiceReview}>Review</Text>
+            <Ionicons name="chevron-forward" size={16} color="#5E646D" />
           </TouchableOpacity>
 
-          {!canSubmitCompletion && (
+          {pendingRequiredChanges.length > 0 && (
             <View style={styles.completeBlockedCard}>
               <Ionicons name="alert-circle-outline" size={18} color="#F04416" />
-              <Text style={styles.completeBlockedText}>Resolve pending customer approvals before completing this job.</Text>
+              <Text style={styles.completeBlockedText}>Waiting for the customer to answer extra work. You can complete the job after that.</Text>
             </View>
           )}
 
-          <TouchableOpacity style={[styles.completeSubmitBtn, !canSubmitCompletion && styles.startInspectionBtnDisabled]} activeOpacity={canSubmitCompletion ? 0.86 : 1} disabled={!canSubmitCompletion} onPress={submitCompletion}>
-            <Text style={[styles.completeSubmitText, !canSubmitCompletion && styles.startInspectionTextDisabled]}>Complete & Collect Payment · {formatCurrency(finalTotal)}</Text>
+          <TouchableOpacity style={[styles.finSubmitBtn, !canSubmitCompletion && styles.startInspectionBtnDisabled]} activeOpacity={canSubmitCompletion ? 0.86 : 1} disabled={!canSubmitCompletion} onPress={submitCompletion}>
+            <Text style={[styles.finSubmitText, !canSubmitCompletion && styles.startInspectionTextDisabled]}>
+              {photosSaving ? 'Saving photos…' : `Complete & Collect Payment · ${formatCurrency(finalTotal)}`}
+            </Text>
           </TouchableOpacity>
         </ScrollView>
 
@@ -1996,10 +2038,11 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
           {/* Payment card */}
           <View style={styles.detailPriceCard}>
             <View style={styles.detailPriceTop}>
-              <Text style={styles.detailPriceLabel}>Total Paid</Text>
-              <View style={styles.detailPaidBadge}>
-                <Ionicons name="checkmark-circle" size={13} color="#16A34A" />
-                <Text style={styles.detailPaidText}>PAID</Text>
+              {/* The card can fail at completion: then the job is unpaid, not "paid". */}
+              <Text style={styles.detailPriceLabel}>{job.payment?.status === 'payment_failed' ? 'Total Due' : 'Total Paid'}</Text>
+              <View style={[styles.detailPaidBadge, job.payment?.status === 'payment_failed' && styles.unpaidBadge]}>
+                <Ionicons name={job.payment?.status === 'payment_failed' ? 'alert-circle' : 'checkmark-circle'} size={13} color={job.payment?.status === 'payment_failed' ? '#DC2626' : '#16A34A'} />
+                <Text style={[styles.detailPaidText, job.payment?.status === 'payment_failed' && styles.unpaidText]}>{job.payment?.status === 'payment_failed' ? 'UNPAID' : 'PAID'}</Text>
               </View>
             </View>
             <Text style={styles.detailPriceValue}>{formatCurrency(completedFinalTotal)}</Text>
@@ -2380,8 +2423,8 @@ function JobPopupScreen({ job, workflow = {}, onWorkflowChange, onBack, onCancel
                 <Text style={styles.completedSummaryLabel}>Invoice</Text>
                 <Text style={styles.completedSummaryValue}>{workflow?.invoiceNumber || job.invoiceNumber || `INV-${job.number || '00000'}`}</Text>
               </View>
-              <View style={styles.completedInvoicePaid}>
-                <Text style={styles.completedInvoicePaidText}>PAID</Text>
+              <View style={[styles.completedInvoicePaid, job.payment?.status === 'payment_failed' && styles.unpaidBadge]}>
+                <Text style={[styles.completedInvoicePaidText, job.payment?.status === 'payment_failed' && styles.unpaidText]}>{job.payment?.status === 'payment_failed' ? 'UNPAID' : 'PAID'}</Text>
               </View>
               <Ionicons name="chevron-forward" size={16} color="#C4C9D1" style={{ marginLeft: 4 }} />
             </TouchableOpacity>
@@ -2711,6 +2754,14 @@ function InvoicePreviewModal({ visible, onClose, job, vin, invoiceEstimate, invo
   const { provider } = useProvider();
   const vehicleDisplayParts = getVehicleDisplayParts(job);
   const hasVin = hasKnownVin(job);
+  // A completed job shows the warranty it was completed with; before that, the
+  // provider's current one (Services → Warranty). No line when there's none.
+  const sentDetails = job.orderContext?.serviceDetails;
+  const [currentWarranty, setCurrentWarranty] = useState(null);
+  useEffect(() => {
+    if (visible && !sentDetails) loadWarrantyPolicy().then(setCurrentWarranty);
+  }, [visible, sentDetails]);
+  const warrantyText = warrantyLine(sentDetails ? sentDetails.warranty : currentWarranty);
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.customerEstimateOverlay}>
@@ -2738,10 +2789,23 @@ function InvoicePreviewModal({ visible, onClose, job, vin, invoiceEstimate, invo
                   <Text style={styles.invTitle}>Invoice</Text>
                   <Text style={styles.invMeta}>{invoiceNumber}{job.completedAt && !isNaN(new Date(job.completedAt).getTime()) ? `  ·  ${new Date(job.completedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}` : ''}</Text>
                 </View>
-                <View style={styles.invPaidBadge}>
-                  <Ionicons name="checkmark-circle" size={12} color="#16A34A" />
-                  <Text style={styles.invPaidText}>PAID</Text>
-                </View>
+                {/* The order's real payment state: charged only after Complete & Collect. */}
+                {job.payment?.status === 'paid' ? (
+                  <View style={styles.invPaidBadge}>
+                    <Ionicons name="checkmark-circle" size={12} color="#16A34A" />
+                    <Text style={styles.invPaidText}>PAID</Text>
+                  </View>
+                ) : job.payment?.status === 'payment_failed' ? (
+                  <View style={[styles.invPaidBadge, styles.invFailedBadge]}>
+                    <Ionicons name="alert-circle" size={12} color="#DC2626" />
+                    <Text style={[styles.invPaidText, styles.invFailedText]}>PAYMENT FAILED</Text>
+                  </View>
+                ) : (
+                  <View style={[styles.invPaidBadge, styles.invPendingBadge]}>
+                    <Ionicons name="time-outline" size={12} color="#5E646D" />
+                    <Text style={[styles.invPaidText, styles.invPendingText]}>NOT CHARGED YET</Text>
+                  </View>
+                )}
               </View>
             </View>
             <View style={styles.invoicePartyCard}>
@@ -2852,6 +2916,13 @@ function InvoicePreviewModal({ visible, onClose, job, vin, invoiceEstimate, invo
                 <Text style={styles.invoiceTotalLabel}>Tax (6.75%)</Text>
                 <Text style={styles.invoiceTotalValue}>{formatCurrency(invoiceTax)}</Text>
               </View>
+              {/* The job cost less than the service call fee: the fee is the minimum (backend orderMoney.normalizeEstimate). */}
+              {invoiceEstimate?.minimumApplied && (
+                <View style={[styles.invoiceTotalRow, styles.invoiceLineRowBorder]}>
+                  <Text style={styles.invoiceTotalLabel}>Minimum charge (service call fee)</Text>
+                  <Text style={styles.invoiceTotalValue}>{formatCurrency(invoiceEstimate.minimumCharge)}</Text>
+                </View>
+              )}
               <View style={[styles.invoiceTotalRow, styles.invoiceLineRowBorder]}>
                 <Text style={styles.invoiceTotalLabelBold}>Total</Text>
                 <Text style={styles.invoiceTotalValueBold}>{formatCurrency(finalTotal)}</Text>
@@ -2863,28 +2934,16 @@ function InvoicePreviewModal({ visible, onClose, job, vin, invoiceEstimate, invo
               <Text style={styles.invoicePaymentText}>Payment method: <Text style={{ color: '#17191D', fontWeight: '700' }}>{paymentMethod}</Text></Text>
             </View>
 
-            <View style={styles.invoiceWarrantyRow}>
-              <Ionicons name="shield-checkmark-outline" size={14} color="#16A34A" />
-              <Text style={styles.invoiceWarrantyText}>90-day / 4,000-mile warranty on parts and labor</Text>
-            </View>
+            {!!warrantyText && (
+              <View style={styles.invoiceWarrantyRow}>
+                <Ionicons name="shield-checkmark-outline" size={14} color="#16A34A" />
+                <Text style={styles.invoiceWarrantyText}>{warrantyText}</Text>
+              </View>
+            )}
           </ScrollView>
         </View>
       </View>
     </Modal>
-  );
-}
-
-function CompletionCheckRow({ done, title, detail }) {
-  return (
-    <View style={styles.completionCheckRow}>
-      <View style={[styles.completionCheckIcon, done && styles.completionCheckIconDone]}>
-        <Ionicons name={done ? 'checkmark' : 'alert'} size={13} color={done ? '#FFFFFF' : '#F04416'} />
-      </View>
-      <View style={styles.completionCheckInfo}>
-        <Text style={styles.completionCheckTitle}>{title}</Text>
-        <Text style={styles.completionCheckDetail}>{detail}</Text>
-      </View>
-    </View>
   );
 }
 

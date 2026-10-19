@@ -887,6 +887,7 @@ function AppInner() {
     if (status === 'completed') {
       body.serviceDetails = {
         providerNotes: extra.workSummary || order.workSummary || '',
+        noteForCustomer: extra.workCustomerNote || order.workCustomerNote || '',
         photos: (extra.workPhotos || order.workPhotos || []).filter(photo => photo?.saved).length,
       };
     }
@@ -1186,10 +1187,12 @@ function AppInner() {
       body.serviceDetails = {
         servicesPerformed: (currentWorkflow.estimateItems || []).map(i => i.label).filter(Boolean),
         providerNotes: currentWorkflow.workSummary || '',
+        noteForCustomer: currentWorkflow.workCustomerNote || '',
         // The photos themselves are on the server (POST /orders/:id/work-photos).
         photos: (currentWorkflow.workPhotos || []).filter(photo => photo?.saved).length,
         duration: currentWorkflow.workDuration || null,
-        warranty: currentWorkflow.warranty || { days: 90, miles: 4000 },
+        // The provider's own warranty, or none (Services → Warranty); never a default promise.
+        warranty: currentWorkflow.warranty || null,
         diagnosisResults: {
           batteryVoltage: currentWorkflow.batteryVoltage || null,
           diagnosisNotes: currentWorkflow.diagnosisNotes || '',
