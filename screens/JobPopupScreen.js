@@ -2750,9 +2750,13 @@ function formatPhone(raw) {
   return `+1 (${d.slice(0, 3)}) ${d.slice(3, 6)}-${d.slice(6)}`;
 }
 
+// The invoice, laid out exactly like the customer's estimate (CustomerEstimatePreview):
+// the service, a status notice, From / To, the line sections, the totals, then
+// payment and warranty at the bottom.
 function InvoicePreviewModal({ visible, onClose, job, vin, invoiceEstimate, invoiceNumber, invoiceSubtotal, invoiceTax, finalTotal, paymentMethod, approvedRequiredChanges, approveOptional }) {
   const { provider } = useProvider();
-  const vehicleDisplayParts = getVehicleDisplayParts(job);
+  const serviceMeta = getServiceMeta(job);
+  const vehicleParts = getVehicleDisplayParts(job);
   const hasVin = hasKnownVin(job);
   // A completed job shows the warranty it was completed with; before that, the
   // provider's current one (Services → Warranty). No line when there's none.
@@ -2762,6 +2766,24 @@ function InvoicePreviewModal({ visible, onClose, job, vin, invoiceEstimate, invo
     if (visible && !sentDetails) loadWarrantyPolicy().then(setCurrentWarranty);
   }, [visible, sentDetails]);
   const warrantyText = warrantyLine(sentDetails ? sentDetails.warranty : currentWarranty);
+  const completedDate = job.completedAt && !isNaN(new Date(job.completedAt).getTime())
+    ? new Date(job.completedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+    : null;
+  // The order's real payment state: charged only after Complete & Collect.
+  const paymentStatus = job.payment?.status;
+  const notice = paymentStatus === 'paid'
+    ? { icon: 'checkmark-circle', color: '#16A34A', style: null, text: `Paid${completedDate ? ` · ${completedDate}` : ''}` }
+    : paymentStatus === 'payment_failed'
+      ? { icon: 'alert-circle', color: '#DC2626', style: styles.invoiceNoticeFailed, text: 'Payment failed. The customer has been asked to pay the balance in the app.' }
+      : { icon: 'time-outline', color: '#5E646D', style: styles.invoiceNoticePending, text: 'Not charged yet. The card is charged when you complete the job.' };
+  const sections = [
+    { title: 'Labor', items: invoiceEstimate.labor || [] },
+    { title: 'Parts & Materials', items: invoiceEstimate.parts || [] },
+    { title: 'Fees', items: invoiceEstimate.fees || [] },
+    { title: 'Recommended Labor', items: approveOptional ? (invoiceEstimate.optionalLabor || []) : [] },
+    { title: 'Recommended Parts', items: approveOptional ? (invoiceEstimate.optionalParts || []) : [] },
+    { title: 'Additional Work', items: (approvedRequiredChanges || []).map(item => ({ ...item, label: item.label || item.title || item.name })) },
+  ].filter(section => section.items.length > 0);
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.customerEstimateOverlay}>
@@ -2773,177 +2795,76 @@ function InvoicePreviewModal({ visible, onClose, job, vin, invoiceEstimate, invo
             </TouchableOpacity>
             <View style={styles.customerEstimateTitleWrap}>
               <Text style={styles.customerEstimateTitle}>Invoice</Text>
-              <Text style={styles.customerEstimateSubtitle}>{invoiceNumber}</Text>
+              <Text style={styles.customerEstimateSubtitle}>{invoiceNumber}{completedDate ? ` · ${completedDate}` : ''}</Text>
             </View>
             <TouchableOpacity style={styles.noteCloseBtn} activeOpacity={0.8} onPress={onClose}>
               <Ionicons name="close" size={20} color="#17191D" />
             </TouchableOpacity>
           </View>
           <ScrollView style={styles.customerEstimateScroll} contentContainerStyle={styles.customerEstimateContent} showsVerticalScrollIndicator={false}>
-            <View style={styles.invHeaderCard}>
-              <View style={styles.invHeaderTop}>
-                <View style={styles.invIconWrap}>
-                  <Ionicons name="document-text-outline" size={18} color="#7C3AED" />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.invTitle}>Invoice</Text>
-                  <Text style={styles.invMeta}>{invoiceNumber}{job.completedAt && !isNaN(new Date(job.completedAt).getTime()) ? `  ·  ${new Date(job.completedAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}` : ''}</Text>
-                </View>
-                {/* The order's real payment state: charged only after Complete & Collect. */}
-                {job.payment?.status === 'paid' ? (
-                  <View style={styles.invPaidBadge}>
-                    <Ionicons name="checkmark-circle" size={12} color="#16A34A" />
-                    <Text style={styles.invPaidText}>PAID</Text>
-                  </View>
-                ) : job.payment?.status === 'payment_failed' ? (
-                  <View style={[styles.invPaidBadge, styles.invFailedBadge]}>
-                    <Ionicons name="alert-circle" size={12} color="#DC2626" />
-                    <Text style={[styles.invPaidText, styles.invFailedText]}>PAYMENT FAILED</Text>
-                  </View>
-                ) : (
-                  <View style={[styles.invPaidBadge, styles.invPendingBadge]}>
-                    <Ionicons name="time-outline" size={12} color="#5E646D" />
-                    <Text style={[styles.invPaidText, styles.invPendingText]}>NOT CHARGED YET</Text>
-                  </View>
-                )}
+            <View style={styles.customerEstimateHero}>
+              <View style={styles.customerEstimateServiceIcon}>
+                <Ionicons name={serviceMeta.icon} size={24} color="#F04416" />
               </View>
-            </View>
-            <View style={styles.invoicePartyCard}>
-              <View style={styles.invoicePartyRow}>
-                <Text style={styles.invoicePartyLabel}>FROM</Text>
-                <Text style={styles.invoicePartyName}>{provider?.company || 'Provider'}</Text>
-                <Text style={styles.invoicePartySub}>{formatPhone(provider?.phone)}</Text>
-              </View>
-              <View style={styles.invoiceDivider} />
-              <View style={styles.invoicePartyRow}>
-                <Text style={styles.invoicePartyLabel}>TO</Text>
-                <Text style={styles.invoicePartyName}>{job.customer?.name || 'Customer'}</Text>
-                <Text style={styles.invoicePartySub}>{vehicleDisplayParts.main}{!!vehicleDisplayParts.suffix && <Text style={styles.serviceTypeSuffix}>{vehicleDisplayParts.suffix}</Text>}</Text>
-                {hasVin && <Text style={styles.invoicePartySub}>VIN: {vin}</Text>}
-              </View>
-              <View style={styles.invoiceDivider} />
-              <View style={styles.invoicePartyRow}>
-                <Text style={styles.invoicePartyLabel}>SERVICE</Text>
-                <Text style={styles.invoicePartyName}>{job.service?.issueName || job.service?.type || 'Service'}</Text>
-                <Text style={styles.invoicePartySub}>{job.pickup?.address || 'Service location'}</Text>
+              <View style={styles.customerEstimateHeroInfo}>
+                <Text style={styles.customerEstimateService} numberOfLines={1}>{serviceMeta.title}</Text>
+                <Text style={styles.customerEstimateVehicle} numberOfLines={2}>{vehicleParts.main}{!!vehicleParts.suffix && <Text style={styles.serviceTypeSuffix}>{vehicleParts.suffix}</Text>}</Text>
+                {hasVin && <Text style={styles.customerEstimateLocation} numberOfLines={1}>VIN {vin}</Text>}
+                <Text style={styles.customerEstimateLocation} numberOfLines={1}>{job.pickup?.address || 'Service location'}</Text>
               </View>
             </View>
 
-            {invoiceEstimate.labor.length > 0 && (
-              <View style={styles.invoiceSection}>
-                <Text style={styles.invoiceSectionLabel}>LABOR</Text>
-                {invoiceEstimate.labor.map((item, i) => (
-                  <View key={item.id || i} style={[styles.invoiceLineRow, i > 0 && styles.invoiceLineRowBorder]}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.invoiceLineName}>{item.label}</Text>
-                      {!!item.hours && <Text style={styles.invoiceLineSub}>{item.hours}</Text>}
-                    </View>
-                    <Text style={styles.invoiceLineAmount}>{formatCurrency(item.amount)}</Text>
-                  </View>
-                ))}
-              </View>
-            )}
+            <View style={[styles.customerEstimateNotice, notice.style]}>
+              <Ionicons name={notice.icon} size={16} color={notice.color} />
+              <Text style={styles.customerEstimateNoticeText}>{notice.text}</Text>
+            </View>
 
-            {invoiceEstimate.parts.length > 0 && (
-              <View style={styles.invoiceSection}>
-                <Text style={styles.invoiceSectionLabel}>PARTS & MATERIALS</Text>
-                {invoiceEstimate.parts.map((item, i) => (
-                  <View key={item.id || i} style={[styles.invoiceLineRow, i > 0 && styles.invoiceLineRowBorder]}>
-                    <Text style={[styles.invoiceLineName, { flex: 1 }]}>{item.label}</Text>
-                    <Text style={styles.invoiceLineAmount}>{formatCurrency(item.amount)}</Text>
-                  </View>
-                ))}
-              </View>
-            )}
+            <CustomerPreviewSection title="From / To">
+              <InvoicePartyLine label="From" name={provider?.company || 'Provider'} sub={formatPhone(provider?.phone)} />
+              <InvoicePartyLine label="To" name={job.customer?.name || 'Customer'} sub={formatPhone(job.customer?.phone)} />
+            </CustomerPreviewSection>
 
-            {invoiceEstimate.fees.length > 0 && (
-              <View style={styles.invoiceSection}>
-                <Text style={styles.invoiceSectionLabel}>FEES</Text>
-                {invoiceEstimate.fees.map((item, i) => (
-                  <View key={i} style={[styles.invoiceLineRow, i > 0 && styles.invoiceLineRowBorder]}>
-                    <Text style={[styles.invoiceLineName, { flex: 1 }]}>{item.label}</Text>
-                    <Text style={styles.invoiceLineAmount}>{formatCurrency(item.amount)}</Text>
-                  </View>
-                ))}
-              </View>
-            )}
+            {sections.map(section => (
+              <CustomerPreviewSection key={section.title} title={section.title}>
+                {section.items.map((item, index) => <CustomerPreviewLine key={`${section.title}-${item.id || item.label}-${index}`} {...item} />)}
+              </CustomerPreviewSection>
+            ))}
 
-            {approveOptional && invoiceEstimate.optionalLabor?.length > 0 && (
-              <View style={styles.invoiceSection}>
-                <Text style={styles.invoiceSectionLabel}>RECOMMENDED LABOR</Text>
-                {invoiceEstimate.optionalLabor.map((item, i) => (
-                  <View key={item.id || i} style={[styles.invoiceLineRow, i > 0 && styles.invoiceLineRowBorder]}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.invoiceLineName}>{item.label}</Text>
-                      {!!item.hours && <Text style={styles.invoiceLineSub}>{item.hours}</Text>}
-                    </View>
-                    <Text style={styles.invoiceLineAmount}>{formatCurrency(item.amount)}</Text>
-                  </View>
-                ))}
-              </View>
-            )}
-
-            {approveOptional && invoiceEstimate.optionalParts?.length > 0 && (
-              <View style={styles.invoiceSection}>
-                <Text style={styles.invoiceSectionLabel}>RECOMMENDED PARTS</Text>
-                {invoiceEstimate.optionalParts.map((item, i) => (
-                  <View key={item.id || i} style={[styles.invoiceLineRow, i > 0 && styles.invoiceLineRowBorder]}>
-                    <Text style={[styles.invoiceLineName, { flex: 1 }]}>{item.label}</Text>
-                    <Text style={styles.invoiceLineAmount}>{formatCurrency(item.amount)}</Text>
-                  </View>
-                ))}
-              </View>
-            )}
-
-            {approvedRequiredChanges.length > 0 && (
-              <View style={styles.invoiceSection}>
-                <Text style={styles.invoiceSectionLabel}>ADDITIONAL WORK</Text>
-                {approvedRequiredChanges.map((item, i) => (
-                  <View key={i} style={[styles.invoiceLineRow, i > 0 && styles.invoiceLineRowBorder]}>
-                    <Text style={[styles.invoiceLineName, { flex: 1 }]}>{item.name || item.label}</Text>
-                    <Text style={styles.invoiceLineAmount}>{formatCurrency(item.amount)}</Text>
-                  </View>
-                ))}
-              </View>
-            )}
-
-            <View style={styles.invoiceTotalsCard}>
-              <View style={styles.invoiceTotalRow}>
-                <Text style={styles.invoiceTotalLabel}>Subtotal</Text>
-                <Text style={styles.invoiceTotalValue}>{formatCurrency(invoiceSubtotal)}</Text>
-              </View>
-              <View style={[styles.invoiceTotalRow, styles.invoiceLineRowBorder]}>
-                <Text style={styles.invoiceTotalLabel}>Tax (6.75%)</Text>
-                <Text style={styles.invoiceTotalValue}>{formatCurrency(invoiceTax)}</Text>
-              </View>
+            <View style={styles.customerEstimateTotals}>
+              <CustomerPreviewLine label="Subtotal" amount={invoiceSubtotal} strong />
+              <CustomerPreviewLine label="Tax (6.75%)" amount={invoiceTax} />
               {/* The job cost less than the service call fee: the fee is the minimum (backend orderMoney.normalizeEstimate). */}
-              {invoiceEstimate?.minimumApplied && (
-                <View style={[styles.invoiceTotalRow, styles.invoiceLineRowBorder]}>
-                  <Text style={styles.invoiceTotalLabel}>Minimum charge (service call fee)</Text>
-                  <Text style={styles.invoiceTotalValue}>{formatCurrency(invoiceEstimate.minimumCharge)}</Text>
-                </View>
-              )}
-              <View style={[styles.invoiceTotalRow, styles.invoiceLineRowBorder]}>
-                <Text style={styles.invoiceTotalLabelBold}>Total</Text>
-                <Text style={styles.invoiceTotalValueBold}>{formatCurrency(finalTotal)}</Text>
-              </View>
+              {invoiceEstimate?.minimumApplied && <CustomerPreviewLine label="Minimum charge (service call fee)" amount={invoiceEstimate.minimumCharge} />}
+              <CustomerPreviewLine label="Total" amount={finalTotal} total />
             </View>
 
-            <View style={styles.invoicePaymentRow}>
-              <Ionicons name="card-outline" size={16} color="#5E646D" />
-              <Text style={styles.invoicePaymentText}>Payment method: <Text style={{ color: '#17191D', fontWeight: '700' }}>{paymentMethod}</Text></Text>
+            <View style={styles.customerPreviewOnlyNote}>
+              <Ionicons name="card-outline" size={15} color="#5E646D" />
+              <Text style={styles.customerPreviewOnlyText}>Payment method: {paymentMethod}</Text>
             </View>
-
             {!!warrantyText && (
-              <View style={styles.invoiceWarrantyRow}>
-                <Ionicons name="shield-checkmark-outline" size={14} color="#16A34A" />
-                <Text style={styles.invoiceWarrantyText}>{warrantyText}</Text>
+              <View style={[styles.customerPreviewOnlyNote, styles.invoiceNoteGap]}>
+                <Ionicons name="shield-checkmark-outline" size={15} color="#16A34A" />
+                <Text style={styles.customerPreviewOnlyText}>{warrantyText}</Text>
               </View>
             )}
           </ScrollView>
         </View>
       </View>
     </Modal>
+  );
+}
+
+// A From / To row in the estimate's line style: the role, then the name and contact.
+function InvoicePartyLine({ label, name, sub }) {
+  return (
+    <View style={styles.customerPreviewLine}>
+      <View style={styles.customerPreviewLineInfo}>
+        <Text style={styles.customerPreviewLineMeta}>{label}</Text>
+        <Text style={styles.customerPreviewLineLabel} numberOfLines={1}>{name}</Text>
+      </View>
+      {!!sub && <Text style={styles.invoicePartyContact} numberOfLines={1}>{sub}</Text>}
+    </View>
   );
 }
 
